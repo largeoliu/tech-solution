@@ -17,7 +17,7 @@
 你可以让 AI 协助确认、替换或定制当前项目的技术方案模板。
 
 ```text
-请使用 setup-architect，帮我定制当前项目的技术方案模板。
+使用 setup-architect skill，帮我定制当前项目的技术方案模板。
 ```
 
 模板文件位置：`.architecture/templates/technical-solution-template.md`
@@ -27,7 +27,7 @@
 你可以基于主题、需求描述、已有文档路径或相关上下文，让 AI 生成正式技术方案文档。
 
 ```text
-请使用 create-technical-solution，帮我编写当前项目的技术方案文档。
+使用 create-technical-solution skill，帮我编写当前项目的技术方案文档。
 ```
 
 方案文档位置：`.architecture/technical-solutions/`
