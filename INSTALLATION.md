@@ -24,13 +24,9 @@ rm -rf ./tech-solution-tmp
 
 Stage 2 完成后，继续读取并执行本地 `setup-architect` 的初始化流程，不要等待用户追加输入。
 
-必须基于以下本地文件完成当前项目初始化：
+必须基于以下目录下的文件完成当前项目初始化：
 
-- `"$TARGET/setup-architect/SKILL.md"`
-- `"$TARGET/setup-architect/references/installation-procedures.md"`
-- `"$TARGET/setup-architect/references/member-customization.md"`
-- `"$TARGET/setup-architect/references/principles-customization.md"`
-- `"$TARGET/setup-architect/templates/*"`
+- `"$TARGET/setup-architect"`
 
 完成标准：
 

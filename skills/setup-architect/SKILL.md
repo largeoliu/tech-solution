@@ -45,7 +45,7 @@ description: 在项目中安装并初始化 Tech Solution，或在已完成 setu
 
 ### 6. 最后确认技术方案模板并收尾
 
-按 [references/technical-solution-template-customization.md](references/technical-solution-template-customization.md) 完成技术方案模板确认，并在此步骤中一并提供初始化摘要：
+需要询问用户是否需要定制技术方案模板，按 [references/technical-solution-template-customization.md](references/technical-solution-template-customization.md) 完成技术方案模板确认，并在此步骤中一并提供初始化摘要：
 
 ```text
 Tech Solution 设置完成

@@ -2,7 +2,7 @@
 
 此文档是 `.architecture/templates/technical-solution-template.md` 的唯一操作规范，负责两类场景：
 
-- 初始化收尾时确认模板状态
+- 初始化收尾时确认模板是否定制
 - 项目已完成 setup 后，单独替换技术方案模板
 
 ## 通用前置校验
@@ -32,7 +32,7 @@ test -f .architecture/principles.md && echo "✅ principles.md 存在"
 - 输出中必须明确目标文件为 `.architecture/templates/technical-solution-template.md`。
 - 各场景只保留自己的摘要文案，不重复定义完整流程规则。
 
-## 场景 A：初始化收尾时确认模板状态
+## 场景 A：初始化收尾时确认模板是否定制
 
 先执行“通用前置校验”。
 
