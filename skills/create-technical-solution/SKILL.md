@@ -1,63 +1,117 @@
 ---
 name: create-technical-solution
-description: 使用相关架构团队成员协作创建技术方案文档，支持项目自定义模板。当用户请求 "创建技术方案" 或类似表达时使用。
+description: 在用户请求创建、补写或更新技术方案文档，需要基于架构成员协作形成正式方案时使用。
 ---
 
 # 创建技术方案
 
-按项目模板组织内容，由相关架构成员协作形成技术方案。
+按当前项目模板产出正式技术方案。主技能文件只定义职责边界和高层流程；详细过程、模板适配和分析重点分别放在参考文档中。
 
-## 流程
+## 技能定位
 
-### 1. 解析输入与定题
+- 负责把主题、约束和架构成员观点收敛为可评审的技术方案文档。
+- 依赖项目约定文件，而不是临时口头约定：
+  - `.architecture/members.yml`
+  - `.architecture/principles.md`
+  - `.architecture/templates/technical-solution-template.md`
+- 始终先读取当前 `.architecture/templates/technical-solution-template.md`，不得假设固定章节名、固定顺序或默认模板结构。
+- 参考文档定义的是必需信息、分析重点和落位规则，不是默认模板章节清单。
+- 技术方案正文结构始终以当前模板为准，不再发明第二套章节。
+- 若当前模板无法承载必需信息，且又不能在不破坏模板结构的前提下自然落位，则停止并向用户确认，不得擅自发明新顶级章节。
+- 只在需要正式技术方案文档时使用；如果只是初始化 `.architecture/`、补跑安装或替换模板，转到 `setup-architect`。
 
-输入可能是方案主题、需求描述，或已有上下文文档路径。
+## 完成标准
 
-明确：问题、目标与非目标、约束与依赖、影响范围、相关需求。
+- 主题、目标、非目标、约束、影响范围已经明确。
+- 参与成员选择有依据，且至少包含系统架构师。
+- 共享上下文已覆盖原则、现状、已有实现、关键约束和当前模板结构。
+- 成员独立输入与协作收敛结果完整，并已抽象为标准信息块。
+- 最终文档在不破坏当前模板结构的前提下承载全部必需信息，并显式写出边界与职责、依赖关系。
+- 结果已保存到 `.architecture/technical-solutions/[文件名].md`，且没有未经确认覆盖已有文件。
 
-如果主题不明确，先澄清。生成 kebab-case 文件名：移除 `..` `/` `\` 控制字符和首尾空白 → 折叠空格/下划线/分隔符为 `-` → 小写，只保留 `[a-z0-9-]` → 去掉首尾 `-`，限制长度；清洗为空则要求用户提供更明确的标题。
+## 高层工作流
 
-### 2. 准备前置条件
+### 1. 定题与范围判断
 
-确保 `.architecture/technical-solutions/` 存在：
+输入可以是方案主题、需求描述、已有文档路径，或用户给出的上下文片段。
 
-```bash
-mkdir -p .architecture/technical-solutions
-ls .architecture/technical-solutions
-```
+先明确：问题、目标与非目标、约束与依赖、影响范围、相关需求。主题模糊时先澄清，再生成安全的短横线风格文件名。
 
-确认 `.architecture/members.yml`、`.architecture/principles.md`、`.architecture/templates/technical-solution-template.md` 均存在。任一缺失则停止并说明 setup 不完整。
+### 2. 检查前置条件
+
+确保 `.architecture/technical-solutions/` 存在。
+
+确认以下文件全部存在：
+
+- `.architecture/members.yml`
+- `.architecture/principles.md`
+- `.architecture/templates/technical-solution-template.md`
+
+任一缺失时立即停止，明确说明初始化未完成，并引导用户先使用 `setup-architect`。
 
 ### 3. 加载成员并选择参与者
 
 读取 `.architecture/members.yml`。
 
-默认必选系统架构师；非 trivial 方案通常加入可维护性专家和实施策略师。按主题补充：涉及业务语义加入领域专家，涉及认证/数据保护/合规加入安全专家，涉及延迟/吞吐/成本效率加入性能专家。跨系统、高风险或平台级主题升级为全员参与。
+默认至少包含系统架构师。非简单方案通常加入可维护性专家；涉及业务语义加入领域专家；涉及认证、权限、隐私、数据保护或合规时加入安全专家；涉及延迟、吞吐、容量或成本效率时加入性能专家。跨系统、高风险或平台级主题升级为当前名册中的全部核心成员；如 `.architecture/members.yml` 中存在贴合主题的自定义专家，也一并纳入。
 
-### 4. 构建共享上下文
+### 4. 构建共享上下文并读取当前模板
 
-整合 `.architecture/principles.md`、repowiki文档、代码/配置/架构说明、已有实现。原则文档是方案判断标准，不是可选背景；所有成员基于同一上下文设计。
+整合 `.architecture/principles.md`、代码与配置、Repo Wiki、现有实现、相关文档和外部约束，并读取当前模板的标题、章节层级和已有结构。原则文档是判断标准，不是可选背景；当前模板是唯一正文骨架来源。
 
-### 5. 独立设计输入并协作收敛
+### 5. 组织成员独立输入
 
-各成员先独立产出：视角说明、设计目标、关键约束、方案贡献、风险与权衡、原则对齐与冲突、必要保护措施、未决问题。独立输入基于共享上下文，避免泛泛评论或重复。
+要求每个参与成员基于共享上下文，按统一字段独立产出自己的判断，不要直接重复别人的结论。
 
-然后收敛出：设计共识、争议点、候选方案对比、选定方向、选择理由、原则冲突的取舍、未决问题与后续决策点。
+详细格式见 [references/solution-process.md](references/solution-process.md)。
 
-按项目模板生成最终方案，涵盖：问题与目标、背景与约束（包含原则约束）、设计共识、方案摘要、备选方案与权衡（包含原则驱动的取舍）、详细设计、风险与缓解、实施建议、评审关注点、未决问题 / 后续决策点。
+### 6. 协作收敛、生成信息块并落位到模板
 
-### 6. 生成、保存并报告
+把成员输入收敛成共同结论、争议点、候选方案对比、选定方向、原则冲突与取舍、未决问题，再整理成标准信息块，并无侵入落位到当前模板。
 
-写入 `.architecture/technical-solutions/[topic-kebab-case].md`。若文件已存在且用户未明确要求更新，先确认覆盖还是另存；不要静默覆盖无关文档。
+标准信息块见 [references/solution-process.md](references/solution-process.md)。
+
+模板落位规则见 [references/template-adaptation.md](references/template-adaptation.md)。
+
+方案类型的分析重点见 [references/solution-analysis-guide.md](references/solution-analysis-guide.md)。
+
+### 7. 生成、保存并汇报
+
+将最终文档写入 `.architecture/technical-solutions/[主题-短横线文件名].md`。
+
+若目标文件已存在且用户未明确要求更新，先确认覆盖还是另存；不要静默覆盖无关文档。
+
+## 详细说明
+
+- [标准产出流程](references/solution-process.md)
+- [模板适配规则](references/template-adaptation.md)
+- [方案类型分析指引](references/solution-analysis-guide.md)
+
+## 行为契约
+
+执行此技能时，始终遵守以下契约：
+
+1. 读取当前模板
+2. 生成标准信息块
+3. 将信息块无侵入落到当前模板
+4. 无法安全落位时停止并确认
+
+## 结果汇报格式
 
 ```text
-技术方案已创建或更新：[Title]
+技术方案已创建或更新：[标题]
 
-位置：.architecture/technical-solutions/[filename].md
-参与成员：[Members]
+位置：.architecture/technical-solutions/[文件名].md
+参与成员：[参与成员]
 
 关键点：
-- 选定方向：[Approach]
-- 主要权衡：[Trade-off]
-- 未决问题：[Open Questions]
+- 选定方向：[选定方向]
+- 主要权衡：[主要权衡]
+- 关键风险：[关键风险]
+- 未决问题：[未决问题]
+- 建议下一步：[建议下一步]
 ```
+
+## 相关技能
+
+- `setup-architect`：初始化 `.architecture/` 目录、成员名册、原则文档和技术方案模板。
