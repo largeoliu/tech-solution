@@ -18,7 +18,8 @@ class CreateTechnicalSolutionContractTests(unittest.TestCase):
             self,
             self.sources["main"],
             (
-                "始终先读取当前 `.architecture/templates/technical-solution-template.md`",
+                "当前 `.architecture/templates/technical-solution-template.md` 是唯一正文骨架来源；它可能是默认模板，也可能是用户替换后的自定义模板。",
+                "必须先读取当前生效模板，再判断方案类型，再选择参与成员。",
                 "如果只是初始化 `.architecture/`、补跑安装或替换模板，转到 `setup-architect`。",
             ),
         )
@@ -38,7 +39,7 @@ class CreateTechnicalSolutionContractTests(unittest.TestCase):
             self,
             self.sources["main"],
             (
-                "结果已保存到 `.architecture/technical-solutions/[文件名].md`，且没有未经确认覆盖已有文件。",
+                "若三个关键文件齐全但 `.architecture/technical-solutions/` 缺失，则自动创建该目录后继续。",
                 "将最终文档写入 `.architecture/technical-solutions/[主题-短横线文件名].md`。",
                 "若目标文件已存在且用户未明确要求更新，先确认覆盖还是另存；不要静默覆盖无关文档。",
             ),
