@@ -20,7 +20,7 @@ test -f .architecture/principles.md && echo "✅ principles.md 存在"
 
 ## 通用输入与替换规则
 
-- 只接受用户直接提供的完整 Markdown 模板内容。
+- 接受用户直接提供的完整 Markdown 模板内容、文件路径或者链接地址。
 - 收到后整体替换 `.architecture/templates/technical-solution-template.md`。
 - 若用户尚未提供完整 Markdown，则继续索要。
 - 不支持恢复默认模板。
