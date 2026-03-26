@@ -16,12 +16,23 @@ description: 在项目中安装并初始化 Tech Solution，或在已完成 setu
 
 ## 完成标准
 
-- 创建最小 `.architecture/` 目录结构
-- 安装模板、`members.yml`、`principles.md`
-- 按项目现实定制成员与原则，并保证原则可直接用于技术方案与架构评审
-- 确认 `.architecture/templates/technical-solution-template.md` 最终采用默认模板或用户提供的自定义模板
+- 创建最小 `.architecture/` 目录结构。
+- 安装 `.architecture/members.yml`、`.architecture/principles.md` 和 `.architecture/templates/technical-solution-template.md`。
+- 按项目现实定制成员与原则，并保证原则可直接用于技术方案与架构评审。
+- `.architecture/templates/technical-solution-template.md` 已明确为当前生效模板。
+- 当前生效模板可以是默认模板，也可以是用户替换后的自定义模板。
 
-## 工作流
+## 使用路径
+
+### 路径 A：完整初始化
+
+适用于首次安装、补跑初始化，或需要重新建立 `.architecture/` 基础结构的情况。
+
+### 路径 B：仅替换技术方案模板
+
+适用于 setup 已完成，且用户只想替换 `.architecture/templates/technical-solution-template.md` 的情况。
+
+## 路径 A：完整初始化
 
 ### 1. 分析项目
 
@@ -43,9 +54,17 @@ description: 在项目中安装并初始化 Tech Solution，或在已完成 setu
 
 按安装文档验证最终结构，若结构不符，返回第 2 步重新安装。
 
-### 6. 最后确认技术方案模板并收尾
+### 6. 确认当前生效模板并收尾
 
-需要询问用户是否需要定制技术方案模板，按 [references/technical-solution-template-customization.md](references/technical-solution-template-customization.md) 完成技术方案模板确认，并在此步骤中一并提供初始化摘要：
+- 先询问用户是否需要定制技术方案模板。
+- 若回答“不需要”，保留当前 `.architecture/templates/technical-solution-template.md`；首次安装通常保留默认模板，重跑初始化时也可能保留项目现有模板。
+- 若回答“需要”，先校验 `.architecture/templates/technical-solution-template.md`、`.architecture/members.yml`、`.architecture/principles.md` 已存在；若 setup 不完整，则必须停止，并要求用户先完成完整初始化。
+- 只接受完整 Markdown、文件路径或链接地址。
+- 只允许整体替换 `.architecture/templates/technical-solution-template.md`。
+- 不允许自动生成模板、局部编辑或内容合并。
+- 详细输入处理和场景摘要见 [references/technical-solution-template-customization.md](references/technical-solution-template-customization.md)。
+
+初始化摘要：
 
 ```text
 Tech Solution 设置完成
@@ -56,6 +75,11 @@ Tech Solution 设置完成
 - 编写技术方案文档
 ```
 
-## 安装后定制技术方案模板
+## 路径 B：仅替换技术方案模板
 
-如果项目已完成 setup 且用户只需替换技术方案模板，不要重跑上述初始安装流程，直接读取 [references/technical-solution-template-customization.md](references/technical-solution-template-customization.md)。
+- 不重跑初始化流程。
+- 先校验 `.architecture/templates/technical-solution-template.md`、`.architecture/members.yml`、`.architecture/principles.md` 已存在；若任一缺失，则必须停止，并要求用户先完成完整初始化。
+- 直接要求用户提供完整 Markdown、文件路径或链接地址。
+- 收到后整体替换 `.architecture/templates/technical-solution-template.md`。
+- 不允许自动生成模板、局部编辑或内容合并。
+- 详细输入处理和场景摘要见 [references/technical-solution-template-customization.md](references/technical-solution-template-customization.md)。

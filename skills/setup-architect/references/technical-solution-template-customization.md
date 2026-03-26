@@ -1,9 +1,21 @@
 # 技术方案模板定制与替换
 
-此文档是 `.architecture/templates/technical-solution-template.md` 的唯一操作规范，负责两类场景：
+此文档是 `setup-architect` 中模板替换分支的补充说明，用来展开输入细节、场景差异和摘要文案。
+
+主 skill 已定义模板替换的硬规则：
+
+- 替换前必须完成前置校验。
+- 若 setup 不完整，则必须停止，并要求用户先完成完整初始化。
+- 只接受完整 Markdown、文件路径或链接地址。
+- 只允许整体替换 `.architecture/templates/technical-solution-template.md`。
+- 不允许自动生成模板、局部编辑或内容合并。
+
+这里不再重复充当唯一硬规则来源，而是补充说明两类场景：
 
 - 初始化收尾时确认模板是否定制
 - 项目已完成 setup 后，单独替换技术方案模板
+
+当前生效模板可能是默认模板，也可能是用户替换后的自定义模板。
 
 ## 通用前置校验
 
@@ -30,7 +42,7 @@ test -f .architecture/principles.md && echo "✅ principles.md 存在"
 
 - 输出中必须明确模板最终状态。
 - 输出中必须明确目标文件为 `.architecture/templates/technical-solution-template.md`。
-- 各场景只保留自己的摘要文案，不重复定义完整流程规则。
+- 各场景只保留自己的摘要文案，不重复定义主 skill 已明确的硬规则。
 
 ## 场景 A：初始化收尾时确认模板是否定制
 
