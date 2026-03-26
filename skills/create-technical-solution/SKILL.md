@@ -1,6 +1,6 @@
 ---
 name: create-technical-solution
-description: 在用户请求创建、补写或更新技术方案文档，需要基于架构成员协作形成正式方案时使用。
+description: 在用户请求创建、补写或更新技术方案，需要基于架构成员协作形成正式方案时使用。
 ---
 
 # 创建技术方案
