@@ -17,7 +17,7 @@ description: 在项目中安装并初始化 Tech Solution，或在已完成 setu
 ## 完成标准
 
 - 创建最小 `.architecture/` 目录结构
-- 安装模板、配置种子、`members.yml`、`principles.md`
+- 安装模板、`members.yml`、`principles.md`
 - 按项目现实定制成员与原则，并保证原则可直接用于技术方案与架构评审
 - 确认 `.architecture/templates/technical-solution-template.md` 最终采用默认模板或用户提供的自定义模板
 
@@ -29,7 +29,7 @@ description: 在项目中安装并初始化 Tech Solution，或在已完成 setu
 
 ### 2. 安装架构框架
 
-按 [references/installation-procedures.md](references/installation-procedures.md) 创建目录，并安装模板、配置种子和基础文件。
+按 [references/installation-procedures.md](references/installation-procedures.md) 创建目录，并安装模板和基础文件。
 
 ### 3. 定制架构团队
 
@@ -39,7 +39,7 @@ description: 在项目中安装并初始化 Tech Solution，或在已完成 setu
 
 按 [references/principles-customization.md](references/principles-customization.md) 补充与项目现实一致的原则；后续技术方案和架构评审会将这些原则作为必需输入。
 
-### 5. 复核正式项目结构并安全清理
+### 5. 复核正式项目结构
 
 按安装文档验证最终结构，若结构不符，返回第 2 步重新安装。
 
