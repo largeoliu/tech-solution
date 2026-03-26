@@ -1,0 +1,130 @@
+import unittest
+
+from tests.skill_validation.case_catalog import (
+    ALL_CASES,
+    PHASE_1_CASE_IDS,
+    PHASE_2_CASE_IDS,
+    PHASE_3_CASE_IDS,
+)
+
+
+EXPECTED_PHASE_1 = {
+    "SA-01",
+    "SA-02",
+    "SA-07",
+    "SA-08",
+    "CTS-01",
+    "CTS-02",
+    "CTS-04",
+    "CTS-07",
+    "CTS-08",
+}
+
+EXPECTED_PHASE_1_ORDER = (
+    "SA-01",
+    "SA-02",
+    "SA-07",
+    "SA-08",
+    "CTS-01",
+    "CTS-02",
+    "CTS-04",
+    "CTS-07",
+    "CTS-08",
+)
+
+EXPECTED_PHASE_2 = {
+    "SA-03",
+    "SA-04",
+    "SA-05",
+    "SA-06",
+    "CTS-03",
+    "CTS-05",
+    "CTS-06",
+    "CTS-09",
+}
+
+EXPECTED_PHASE_2_ORDER = (
+    "SA-03",
+    "SA-04",
+    "SA-05",
+    "SA-06",
+    "CTS-03",
+    "CTS-05",
+    "CTS-06",
+    "CTS-09",
+)
+
+EXPECTED_PHASE_3 = {
+    "SA-09",
+    "SA-10",
+    "SA-11",
+    "SA-12",
+    "CTS-10",
+    "CTS-11",
+    "CTS-12",
+}
+
+EXPECTED_PHASE_3_ORDER = (
+    "SA-09",
+    "SA-10",
+    "SA-11",
+    "SA-12",
+    "CTS-10",
+    "CTS-11",
+    "CTS-12",
+)
+
+EXPECTED_CASE_IDS = EXPECTED_PHASE_1 | EXPECTED_PHASE_2 | EXPECTED_PHASE_3
+
+
+class CaseCatalogTests(unittest.TestCase):
+    def test_case_ids_are_unique(self) -> None:
+        case_ids = [case.case_id for case in ALL_CASES]
+        self.assertEqual(len(case_ids), len(set(case_ids)))
+
+    def test_catalog_contains_all_design_cases(self) -> None:
+        self.assertEqual(len(ALL_CASES), 24)
+        self.assertEqual({case.case_id for case in ALL_CASES}, EXPECTED_CASE_IDS)
+        self.assertEqual(PHASE_1_CASE_IDS, EXPECTED_PHASE_1_ORDER)
+        self.assertEqual(PHASE_2_CASE_IDS, EXPECTED_PHASE_2_ORDER)
+        self.assertEqual(PHASE_3_CASE_IDS, EXPECTED_PHASE_3_ORDER)
+        self.assertEqual(len(PHASE_1_CASE_IDS), len(set(PHASE_1_CASE_IDS)))
+        self.assertEqual(len(PHASE_2_CASE_IDS), len(set(PHASE_2_CASE_IDS)))
+        self.assertEqual(len(PHASE_3_CASE_IDS), len(set(PHASE_3_CASE_IDS)))
+
+    def test_every_case_has_actionable_metadata(self) -> None:
+        for case in ALL_CASES:
+            with self.subTest(case_id=case.case_id):
+                self.assertTrue(case.skill)
+                self.assertTrue(case.layer)
+                self.assertTrue(case.fixture)
+                self.assertTrue(case.prompt)
+                self.assertTrue(case.purpose)
+                self.assertTrue(case.expected_result)
+                self.assertTrue(
+                    case.assert_paths
+                    or case.assert_structure
+                    or case.assert_semantics
+                    or case.assert_safety
+                )
+
+    def test_placeholder_like_assertions_are_not_allowed(self) -> None:
+        disallowed_values = {
+            "缺失文件被补齐",
+            "缺失前置项被明确指出",
+            "明确列出缺失前置",
+            "原始目标文件保持不变",
+        }
+        for case in ALL_CASES:
+            with self.subTest(case_id=case.case_id):
+                self.assertTrue(disallowed_values.isdisjoint(case.assert_paths))
+
+    def test_assert_paths_only_contains_concrete_repo_paths(self) -> None:
+        for case in ALL_CASES:
+            for path_assertion in case.assert_paths:
+                with self.subTest(case_id=case.case_id, path_assertion=path_assertion):
+                    self.assertTrue(path_assertion.startswith("."), path_assertion)
+
+
+if __name__ == "__main__":
+    unittest.main()

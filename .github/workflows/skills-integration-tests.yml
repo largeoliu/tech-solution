@@ -111,3 +111,7 @@ jobs:
           [ -f "$target/setup-architect/templates/technical-solution-template.md" ] || (echo "Missing technical-solution-template.md" && exit 1)
           [ -f "$target/setup-architect/templates/members-template.yml" ] || (echo "Missing members-template.yml" && exit 1)
           [ -f "$target/setup-architect/templates/principles-template.md" ] || (echo "Missing principles-template.md" && exit 1)
+
+      - name: Run skill validation contract suite
+        run: |
+          python3 -m unittest discover -s tests/skill_validation -p "test_*.py" -v
