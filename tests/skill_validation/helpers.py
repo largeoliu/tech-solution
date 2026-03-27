@@ -66,6 +66,9 @@ def load_create_solution_contract_sources() -> dict[str, str]:
         "template_adaptation": read_repo_text(
             "skills/create-technical-solution/references/template-adaptation.md"
         ),
+        "progress_transparency": read_repo_text(
+            "skills/create-technical-solution/references/progress-transparency.md"
+        ),
         "analysis_guide": read_repo_text(
             "skills/create-technical-solution/references/solution-analysis-guide.md"
         ),

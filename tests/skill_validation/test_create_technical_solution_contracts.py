@@ -45,6 +45,23 @@ class CreateTechnicalSolutionContractTests(unittest.TestCase):
             ),
         )
 
+    def test_main_skill_enforces_template_locked_workflow(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["main"],
+            (
+                "必须先读取当前生效模板，再判断方案类型，再选择参与成员。",
+                "### 7. 生成模板任务单",
+                "明确每个模板槽位的语义、负责参与成员、专家必答问题、禁止越界输出的事项，以及会阻止安全落位的阻塞条件。",
+                "### 8. 组织专家按模板逐槽位分析",
+                "按模板槽位逐项独立分析，不要直接重复别人的结论，也不要输出模板外可见结构。",
+                "### 9. 按模板逐槽位协作收敛",
+                "只保留能够稳定落回当前模板已有位置的内容。",
+                "### 10. 严格模板成稿并保存结果",
+                "保持当前生效模板的现有结构，不新增任何模板外可见结构；若模板没有同名章节，则按现有结构语义落位。",
+            ),
+        )
+
     def test_solution_process_defines_slug_rules_and_mandatory_information_blocks(self) -> None:
         require_snippets_in_order(
             self,
@@ -66,6 +83,45 @@ class CreateTechnicalSolutionContractTests(unittest.TestCase):
             ),
         )
 
+    def test_solution_process_requires_template_slot_artifacts(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["solution_process"],
+            (
+                "## 3. 模板任务单",
+                "`槽位标识`",
+                "`每位专家必答问题`",
+                "## 4. 专家按模板逐槽位分析",
+                "`是否参与该槽位`",
+                "`建议写法或建议内容`",
+                "## 5. 按模板逐槽位协作收敛",
+                "`共同结论`",
+                "`未采纳理由`",
+            ),
+        )
+
+    def test_solution_process_forbids_generic_expert_shells(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["solution_process"],
+            (
+                "专家不能再以 `设计目标`、`关键约束`、`主要风险`、`关键权衡` 等通用标题组织自己的主结构。",
+                "只能围绕模板已有槽位回答。",
+                "如果某个槽位与该专家无关，应明确标记无贡献，而不是自由发挥到别的结构里。",
+            ),
+        )
+
+    def test_solution_process_treats_semantic_obligations_as_checklist_not_parallel_structure(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["solution_process"],
+            (
+                "最终文档仍必须覆盖下面这组最低语义义务。",
+                "它们只是最终成稿前的检查清单。",
+                "不是模板外的中间层，也不是要求另起一套通用章节名。",
+            ),
+        )
+
     def test_template_adaptation_forbids_new_top_level_sections_and_requires_stop_on_ambiguity(self) -> None:
         require_snippets_in_order(
             self,
@@ -76,6 +132,117 @@ class CreateTechnicalSolutionContractTests(unittest.TestCase):
                 "遇到以下情况时，不要猜测，直接停止并向用户确认：",
                 "当前模板缺少承载某个必需信息块的合理位置",
                 "模板几乎没有结构，无法安全判断应该在哪里承载关键内容",
+            ),
+        )
+
+    def test_template_chain_is_locked_in_adaptation_and_progress_docs(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["template_adaptation"],
+            (
+                "当前 `.architecture/templates/technical-solution-template.md` 是唯一正文骨架来源。",
+                "当前模板不仅是最终正文骨架，也是整条分析链唯一的信息架构。",
+                "不允许在任何阶段引入模板外的章节层级。",
+                "如果某个必要信息在当前模板内没有合法落点，应停止并向用户确认。",
+            ),
+        )
+        require_snippets_in_order(
+            self,
+            self.sources["progress_transparency"],
+            (
+                "模板任务单阶段",
+                "专家按模板逐槽位分析阶段",
+                "`专家按模板逐槽位分析` 的对话内展示包装",
+                "按 `references/solution-process.md` 的模板逐槽位字段顺序展示",
+                "按模板逐槽位协作收敛阶段",
+                "canonical `按模板逐槽位协作收敛` 结构的对话内展示形态",
+                "模板发生变化时，至少回退到 `模板任务单`。",
+            ),
+        )
+        self.assertNotIn("成员独立输入格式", self.sources["progress_transparency"])
+        self.assertNotIn("canonical `协作收敛`", self.sources["progress_transparency"])
+        self.assertIn("严格模板成稿阶段", self.sources["solution_process"])
+
+    def test_template_task_sheet_is_visible_before_expert_analysis(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["progress_transparency"],
+            (
+                "## 3. 模板任务单",
+                "`模板任务单` 是对 `references/solution-process.md` 中 `模板任务单` 的对话内展示包装",
+                "模板槽位、参与专家、必答问题和阻塞条件稳定后，必须先展示 `模板任务单`，再进入 `专家按模板逐槽位分析阶段`。",
+                "最小展示外壳如下：",
+                "## 模板任务单",
+                "[按 references/solution-process.md 的模板任务单格式渲染正文]",
+                "按 `references/solution-process.md` 的 canonical `模板任务单` schema 与当前模板槽位顺序稳定展示，不得自行换序或删减必填字段。",
+            ),
+        )
+        require_snippets_in_order(
+            self,
+            self.sources["main"],
+            (
+                "### 7. 生成模板任务单",
+                "先基于当前生效模板生成一份 `模板任务单`",
+                "按 [references/progress-transparency.md](references/progress-transparency.md) 在对话中展示这份 `模板任务单`。",
+                "### 8. 组织专家按模板逐槽位分析",
+            ),
+        )
+        self.assertIn(
+            "过程可见产物：已展示 1 份模板任务单、[成员数] 份专家产物与 1 份协作收敛纪要",
+            self.sources["main"],
+        )
+
+    def test_contracts_require_zero_new_visible_content_and_safe_stop(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["main"],
+            (
+                "最终只把已收敛内容写回当前模板已有位置。",
+                "缺少语义前置、无法展示稳定中间产物或无法安全落位时停止并确认。",
+            ),
+        )
+        require_snippets_in_order(
+            self,
+            self.sources["solution_process"],
+            (
+                "任何槽位如果没有足够语义支撑，必须标记为阻塞并停止后续自动成稿。",
+                "`选定写法` 只能落回当前模板已有槽位，不得外溢为模板外可见结构。",
+            ),
+        )
+        require_snippets_in_order(
+            self,
+            self.sources["progress_transparency"],
+            (
+                "`严格模板成稿阶段` 只负责把已稳定的结论映射回当前模板，不发明模板外可见结构。",
+                "若模板无法安全承载必需信息，应停止并向用户确认，而不是绕过模板约束继续写。",
+            ),
+        )
+        require_snippets_in_order(
+            self,
+            self.sources["template_adaptation"],
+            (
+                "不允许在任何阶段引入模板外的章节层级。",
+                "不允许新增用户模板没有定义的一级章节。",
+                "如果某个必要信息在当前模板内没有合法落点，应停止并向用户确认。",
+            ),
+        )
+
+    def test_progress_transparency_change_impact_mentions_invalidated_template_task_sheet_content(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["progress_transparency"],
+            (
+                "## 变更影响说明",
+                "- 受影响内容：[哪些模板任务单槽位、哪些专家槽位分析、哪些协作收敛结论、哪些模板映射内容失效]",
+                "- 最近受影响的阶段边界：[模板任务单阶段 / 专家按模板逐槽位分析阶段 / 按模板逐槽位协作收敛阶段 / 严格模板成稿阶段]",
+            ),
+        )
+        require_snippets_in_order(
+            self,
+            self.sources["progress_transparency"],
+            (
+                "要求：",
+                "- 如果已展示的 `模板任务单` 内容受影响，必须明确说明其哪些槽位已作废或失效，不得继续视为当前有效版本。",
             ),
         )
 
