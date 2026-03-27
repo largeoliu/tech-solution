@@ -62,6 +62,90 @@ class CreateTechnicalSolutionContractTests(unittest.TestCase):
             ),
         )
 
+    def test_shared_context_must_flow_through_all_artifacts(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["main"],
+            (
+                "### 6. 构建共享上下文",
+                "先形成一份 `共享上下文清单`",
+                "`上下文编号`",
+                "`来源`",
+                "`结论或约束`",
+                "`适用槽位`",
+                "`可信度或缺口`",
+                "### 7. 生成模板任务单",
+                "`本槽位必须消费的共享上下文`",
+                "`缺失即停止的上下文`",
+                "### 8. 组织专家按模板逐槽位分析",
+                "`已使用的共享上下文编号`",
+                "`未使用原因`",
+                "`结论是否超出上下文支持`",
+                "### 9. 按模板逐槽位协作收敛",
+                "`本槽位已核销的共享上下文`",
+                "`上下文冲突如何处理`",
+                "`仍缺哪条共享上下文`",
+                "### 10. 严格模板成稿并保存结果",
+                "任一槽位若无法回溯到已核销的共享上下文编号，停止成稿并确认。",
+            ),
+        )
+
+    def test_behavior_contract_orders_shared_context_before_task_sheet(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["main"],
+            (
+                "3. 再选择参与成员。",
+                "4. 第 6 步必须先产出 `共享上下文清单`。",
+                "5. 再生成 `模板任务单`。",
+                "6. 再按阶段先展示 `共享上下文清单`，后展示 `模板任务单`，再展示按模板逐槽位组织的 `专家产物` 与 `协作收敛纪要`。",
+            ),
+        )
+
+    def test_reference_docs_require_context_traceability_and_stop_rules(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["solution_process"],
+            (
+                "`共享上下文清单`",
+                "`上下文编号`",
+                "`来源`",
+                "`结论或约束`",
+                "`适用槽位`",
+                "`可信度或缺口`",
+                "`本槽位必须消费的共享上下文`",
+                "`缺失即停止的上下文`",
+                "`已使用的共享上下文编号`",
+                "`未使用原因`",
+                "`结论是否超出上下文支持`",
+                "`本槽位已核销的共享上下文`",
+                "`上下文冲突如何处理`",
+                "`仍缺哪条共享上下文`",
+                "任一槽位若缺少必须消费的共享上下文，必须标记为阻塞并停止后续自动成稿。",
+            ),
+        )
+        require_snippets_in_order(
+            self,
+            self.sources["progress_transparency"],
+            (
+                "### 共享上下文清单：展示契约",
+                "`共享上下文清单` 是第 6 步共享证据的对话内展示包装",
+                "必须先展示 `共享上下文清单`，再展示 `模板任务单`，才允许进入 `专家按模板逐槽位分析阶段`。",
+                "`模板任务单` 是对 `references/solution-process.md` 中 `模板任务单` 的对话内展示包装",
+                "`本槽位必须消费的共享上下文`",
+                "`缺失即停止的上下文`",
+                "`专家产物` 是对 `references/solution-process.md` 中 `专家按模板逐槽位分析` 的对话内展示包装",
+                "`已使用的共享上下文编号`",
+                "`未使用原因`",
+                "`结论是否超出上下文支持`",
+                "`协作收敛纪要` 是 `references/solution-process.md` 中 canonical `按模板逐槽位协作收敛` 结构的对话内展示形态。",
+                "`本槽位已核销的共享上下文`",
+                "`上下文冲突如何处理`",
+                "`仍缺哪条共享上下文`",
+                "若任一槽位缺少已核销的共享上下文，不进入 `严格模板成稿阶段`。",
+            ),
+        )
+
     def test_solution_process_defines_slug_rules_and_mandatory_information_blocks(self) -> None:
         require_snippets_in_order(
             self,
@@ -188,7 +272,7 @@ class CreateTechnicalSolutionContractTests(unittest.TestCase):
             ),
         )
         self.assertIn(
-            "过程可见产物：已展示 1 份模板任务单、[成员数] 份专家产物与 1 份协作收敛纪要",
+            "过程可见产物：已展示 1 份共享上下文清单、1 份模板任务单、[成员数] 份专家产物与 1 份协作收敛纪要",
             self.sources["main"],
         )
 

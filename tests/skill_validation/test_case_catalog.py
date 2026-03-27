@@ -79,6 +79,7 @@ EXPECTED_PHASE_3 = {
     "CTS-10",
     "CTS-11",
     "CTS-12",
+    "CTS-13",
     "RTS-07",
     "RTS-08",
     "RTS-09",
@@ -92,6 +93,7 @@ EXPECTED_PHASE_3_ORDER = (
     "CTS-10",
     "CTS-11",
     "CTS-12",
+    "CTS-13",
     "RTS-07",
     "RTS-08",
     "RTS-09",
@@ -106,7 +108,7 @@ class CaseCatalogTests(unittest.TestCase):
         self.assertEqual(len(case_ids), len(set(case_ids)))
 
     def test_catalog_contains_all_design_cases(self) -> None:
-        self.assertEqual(len(ALL_CASES), 35)
+        self.assertEqual(len(ALL_CASES), 36)
         self.assertEqual({case.case_id for case in ALL_CASES}, EXPECTED_CASE_IDS)
         self.assertEqual(PHASE_1_CASE_IDS, EXPECTED_PHASE_1_ORDER)
         self.assertEqual(PHASE_2_CASE_IDS, EXPECTED_PHASE_2_ORDER)
@@ -197,6 +199,17 @@ class CaseCatalogTests(unittest.TestCase):
     def test_sa_14_stays_in_phase_2(self) -> None:
         self.assertIn("SA-14", PHASE_2_CASE_IDS)
         self.assertEqual(CASE_INDEX["SA-14"].expected_result, "SUCCESS_REPLACE_TEMPLATE")
+
+    def test_cts_13_tracks_missing_shared_context_consumption(self) -> None:
+        self.assertEqual(CASE_INDEX["CTS-13"].expected_result, "STOP_AND_ASK")
+        self.assertEqual(
+            CASE_INDEX["CTS-13"].assert_semantics,
+            ("明确指出缺失的共享上下文消费链",),
+        )
+        self.assertEqual(
+            CASE_INDEX["CTS-13"].forbidden_behavior,
+            ("跳过上下文引用继续生成最终方案",),
+        )
 
 
 if __name__ == "__main__":
