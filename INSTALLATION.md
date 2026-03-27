@@ -7,6 +7,7 @@
 - Claude：`TARGET=".claude/skills"`
 - Qoder：`TARGET=".qoder/skills"`
 - Lingma：`TARGET=".lingma/skills"`
+- Trae：`TARGET=".trae/skills"`
 - 其他助手：`TARGET=".agents/skills"`
 
 ### Stage 2: 安装 skills 到目标目录
