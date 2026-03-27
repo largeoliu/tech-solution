@@ -2,7 +2,7 @@
 
 ## Scope
 
-This runbook operationalizes the layered validation strategy in `docs/superpowers/specs/2026-03-26-skill-validation-design.md` for `setup-architect`, `create-technical-solution`, and `review-technical-solution`. Use it when validating changes to skill contracts, flow control, regression-sensitive behavior, and adversarial boundary handling.
+This runbook operationalizes the layered validation strategy in `docs/superpowers/specs/2026-03-26-skill-validation-design.md` for `setup-architect` and `create-technical-solution`, plus `docs/superpowers/specs/2026-03-27-review-technical-solution-design.md` for `review-technical-solution`. Use it when validating changes to skill contracts, flow control, regression-sensitive behavior, and adversarial boundary handling.
 
 ## Local command
 
@@ -20,7 +20,7 @@ python3 -m unittest discover -s tests/skill_validation -p "test_*.py" -v
 ### 流程场景层
 
 - Focus: stop/redirect behavior, prerequisite enforcement, and primary success-path branching.
-- Representative cases: `SA-01`, `CTS-01`, `CTS-11`, `RTS-01`, `RTS-02`.
+- Representative cases: `SA-01`, `SA-13`, `CTS-01`, `CTS-11`, `RTS-01`, `RTS-02`.
 
 ### 行为回归层
 
@@ -34,16 +34,18 @@ python3 -m unittest discover -s tests/skill_validation -p "test_*.py" -v
 
 ## Phase rollout
 
+- Note: some catalog cases now use multi-turn `turns` definitions to express turn boundaries.
+
 ### Phase 1
 
 - Goal: lock the hard rules first so the suite catches unsafe continuation, unsafe inference, silent overwrite behavior, and invalid formal review starts early.
-- Cases: `SA-01`, `SA-02`, `SA-07`, `SA-08`, `CTS-01`, `CTS-02`, `CTS-04`, `CTS-07`, `CTS-08`, `RTS-01`, `RTS-02`, `RTS-03`.
+- Cases: `SA-01`, `SA-02`, `SA-07`, `SA-08`, `SA-13`, `CTS-01`, `CTS-02`, `CTS-04`, `CTS-07`, `CTS-08`, `RTS-01`, `RTS-02`, `RTS-03`.
 - Use when: validating the first enforcement baseline for contract and boundary-sensitive behavior after changes to skill rules, references, or prompts.
 
 ### Phase 2
 
 - Goal: expand from hard-stop protection into mainline success-path and stable regression coverage.
-- Cases: `SA-03`, `SA-04`, `SA-05`, `SA-06`, `CTS-03`, `CTS-05`, `CTS-06`, `CTS-09`, `RTS-04`, `RTS-05`, `RTS-06`.
+- Cases: `SA-03`, `SA-04`, `SA-05`, `SA-06`, `SA-14`, `CTS-03`, `CTS-05`, `CTS-06`, `CTS-09`, `RTS-04`, `RTS-05`, `RTS-06`.
 - Use when: validating template adaptation, required information-block coverage, and non-destructive behavior on established paths.
 
 ### Phase 3

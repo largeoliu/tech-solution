@@ -3,6 +3,17 @@ from typing import Tuple
 
 
 @dataclass(frozen=True)
+class ConversationTurn:
+    user_input: str
+    expected_result: str
+    assert_paths: Tuple[str, ...] = ()
+    assert_structure: Tuple[str, ...] = ()
+    assert_semantics: Tuple[str, ...] = ()
+    assert_safety: Tuple[str, ...] = ()
+    forbidden_behavior: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ValidationCase:
     case_id: str
     skill: str
@@ -16,6 +27,7 @@ class ValidationCase:
     assert_semantics: Tuple[str, ...] = ()
     assert_safety: Tuple[str, ...] = ()
     forbidden_behavior: Tuple[str, ...] = ()
+    turns: Tuple[ConversationTurn, ...] = ()
 
 
 def vcase(
@@ -32,6 +44,7 @@ def vcase(
     assert_semantics: Tuple[str, ...] = (),
     assert_safety: Tuple[str, ...] = (),
     forbidden_behavior: Tuple[str, ...] = (),
+    turns: Tuple[ConversationTurn, ...] = (),
 ) -> ValidationCase:
     return ValidationCase(
         case_id=case_id,
@@ -46,6 +59,7 @@ def vcase(
         assert_semantics=assert_semantics,
         assert_safety=assert_safety,
         forbidden_behavior=forbidden_behavior,
+        turns=turns,
     )
 
 
@@ -239,6 +253,65 @@ SETUP_ARCHITECT_CASES = (
         assert_structure=("assistant 目标目录唯一",),
         assert_safety=("无 CLAUDE.md", "无 agent_docs", "无嵌套 .git", "无随机 temp 目录"),
         forbidden_behavior=("生成无关安装副产物",),
+    ),
+    vcase(
+        "SA-13",
+        "setup-architect",
+        "流程场景层",
+        "complete-architecture-default-template",
+        "setup-architect 初始化后进入模板定制确认对话。",
+        "验证多轮确认后可保留当前模板",
+        "SUCCESS_INIT",
+        assert_semantics=("先确认是否需要定制模板",),
+        assert_safety=("未确认前不直接输出最终总结",),
+        forbidden_behavior=("未确认模板策略就直接给出最终总结",),
+        turns=(
+            ConversationTurn(
+                user_input="先完成 setup-architect 初始化，模板部分你先别直接定，先问我要不要自定义。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("询问是否需要自定义模板",),
+                assert_safety=("暂停等待模板决策",),
+                forbidden_behavior=("直接输出最终总结",),
+            ),
+            ConversationTurn(
+                user_input="不用自定义，保持当前模板即可。",
+                expected_result="SUCCESS_INIT",
+                assert_paths=(".architecture/templates/technical-solution-template.md",),
+                assert_semantics=("模板最终状态明确为保留当前模板",),
+                assert_safety=("不发生模板替换",),
+                forbidden_behavior=("无用户请求时覆盖模板",),
+            ),
+        ),
+    ),
+    vcase(
+        "SA-14",
+        "setup-architect",
+        "行为回归层",
+        "template-replacement-inputs",
+        "setup-architect 初始化后进入模板替换确认对话。",
+        "验证多轮确认后可整体替换模板",
+        "SUCCESS_REPLACE_TEMPLATE",
+        assert_paths=(".architecture/templates/technical-solution-template.md",),
+        assert_structure=("整体替换单个目标文件",),
+        assert_safety=("不做局部 merge", "未确认前不直接输出最终总结"),
+        forbidden_behavior=("局部编辑", "内容合并", "未确认模板策略就直接给出最终总结"),
+        turns=(
+            ConversationTurn(
+                user_input="setup 完成后，模板先别默认落定，先问我要不要自定义。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("询问是否需要自定义模板",),
+                assert_safety=("暂停等待模板输入",),
+                forbidden_behavior=("直接输出最终总结",),
+            ),
+            ConversationTurn(
+                user_input="请用下面这份完整 Markdown 模板整体替换当前模板：# 技术方案\n\n## 背景\n\n## 目标\n\n## 方案设计\n\n## 风险与验证",
+                expected_result="SUCCESS_REPLACE_TEMPLATE",
+                assert_paths=(".architecture/templates/technical-solution-template.md",),
+                assert_structure=("整体替换单个目标文件",),
+                assert_safety=("不做局部 merge",),
+                forbidden_behavior=("局部编辑", "内容合并"),
+            ),
+        ),
     ),
 )
 
@@ -532,6 +605,7 @@ ALL_CASES = SETUP_ARCHITECT_CASES + CREATE_TECHNICAL_SOLUTION_CASES + REVIEW_TEC
 PHASE_1_CASE_IDS = (
     "SA-01",
     "SA-02",
+    "SA-13",
     "SA-07",
     "SA-08",
     "CTS-01",
@@ -549,6 +623,7 @@ PHASE_2_CASE_IDS = (
     "SA-04",
     "SA-05",
     "SA-06",
+    "SA-14",
     "CTS-03",
     "CTS-05",
     "CTS-06",
