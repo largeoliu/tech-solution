@@ -51,6 +51,9 @@ def load_setup_contract_sources() -> dict[str, str]:
         "principles_customization": read_repo_text(
             "skills/setup-architect/references/principles-customization.md"
         ),
+        "principles_template": read_repo_text(
+            "skills/setup-architect/templates/principles-template.md"
+        ),
         "template_customization": read_repo_text(
             "skills/setup-architect/references/technical-solution-template-customization.md"
         ),

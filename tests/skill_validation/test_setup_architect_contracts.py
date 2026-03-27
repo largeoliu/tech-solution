@@ -1,6 +1,11 @@
 import unittest
 
-from tests.skill_validation.helpers import load_setup_contract_sources, require_all_snippets
+from tests.skill_validation.helpers import (
+    load_setup_contract_sources,
+    require_all_snippets,
+    require_snippets_in_order,
+    top_level_headings,
+)
 
 
 class SetupArchitectContractTests(unittest.TestCase):
@@ -111,6 +116,65 @@ class SetupArchitectContractTests(unittest.TestCase):
                 "务实的简洁性",
                 "变更影响意识",
             ),
+        )
+
+    def test_principles_customization_requires_host_project_baseline_rules(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["principles_customization"],
+            (
+                "`.architecture/principles.md` 的主要作用，是为宿主项目后续的技术方案编写与架构评审提供项目上下文和判断基线。",
+                "按七个主章节填写宿主项目事实、边界、底线和当前现实。",
+                "核心原则必须保留，但必须翻译成宿主项目语境下的判断规则。",
+                "只保留会影响技术方案和评审判断的内容。",
+                "不要写成 README、系统清单、接口总表或运维手册。",
+            ),
+        )
+
+    def test_main_skill_positions_principles_as_required_judgment_baseline(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["main"],
+            (
+                "### 4. 定制架构原则",
+                "按 [references/principles-customization.md](references/principles-customization.md) 把 `.architecture/principles.md` 定制成宿主项目的上下文和判断基线；",
+                "后续技术方案编写与架构评审会将这些原则作为必需输入。",
+            ),
+        )
+
+    def test_principles_template_uses_host_project_baseline_sections(self) -> None:
+        self.assertEqual(
+            top_level_headings(self.sources["principles_template"]),
+            [
+                "文档目的与使用方式",
+                "业务域与项目语义",
+                "模块边界与依赖方向",
+                "数据、接口与事件边界",
+                "质量属性与治理底线",
+                "当前必须尊重的项目现实",
+                "方案编写与评审准绳",
+                "原则映射表",
+            ],
+        )
+
+    def test_principles_template_embeds_inline_host_project_guidance_and_mapping(self) -> None:
+        principles_template = self.sources["principles_template"]
+
+        require_all_snippets(
+            self,
+            principles_template,
+            (
+                "本文档用于为后续技术方案编写与评审提供项目上下文和判断基线。",
+                "### 本项目事实",
+                "### 为什么重要",
+                "### 对方案与评审的要求",
+                "核心原则必须保留，但要翻译成当前项目里的具体判断规则。",
+                "| 核心原则 | 主要落点章节 | 本项目中的约束含义 |",
+            ),
+        )
+        self.assertNotIn(
+            "复制下方模板，在上方合适位置新增项目特定原则",
+            principles_template,
         )
 
 

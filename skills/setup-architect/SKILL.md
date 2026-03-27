@@ -48,7 +48,7 @@ description: 在项目中安装并初始化 Tech Solution，或在已完成 setu
 
 ### 4. 定制架构原则
 
-按 [references/principles-customization.md](references/principles-customization.md) 补充与项目现实一致的原则；后续技术方案和架构评审会将这些原则作为必需输入。
+按 [references/principles-customization.md](references/principles-customization.md) 把 `.architecture/principles.md` 定制成宿主项目的上下文和判断基线；后续技术方案编写与架构评审会将这些原则作为必需输入。
 
 ### 5. 复核正式项目结构
 
