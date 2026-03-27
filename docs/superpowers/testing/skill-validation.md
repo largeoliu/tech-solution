@@ -30,7 +30,7 @@ python3 -m unittest discover -s tests/skill_validation -p "test_*.py" -v
 ### 对抗边界层
 
 - Focus: ambiguous, partial, or risky inputs that could trigger unsafe inference, unsafe overwrite, invalid template expansion, or lowered review standards.
-- Representative cases: `SA-07`, `SA-08`, `CTS-07`, `CTS-08`, `RTS-03`, `RTS-07`, `RTS-08`.
+- Representative cases: `SA-07`, `SA-08`, `CTS-07`, `CTS-08`, `CTS-13`, `RTS-03`, `RTS-07`, `RTS-08`.
 
 ## Phase rollout
 
@@ -49,8 +49,8 @@ python3 -m unittest discover -s tests/skill_validation -p "test_*.py" -v
 ### Phase 3
 
 - Goal: add governance-heavy and pressure-path coverage once the baseline suite is stable.
-- Cases: `SA-09`, `SA-10`, `SA-11`, `SA-12`, `CTS-10`, `CTS-11`, `CTS-12`, `RTS-07`, `RTS-08`, `RTS-09`.
-- Use when: validating member/principle governance, standalone execution expectations, and higher-pressure adversarial scenarios.
+- Cases: `SA-09`, `SA-10`, `SA-11`, `SA-12`, `CTS-10`, `CTS-11`, `CTS-12`, `CTS-13`, `RTS-07`, `RTS-08`, `RTS-09`.
+- Use when: validating member/principle governance, standalone execution expectations, shared-context traceability, and higher-pressure adversarial scenarios.
 
 ## Recommended cadence
 
