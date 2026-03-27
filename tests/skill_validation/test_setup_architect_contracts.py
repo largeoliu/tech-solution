@@ -13,12 +13,36 @@ class SetupArchitectContractTests(unittest.TestCase):
             self,
             self.sources["main"],
             (
-                "### 2. 安装架构框架",
+                "### 1. 安装架构框架",
                 "### 6. 确认当前生效模板并收尾",
                 "## 路径 B：仅替换技术方案模板",
                 "- 不重跑初始化流程。",
             ),
         )
+
+    def test_main_skill_lists_install_before_project_analysis(self) -> None:
+        main = self.sources["main"]
+        install_heading = "### 1. 安装架构框架"
+        analysis_heading = "### 2. 分析项目"
+
+        self.assertIn(install_heading, main)
+        self.assertIn(analysis_heading, main)
+        self.assertLess(main.index(install_heading), main.index(analysis_heading))
+
+    def test_main_skill_keeps_install_and_analysis_bodies_with_reordered_steps(self) -> None:
+        main = self.sources["main"]
+        install_section = (
+            "### 1. 安装架构框架\n\n"
+            "按 [references/installation-procedures.md](references/installation-procedures.md) 创建目录，并安装模板和基础文件。"
+        )
+        analysis_section = (
+            "### 2. 分析项目\n\n"
+            "识别语言、框架、测试/CI、部署方式和目录结构。"
+        )
+
+        self.assertIn(install_section, main)
+        self.assertIn(analysis_section, main)
+        self.assertLess(main.index(install_section), main.index(analysis_section))
 
     def test_installation_reference_creates_minimum_structure(self) -> None:
         require_all_snippets(

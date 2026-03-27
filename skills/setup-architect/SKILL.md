@@ -34,13 +34,13 @@ description: 在项目中安装并初始化 Tech Solution，或在已完成 setu
 
 ## 路径 A：完整初始化
 
-### 1. 分析项目
-
-识别语言、框架、测试/CI、部署方式和目录结构。
-
-### 2. 安装架构框架
+### 1. 安装架构框架
 
 按 [references/installation-procedures.md](references/installation-procedures.md) 创建目录，并安装模板和基础文件。
+
+### 2. 分析项目
+
+识别语言、框架、测试/CI、部署方式和目录结构。
 
 ### 3. 定制架构团队
 
@@ -52,7 +52,7 @@ description: 在项目中安装并初始化 Tech Solution，或在已完成 setu
 
 ### 5. 复核正式项目结构
 
-按安装文档验证最终结构，若结构不符，返回第 2 步重新安装。
+按安装文档验证最终结构，若结构不符，返回第 1 步重新安装。
 
 ### 6. 确认当前生效模板并收尾
 
