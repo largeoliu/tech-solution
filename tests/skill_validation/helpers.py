@@ -24,6 +24,10 @@ SKILL_INSTALL_LAYOUT = {
         "SKILL.md",
         "references",
     ),
+    "review-technical-solution": (
+        "SKILL.md",
+        "references",
+    ),
 }
 
 
@@ -64,6 +68,21 @@ def load_create_solution_contract_sources() -> dict[str, str]:
         ),
         "analysis_guide": read_repo_text(
             "skills/create-technical-solution/references/solution-analysis-guide.md"
+        ),
+    }
+
+
+def load_review_solution_contract_sources() -> dict[str, str]:
+    return {
+        "main": read_repo_text("skills/review-technical-solution/SKILL.md"),
+        "review_process": read_repo_text(
+            "skills/review-technical-solution/references/review-process.md"
+        ),
+        "analysis_guide": read_repo_text(
+            "skills/review-technical-solution/references/review-analysis-guide.md"
+        ),
+        "output_contract": read_repo_text(
+            "skills/review-technical-solution/references/review-output-contract.md"
         ),
     }
 

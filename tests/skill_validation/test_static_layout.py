@@ -53,6 +53,9 @@ class StaticLayoutTests(unittest.TestCase):
                             self.assertTrue(
                                 (target_path / "create-technical-solution" / "SKILL.md").is_file()
                             )
+                            self.assertTrue(
+                                (target_path / "review-technical-solution" / "SKILL.md").is_file()
+                            )
                         else:
                             self.assertFalse(target_path.exists())
 

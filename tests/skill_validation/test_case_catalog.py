@@ -2,6 +2,7 @@ import unittest
 
 from tests.skill_validation.case_catalog import (
     ALL_CASES,
+    CASE_INDEX,
     PHASE_1_CASE_IDS,
     PHASE_2_CASE_IDS,
     PHASE_3_CASE_IDS,
@@ -18,6 +19,9 @@ EXPECTED_PHASE_1 = {
     "CTS-04",
     "CTS-07",
     "CTS-08",
+    "RTS-01",
+    "RTS-02",
+    "RTS-03",
 }
 
 EXPECTED_PHASE_1_ORDER = (
@@ -30,6 +34,9 @@ EXPECTED_PHASE_1_ORDER = (
     "CTS-04",
     "CTS-07",
     "CTS-08",
+    "RTS-01",
+    "RTS-02",
+    "RTS-03",
 )
 
 EXPECTED_PHASE_2 = {
@@ -41,6 +48,9 @@ EXPECTED_PHASE_2 = {
     "CTS-05",
     "CTS-06",
     "CTS-09",
+    "RTS-04",
+    "RTS-05",
+    "RTS-06",
 }
 
 EXPECTED_PHASE_2_ORDER = (
@@ -52,6 +62,9 @@ EXPECTED_PHASE_2_ORDER = (
     "CTS-05",
     "CTS-06",
     "CTS-09",
+    "RTS-04",
+    "RTS-05",
+    "RTS-06",
 )
 
 EXPECTED_PHASE_3 = {
@@ -62,6 +75,9 @@ EXPECTED_PHASE_3 = {
     "CTS-10",
     "CTS-11",
     "CTS-12",
+    "RTS-07",
+    "RTS-08",
+    "RTS-09",
 }
 
 EXPECTED_PHASE_3_ORDER = (
@@ -72,6 +88,9 @@ EXPECTED_PHASE_3_ORDER = (
     "CTS-10",
     "CTS-11",
     "CTS-12",
+    "RTS-07",
+    "RTS-08",
+    "RTS-09",
 )
 
 EXPECTED_CASE_IDS = EXPECTED_PHASE_1 | EXPECTED_PHASE_2 | EXPECTED_PHASE_3
@@ -83,7 +102,7 @@ class CaseCatalogTests(unittest.TestCase):
         self.assertEqual(len(case_ids), len(set(case_ids)))
 
     def test_catalog_contains_all_design_cases(self) -> None:
-        self.assertEqual(len(ALL_CASES), 24)
+        self.assertEqual(len(ALL_CASES), 33)
         self.assertEqual({case.case_id for case in ALL_CASES}, EXPECTED_CASE_IDS)
         self.assertEqual(PHASE_1_CASE_IDS, EXPECTED_PHASE_1_ORDER)
         self.assertEqual(PHASE_2_CASE_IDS, EXPECTED_PHASE_2_ORDER)
@@ -124,6 +143,19 @@ class CaseCatalogTests(unittest.TestCase):
             for path_assertion in case.assert_paths:
                 with self.subTest(case_id=case.case_id, path_assertion=path_assertion):
                     self.assertTrue(path_assertion.startswith("."), path_assertion)
+
+    def test_rts_04_uses_current_review_output_sections(self) -> None:
+        self.assertEqual(
+            CASE_INDEX["RTS-04"].assert_semantics,
+            (
+                "评审结论",
+                "阻断项",
+                "主要问题",
+                "改进方案",
+                "待补充信息",
+                "建议验证",
+            ),
+        )
 
 
 if __name__ == "__main__":

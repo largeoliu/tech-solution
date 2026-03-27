@@ -23,6 +23,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
 
         self.assertIn("- name: Run skill validation contract suite", workflow)
+        self.assertIn("review-technical-solution", workflow)
         self.assertIn(
             'python3 -m unittest discover -s tests/skill_validation -p "test_*.py" -v',
             workflow,
@@ -36,12 +37,15 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("流程场景层", runbook)
         self.assertIn("行为回归层", runbook)
         self.assertIn("对抗边界层", runbook)
+        self.assertIn("review-technical-solution", runbook)
         self.assertIn(
             'python3 -m unittest discover -s tests/skill_validation -p "test_*.py" -v',
             runbook,
         )
         self.assertIn("SA-01", runbook)
         self.assertIn("CTS-08", runbook)
+        self.assertIn("RTS-01", runbook)
+        self.assertIn("RTS-09", runbook)
 
     def test_runbook_includes_phase_rollout_guidance(self) -> None:
         runbook = RUNBOOK_PATH.read_text(encoding="utf-8")
@@ -62,10 +66,10 @@ class WorkflowIntegrationTests(unittest.TestCase):
         runbook = RUNBOOK_PATH.read_text(encoding="utf-8")
 
         expected_layer_examples = {
-            "静态契约层": ("SA-11", "SA-12"),
-            "流程场景层": ("SA-01", "CTS-01", "CTS-11"),
-            "行为回归层": ("SA-03", "CTS-04", "CTS-09"),
-            "对抗边界层": ("SA-07", "SA-08", "CTS-07", "CTS-08"),
+            "静态契约层": ("SA-11", "SA-12", "RTS-09"),
+            "流程场景层": ("SA-01", "CTS-01", "CTS-11", "RTS-01", "RTS-02"),
+            "行为回归层": ("SA-03", "CTS-04", "CTS-09", "RTS-04", "RTS-05", "RTS-06"),
+            "对抗边界层": ("SA-07", "SA-08", "CTS-07", "CTS-08", "RTS-03", "RTS-07", "RTS-08"),
         }
 
         for layer, case_ids in expected_layer_examples.items():

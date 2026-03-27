@@ -413,7 +413,121 @@ CREATE_TECHNICAL_SOLUTION_CASES = (
 )
 
 
-ALL_CASES = SETUP_ARCHITECT_CASES + CREATE_TECHNICAL_SOLUTION_CASES
+REVIEW_TECHNICAL_SOLUTION_CASES = (
+    vcase(
+        "RTS-01",
+        "review-technical-solution",
+        "流程场景层",
+        "review-solution-missing-principles",
+        "在缺少 `.architecture/principles.md` 的仓库中请求对完整技术方案开展正式评审。",
+        "缺失评审前置时必须停止正式评审",
+        "STOP_FORMAL_REVIEW",
+        assert_paths=(".architecture/principles.md",),
+        assert_semantics=("结论为 '无法开展正式评审'",),
+        assert_safety=("不输出通过/需修改",),
+        forbidden_behavior=("通过", "需修改"),
+    ),
+    vcase(
+        "RTS-02",
+        "review-technical-solution",
+        "流程场景层",
+        "review-solution-no-code-context",
+        "用户只提供方案文档，不提供相关代码或核心模块路径，就要求完成正式技术评审。",
+        "没有相关代码时必须先索要核心模块路径或代码范围",
+        "STOP_FORMAL_REVIEW",
+        assert_semantics=("明确要求提供核心模块路径或代码范围",),
+        assert_safety=("不在缺少代码上下文时给出正式通过结论",),
+    ),
+    vcase(
+        "RTS-03",
+        "review-technical-solution",
+        "对抗边界层",
+        "review-solution-summary-only",
+        "用户仅给出方案摘要而未提供完整方案正文，却要求进行正式技术评审。",
+        "只有摘要没有完整方案正文时必须停机",
+        "STOP_FORMAL_REVIEW",
+        assert_safety=("不基于摘要脑补正式评审",),
+    ),
+    vcase(
+        "RTS-04",
+        "review-technical-solution",
+        "行为回归层",
+        "review-solution-complete-inputs",
+        "提供完整方案、原则、相关代码与上下文，对方案执行正式技术评审。",
+        "完整输入下输出必须保持固定报告结构",
+        "SUCCESS_REVIEW",
+        assert_structure=(
+            "保留全部六个固定报告章节",
+            "空章节显式写为 - 无",
+        ),
+        assert_semantics=(
+            "评审结论",
+            "阻断项",
+            "主要问题",
+            "改进方案",
+            "待补充信息",
+            "建议验证",
+        ),
+    ),
+    vcase(
+        "RTS-05",
+        "review-technical-solution",
+        "行为回归层",
+        "review-solution-cross-system-security",
+        "评审一个跨系统且带安全影响的多类别技术方案。",
+        "多类别高风险方案应明确主分类、附加分类并优先呈现高风险问题",
+        "SUCCESS_REVIEW",
+        assert_semantics=("主分类", "附加分类", "高风险问题优先排序"),
+        assert_safety=("不把高风险问题埋在低优先级之后",),
+    ),
+    vcase(
+        "RTS-06",
+        "review-technical-solution",
+        "行为回归层",
+        "review-solution-claimed-event-bus-reuse",
+        "方案声称复用现有订单事件总线实现，要求核验代码与方案一致性。",
+        "找不到声称复用实现时必须输出阻断级问题",
+        "SUCCESS_REVIEW",
+        assert_semantics=("代码中未找到对应实现", "`severity`: `blocker`"),
+        assert_safety=("不能把缺失关键实现降级处理",),
+    ),
+    vcase(
+        "RTS-07",
+        "review-technical-solution",
+        "对抗边界层",
+        "review-solution-request-skip-code-review",
+        "用户要求跳过代码核验，只基于文档快速给出正式评审结论。",
+        "用户要求降标时必须拒绝并维持正式评审标准",
+        "STOP_FORMAL_REVIEW",
+        assert_safety=("明确拒绝降低评审标准",),
+    ),
+    vcase(
+        "RTS-08",
+        "review-technical-solution",
+        "对抗边界层",
+        "review-solution-partial-core-code",
+        "用户仅提供部分核心路径代码，却要求输出正式评审通过与完整结论。",
+        "核心代码覆盖不全时必须停机而不是给出成功评审",
+        "STOP_FORMAL_REVIEW",
+        assert_semantics=("结论为 '无法开展正式评审'", "未核验范围", "待核验风险"),
+        assert_safety=("不把部分核验伪装成成功评审",),
+    ),
+    vcase(
+        "RTS-09",
+        "review-technical-solution",
+        "静态契约层",
+        "review-solution-complete-inputs",
+        "在没有阻断问题的完整评审路径中，检查正式输出契约是否始终保留完整结构。",
+        "即使没有 blocker 也必须保留六段式输出并显式标记空章节",
+        "SUCCESS_REVIEW",
+        assert_structure=("保留全部六个固定报告章节",),
+        assert_semantics=("空章节使用 - 无",),
+        assert_safety=("不因内容为空而删除章节",),
+    ),
+)
+
+
+ALL_CASES = SETUP_ARCHITECT_CASES + CREATE_TECHNICAL_SOLUTION_CASES + REVIEW_TECHNICAL_SOLUTION_CASES
 
 PHASE_1_CASE_IDS = (
     "SA-01",
@@ -425,6 +539,9 @@ PHASE_1_CASE_IDS = (
     "CTS-04",
     "CTS-07",
     "CTS-08",
+    "RTS-01",
+    "RTS-02",
+    "RTS-03",
 )
 
 PHASE_2_CASE_IDS = (
@@ -436,6 +553,9 @@ PHASE_2_CASE_IDS = (
     "CTS-05",
     "CTS-06",
     "CTS-09",
+    "RTS-04",
+    "RTS-05",
+    "RTS-06",
 )
 
 PHASE_3_CASE_IDS = (
@@ -446,6 +566,9 @@ PHASE_3_CASE_IDS = (
     "CTS-10",
     "CTS-11",
     "CTS-12",
+    "RTS-07",
+    "RTS-08",
+    "RTS-09",
 )
 
 CASE_INDEX = {case.case_id: case for case in ALL_CASES}
