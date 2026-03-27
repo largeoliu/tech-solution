@@ -56,12 +56,13 @@ description: 在项目中安装并初始化 Tech Solution，或在已完成 setu
 
 ### 6. 确认当前生效模板并收尾
 
-- 先询问用户是否需要定制技术方案模板。
-- 若回答“不需要”，保留当前 `.architecture/templates/technical-solution-template.md`；首次安装通常保留默认模板，重跑初始化时也可能保留项目现有模板。
+- 必须先询问用户是否需要定制技术方案模板。
+- 若用户尚未明确回答，则返回 `STOP_AND_ASK`，继续等待；此时不允许输出最终“Tech Solution 设置完成”摘要。
+- 若回答“不需要”或明确表示保留当前模板，才可保留当前 `.architecture/templates/technical-solution-template.md`；首次安装通常保留默认模板，重跑初始化时也可能保留项目现有模板。
 - 若回答“需要”，先校验 `.architecture/templates/technical-solution-template.md`、`.architecture/members.yml`、`.architecture/principles.md` 已存在；若 setup 不完整，则必须停止，并要求用户先完成完整初始化。
-- 只接受完整 Markdown、文件路径或链接地址。
-- 只允许整体替换 `.architecture/templates/technical-solution-template.md`。
-- 不允许自动生成模板、局部编辑或内容合并。
+- 定制分支只接受完整 Markdown、文件路径或链接地址。
+- 只允许整体替换 `.architecture/templates/technical-solution-template.md`；不允许自动生成模板、局部编辑或内容合并。
+- 只有在用户明确选择保留当前模板，或已提供有效完整输入并完成整体替换后，才允许输出最终“Tech Solution 设置完成”摘要。
 - 详细输入处理和场景摘要见 [references/technical-solution-template-customization.md](references/technical-solution-template-customization.md)。
 
 初始化摘要：

@@ -34,20 +34,29 @@ class SetupArchitectContractTests(unittest.TestCase):
         self.assertIn(analysis_heading, main)
         self.assertLess(main.index(install_heading), main.index(analysis_heading))
 
-    def test_main_skill_keeps_install_and_analysis_bodies_with_reordered_steps(self) -> None:
-        main = self.sources["main"]
-        install_section = (
-            "### 1. 安装架构框架\n\n"
-            "按 [references/installation-procedures.md](references/installation-procedures.md) 创建目录，并安装模板和基础文件。"
-        )
-        analysis_section = (
-            "### 2. 分析项目\n\n"
-            "识别语言、框架、测试/CI、部署方式和目录结构。"
+    def test_main_skill_keeps_install_and_analysis_contract_in_order(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["main"],
+            (
+                "### 1. 安装架构框架",
+                "按 [references/installation-procedures.md](references/installation-procedures.md) 创建目录，并安装模板和基础文件。",
+                "### 2. 分析项目",
+                "识别语言、框架、测试/CI、部署方式和目录结构。",
+            ),
         )
 
-        self.assertIn(install_section, main)
-        self.assertIn(analysis_section, main)
-        self.assertLess(main.index(install_section), main.index(analysis_section))
+    def test_main_skill_waits_for_template_answer_before_init_summary(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["main"],
+            (
+                "必须先询问用户是否需要定制技术方案模板。",
+                "若用户尚未明确回答，则返回 `STOP_AND_ASK`，继续等待；此时不允许输出最终“Tech Solution 设置完成”摘要。",
+                "只有在用户明确选择保留当前模板，或已提供有效完整输入并完成整体替换后，才允许输出最终“Tech Solution 设置完成”摘要。",
+                "初始化摘要：",
+            ),
+        )
 
     def test_installation_reference_creates_minimum_structure(self) -> None:
         require_all_snippets(
@@ -75,13 +84,37 @@ class SetupArchitectContractTests(unittest.TestCase):
             ),
         )
 
-    def test_template_customization_keeps_both_scenario_branches_explicit(self) -> None:
-        require_all_snippets(
+    def test_template_customization_scene_a_keeps_retain_current_template_branch(self) -> None:
+        require_snippets_in_order(
             self,
             self.sources["template_customization"],
             (
+                "## 场景 A：初始化收尾时确认模板是否定制",
                 "若回答“不需要”，保留当前 `.architecture/templates/technical-solution-template.md`。",
+                "初始化场景摘要：",
+            ),
+        )
+
+    def test_template_customization_scene_b_keeps_replace_only_branch(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["template_customization"],
+            (
+                "## 场景 B：安装后单独替换技术方案模板",
                 "直接要求用户提供完整 Markdown 模板内容，不存在“保留当前模板”的分支。",
+                "安装后替换场景摘要：",
+            ),
+        )
+
+    def test_template_customization_scene_a_waits_before_init_summary(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["template_customization"],
+            (
+                "必须先询问用户是否需要定制技术方案模板。",
+                "若用户尚未明确回答，则返回 `STOP_AND_ASK`，继续等待；此时不允许输出最终 `Tech Solution 设置完成` 摘要。",
+                "只有在用户明确选择保留当前模板，或已提供有效完整输入并完成整体替换后，才允许输出最终 `Tech Solution 设置完成` 摘要。",
+                "初始化场景摘要：",
             ),
         )
 

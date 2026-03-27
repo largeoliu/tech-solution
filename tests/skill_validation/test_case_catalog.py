@@ -12,6 +12,7 @@ from tests.skill_validation.case_catalog import (
 EXPECTED_PHASE_1 = {
     "SA-01",
     "SA-02",
+    "SA-13",
     "SA-07",
     "SA-08",
     "CTS-01",
@@ -27,6 +28,7 @@ EXPECTED_PHASE_1 = {
 EXPECTED_PHASE_1_ORDER = (
     "SA-01",
     "SA-02",
+    "SA-13",
     "SA-07",
     "SA-08",
     "CTS-01",
@@ -44,6 +46,7 @@ EXPECTED_PHASE_2 = {
     "SA-04",
     "SA-05",
     "SA-06",
+    "SA-14",
     "CTS-03",
     "CTS-05",
     "CTS-06",
@@ -58,6 +61,7 @@ EXPECTED_PHASE_2_ORDER = (
     "SA-04",
     "SA-05",
     "SA-06",
+    "SA-14",
     "CTS-03",
     "CTS-05",
     "CTS-06",
@@ -102,7 +106,7 @@ class CaseCatalogTests(unittest.TestCase):
         self.assertEqual(len(case_ids), len(set(case_ids)))
 
     def test_catalog_contains_all_design_cases(self) -> None:
-        self.assertEqual(len(ALL_CASES), 33)
+        self.assertEqual(len(ALL_CASES), 35)
         self.assertEqual({case.case_id for case in ALL_CASES}, EXPECTED_CASE_IDS)
         self.assertEqual(PHASE_1_CASE_IDS, EXPECTED_PHASE_1_ORDER)
         self.assertEqual(PHASE_2_CASE_IDS, EXPECTED_PHASE_2_ORDER)
@@ -156,6 +160,43 @@ class CaseCatalogTests(unittest.TestCase):
                 "建议验证",
             ),
         )
+
+    def test_multi_turn_cases_have_required_metadata(self) -> None:
+        for case in ALL_CASES:
+            turns = getattr(case, "turns", ())
+            if not turns:
+                continue
+            with self.subTest(case_id=case.case_id):
+                self.assertGreaterEqual(len(turns), 2)
+                self.assertEqual(turns[0].expected_result, "STOP_AND_ASK")
+                self.assertEqual(turns[-1].expected_result, case.expected_result)
+                for index, turn in enumerate(turns, start=1):
+                    with self.subTest(case_id=case.case_id, turn=index):
+                        self.assertTrue(turn.user_input)
+                        self.assertTrue(turn.expected_result)
+                        self.assertTrue(
+                            turn.assert_paths
+                            or turn.assert_structure
+                            or turn.assert_semantics
+                            or turn.assert_safety
+                            or turn.forbidden_behavior
+                        )
+
+    def test_setup_architect_multi_turn_cases_have_actionable_case_metadata(self) -> None:
+        for case_id in ("SA-13", "SA-14"):
+            case = CASE_INDEX[case_id]
+            with self.subTest(case_id=case_id):
+                self.assertTrue(case.prompt)
+                self.assertTrue(case.purpose)
+                self.assertTrue(case.assert_semantics or case.assert_safety or case.forbidden_behavior)
+
+    def test_sa_13_stays_in_phase_1(self) -> None:
+        self.assertIn("SA-13", PHASE_1_CASE_IDS)
+        self.assertEqual(CASE_INDEX["SA-13"].expected_result, "SUCCESS_INIT")
+
+    def test_sa_14_stays_in_phase_2(self) -> None:
+        self.assertIn("SA-14", PHASE_2_CASE_IDS)
+        self.assertEqual(CASE_INDEX["SA-14"].expected_result, "SUCCESS_REPLACE_TEMPLATE")
 
 
 if __name__ == "__main__":
