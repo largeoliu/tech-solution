@@ -109,6 +109,13 @@ class StaticLayoutTests(unittest.TestCase):
                         else:
                             self.assertFalse(target_path.exists())
 
+    def test_trae_bootstrap_uses_trae_target_only(self) -> None:
+        with bootstrapped_project("trae") as project_dir:
+            self.assertTrue((project_dir / ".trae/skills").is_dir())
+            self.assertFalse((project_dir / ".qoder/skills").exists())
+            self.assertFalse((project_dir / ".claude/skills").exists())
+            self.assertFalse((project_dir / ".agents/skills").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

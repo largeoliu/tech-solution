@@ -11,6 +11,7 @@ ASSISTANT_TARGETS = {
     "claude": ".claude/skills",
     "qoder": ".qoder/skills",
     "lingma": ".lingma/skills",
+    "trae": ".trae/skills",
     "generic": ".agents/skills",
 }
 

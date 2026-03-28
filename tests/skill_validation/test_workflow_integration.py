@@ -1,4 +1,5 @@
 import unittest
+import re
 from pathlib import Path
 
 from tests.skill_validation.case_catalog import CASE_INDEX, PHASE_1_CASE_IDS, PHASE_2_CASE_IDS, PHASE_3_CASE_IDS
@@ -8,6 +9,22 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = REPO_ROOT / ".github/workflows/skills-integration-tests.yml"
 RUNBOOK_PATH = REPO_ROOT / "docs/superpowers/testing/skill-validation.md"
 INSTALLATION_PATH = REPO_ROOT / "INSTALLATION.md"
+
+
+def matrix_target_for_assistant(workflow: str, assistant: str) -> str | None:
+    pattern = re.compile(
+        rf"- assistant:\s*{re.escape(assistant)}\s+target:\s*(?P<target>[^\s]+)",
+        re.MULTILINE,
+    )
+    match = pattern.search(workflow)
+    return None if match is None else match.group("target")
+
+
+def candidate_directories(workflow: str) -> list[str]:
+    loop_match = re.search(r"for\s+candidate\s+in\s+(?P<candidates>.+?);\s*do", workflow)
+    if loop_match is None:
+        return []
+    return loop_match.group("candidates").split()
 
 
 def section_body(markdown: str, heading: str) -> str:
@@ -47,6 +64,18 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertNotIn(
             "printf '%s\\n' create-technical-solution review-technical-solution setup-architect",
             workflow,
+        )
+
+    def test_workflow_covers_trae_install_target_and_candidate_directory(self) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+        self.assertEqual(
+            matrix_target_for_assistant(workflow, "trae"),
+            ".trae/skills",
+        )
+        self.assertIn(
+            ".trae/skills",
+            candidate_directories(workflow),
         )
 
     def test_runbook_documents_local_skill_validation_flow(self) -> None:
