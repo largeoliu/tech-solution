@@ -59,6 +59,28 @@ class ReviewTechnicalSolutionContractTests(unittest.TestCase):
             main,
         )
 
+    def test_main_skill_locks_review_step_chain(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["main"],
+            (
+                "### 2. 判断方案类型",
+                "未完成第 2 步，不得进入第 3 步。",
+                "### 3. 提取核心主张",
+                "未完成第 3 步，不得进入第 4 步。",
+                "### 4. 代码取证",
+                "未完成第 4 步，不得进入第 5 步。",
+                "### 5. 归因与分级",
+                "未完成第 5 步，不得进入第 6 步。",
+                "### 6. 生成改进方案",
+                "未完成第 6 步，不得进入第 7 步。",
+                "### 7. 输出前自检",
+                "未完成第 7 步，不得进入第 8 步。",
+                "### 8. 正式输出",
+                "不得引入任何新的推理或判断，只能基于前 1 到 7 步已闭合的结果进行整理和呈现。",
+            ),
+        )
+
     def test_review_process_defines_claim_extraction_and_evidence_states(self) -> None:
         require_snippets_in_order(
             self,
@@ -89,6 +111,18 @@ class ReviewTechnicalSolutionContractTests(unittest.TestCase):
                 '## 8. 最终结论规则',
                 '任何 `blocker` -> `阻断`',
                 '缺少必要输入 -> `无法开展正式评审`',
+            ),
+        )
+
+    def test_review_process_promotes_self_check_to_release_gate(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["review_process"],
+            (
+                "## 10. 输出前自检",
+                "未完成第 7 步，不得进入第 8 步。",
+                "本轮结果为 `STOP_AND_ASK`。",
+                "只允许回到第一个未完成步骤修正。",
             ),
         )
 
@@ -153,6 +187,18 @@ class ReviewTechnicalSolutionContractTests(unittest.TestCase):
                 '`validation`',
                 '`targets`',
                 '所有区块都必须出现',
+            ),
+        )
+
+    def test_output_contract_forbids_new_reasoning_in_final_output(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["output_contract"],
+            (
+                "正式输出只能消费前七步已经闭合的结果。",
+                "不得引入任何新的推理或判断，只能基于前 1 到 7 步已闭合的结果进行整理和呈现。",
+                "不得在正式输出阶段新增主类型 / 附加类型判断。",
+                "不得在正式输出阶段补做主张提取、证据状态判定、问题分级或改进动作。",
             ),
         )
 

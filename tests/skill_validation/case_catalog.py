@@ -10,6 +10,32 @@ class SetupProgress:
 
 
 @dataclass(frozen=True)
+class ReviewProgress:
+    inputs_ready: bool = False
+    type_classified: bool = False
+    claims_extracted: bool = False
+    evidence_assigned: bool = False
+    issues_classified: bool = False
+    recommendations_defined: bool = False
+    self_check_passed: bool = False
+
+
+@dataclass(frozen=True)
+class CreateProgress:
+    scope_clarified: bool = False
+    prerequisites_ready: bool = False
+    template_read: bool = False
+    solution_typed: bool = False
+    participants_selected: bool = False
+    context_built: bool = False
+    task_sheet_ready: bool = False
+    expert_analysis_complete: bool = False
+    synthesis_complete: bool = False
+    draft_written: bool = False
+    absorb_check_passed: bool = False
+
+
+@dataclass(frozen=True)
 class ConversationTurn:
     user_input: str
     expected_result: str
@@ -22,6 +48,12 @@ class ConversationTurn:
     required_setup_step: int | None = None
     setup_turn_action: str | None = None
     blocked_steps: Tuple[int, ...] = ()
+    review_progress: ReviewProgress | None = None
+    required_review_step: int | None = None
+    review_turn_action: str | None = None
+    create_progress: CreateProgress | None = None
+    required_create_step: int | None = None
+    create_turn_action: str | None = None
 
 
 @dataclass(frozen=True)
@@ -756,6 +788,258 @@ REVIEW_TECHNICAL_SOLUTION_CASES = (
         assert_semantics=("空章节使用 - 无",),
         assert_safety=("不因内容为空而删除章节",),
     ),
+    vcase(
+        "RTS-10",
+        "review-technical-solution",
+        "流程场景层",
+        "review-solution-complete-inputs",
+        "正式输入齐全，但方案类型仍拿不准时，review-technical-solution 必须停在第 2 步。",
+        "验证未完成第 2 步时不会进入第 3 到 8 步",
+        "STOP_AND_ASK",
+        assert_semantics=("当前停在方案类型判定",),
+        assert_safety=("未完成第 2 步不得进入第 3 步",),
+        forbidden_behavior=("进入第 3 步", "进入第 4 步", "进入第 8 步"),
+        turns=(
+            ConversationTurn(
+                user_input="四类正式输入都给你了，但主类型和附加类型还没判定清楚。不要跳去提取主张。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("方案类型判定", "主类型", "附加类型"),
+                assert_safety=("未完成第 2 步，不得进入第 3 步。",),
+                forbidden_behavior=("进入第 3 步", "主张提取", "正式输出"),
+                review_progress=ReviewProgress(inputs_ready=True),
+                required_review_step=2,
+                review_turn_action="await_context",
+                blocked_steps=(3, 4, 5, 6, 7, 8),
+            ),
+            ConversationTurn(
+                user_input="类型结论还是不稳定，先别继续做主张清单。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("方案类型判定", "主类型", "附加类型"),
+                assert_safety=("未完成第 2 步，不得进入第 3 步。",),
+                forbidden_behavior=("进入第 3 步", "进入第 8 步"),
+                review_progress=ReviewProgress(inputs_ready=True),
+                required_review_step=2,
+                review_turn_action="await_context",
+                blocked_steps=(3, 4, 5, 6, 7, 8),
+            ),
+        ),
+    ),
+    vcase(
+        "RTS-11",
+        "review-technical-solution",
+        "流程场景层",
+        "review-solution-complete-inputs",
+        "方案类型已判定，但关键主张清单仍不完整时，review-technical-solution 必须停在第 3 步。",
+        "验证未完成第 3 步时不会进入第 4 到 8 步",
+        "STOP_AND_ASK",
+        assert_semantics=("当前停在核心主张清单",),
+        assert_safety=("未完成第 3 步不得进入第 4 步",),
+        forbidden_behavior=("进入第 4 步", "进入第 8 步"),
+        turns=(
+            ConversationTurn(
+                user_input="主类型和附加类型可以先按当前判断保留，但关键主张还没列全，不要继续查代码。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("核心主张", "主张清单"),
+                assert_safety=("未完成第 3 步，不得进入第 4 步。",),
+                forbidden_behavior=("进入第 4 步", "代码取证", "正式输出"),
+                review_progress=ReviewProgress(inputs_ready=True, type_classified=True),
+                required_review_step=3,
+                review_turn_action="await_context",
+                blocked_steps=(4, 5, 6, 7, 8),
+            ),
+            ConversationTurn(
+                user_input="主张列表还是缺字段和核验方式，先别进入代码取证。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("核心主张", "主张清单"),
+                assert_safety=("未完成第 3 步，不得进入第 4 步。",),
+                forbidden_behavior=("进入第 4 步", "进入第 8 步"),
+                review_progress=ReviewProgress(inputs_ready=True, type_classified=True),
+                required_review_step=3,
+                review_turn_action="await_context",
+                blocked_steps=(4, 5, 6, 7, 8),
+            ),
+        ),
+    ),
+    vcase(
+        "RTS-12",
+        "review-technical-solution",
+        "流程场景层",
+        "review-solution-complete-inputs",
+        "关键主张已提取，但证据状态矩阵仍不完整时，review-technical-solution 必须停在第 4 步。",
+        "验证未完成第 4 步时不会进入第 5 到 8 步",
+        "STOP_AND_ASK",
+        assert_semantics=("当前停在证据核验矩阵",),
+        assert_safety=("未完成第 4 步不得进入第 5 步",),
+        forbidden_behavior=("进入第 5 步", "进入第 8 步"),
+        turns=(
+            ConversationTurn(
+                user_input="主张清单可以保留，但有几条关键主张还没有证据状态，不要继续归因分级。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("证据核验", "待核验"),
+                assert_safety=("未完成第 4 步，不得进入第 5 步。",),
+                forbidden_behavior=("进入第 5 步", "归因与分级", "正式输出"),
+                review_progress=ReviewProgress(inputs_ready=True, type_classified=True, claims_extracted=True),
+                required_review_step=4,
+                review_turn_action="await_context",
+                blocked_steps=(5, 6, 7, 8),
+            ),
+            ConversationTurn(
+                user_input="先别分级，还有主张没有落到 已证实 / 已证伪 / 待核验。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("证据核验", "待核验"),
+                assert_safety=("未完成第 4 步，不得进入第 5 步。",),
+                forbidden_behavior=("进入第 5 步", "进入第 8 步"),
+                review_progress=ReviewProgress(inputs_ready=True, type_classified=True, claims_extracted=True),
+                required_review_step=4,
+                review_turn_action="await_context",
+                blocked_steps=(5, 6, 7, 8),
+            ),
+        ),
+    ),
+    vcase(
+        "RTS-13",
+        "review-technical-solution",
+        "流程场景层",
+        "review-solution-complete-inputs",
+        "证据状态已齐，但问题归因与分级仍不完整时，review-technical-solution 必须停在第 5 步。",
+        "验证未完成第 5 步时不会进入第 6 到 8 步",
+        "STOP_AND_ASK",
+        assert_semantics=("当前停在归因与分级",),
+        assert_safety=("未完成第 5 步不得进入第 6 步",),
+        forbidden_behavior=("进入第 6 步", "进入第 8 步"),
+        turns=(
+            ConversationTurn(
+                user_input="证据状态先保留，但问题维度和严重级别还没闭合，不要先给改进方案。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("归因", "分级"),
+                assert_safety=("未完成第 5 步，不得进入第 6 步。",),
+                forbidden_behavior=("进入第 6 步", "改进方案", "正式输出"),
+                review_progress=ReviewProgress(
+                    inputs_ready=True,
+                    type_classified=True,
+                    claims_extracted=True,
+                    evidence_assigned=True,
+                ),
+                required_review_step=5,
+                review_turn_action="await_context",
+                blocked_steps=(6, 7, 8),
+            ),
+            ConversationTurn(
+                user_input="还有问题没有完成归因与级别，先别写改进动作。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("归因", "分级"),
+                assert_safety=("未完成第 5 步，不得进入第 6 步。",),
+                forbidden_behavior=("进入第 6 步", "进入第 8 步"),
+                review_progress=ReviewProgress(
+                    inputs_ready=True,
+                    type_classified=True,
+                    claims_extracted=True,
+                    evidence_assigned=True,
+                ),
+                required_review_step=5,
+                review_turn_action="await_context",
+                blocked_steps=(6, 7, 8),
+            ),
+        ),
+    ),
+    vcase(
+        "RTS-14",
+        "review-technical-solution",
+        "流程场景层",
+        "review-solution-complete-inputs",
+        "归因与分级已完成，但 blocker / major 对应的改进方案还没闭合时，review-technical-solution 必须停在第 6 步。",
+        "验证未完成第 6 步时不会进入第 7 到 8 步",
+        "STOP_AND_ASK",
+        assert_semantics=("当前停在改进方案",),
+        assert_safety=("未完成第 6 步不得进入第 7 步",),
+        forbidden_behavior=("进入第 7 步", "进入第 8 步"),
+        turns=(
+            ConversationTurn(
+                user_input="问题分级先保留，但高优先级问题的修正动作和验证方式还没写全，不要进入输出前自检。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("改进方案", "验证动作"),
+                assert_safety=("未完成第 6 步，不得进入第 7 步。",),
+                forbidden_behavior=("进入第 7 步", "输出前自检", "正式输出"),
+                review_progress=ReviewProgress(
+                    inputs_ready=True,
+                    type_classified=True,
+                    claims_extracted=True,
+                    evidence_assigned=True,
+                    issues_classified=True,
+                ),
+                required_review_step=6,
+                review_turn_action="await_context",
+                blocked_steps=(7, 8),
+            ),
+            ConversationTurn(
+                user_input="改进动作还是不完整，先别进入输出前自检。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("改进方案", "验证动作"),
+                assert_safety=("未完成第 6 步，不得进入第 7 步。",),
+                forbidden_behavior=("进入第 7 步", "进入第 8 步"),
+                review_progress=ReviewProgress(
+                    inputs_ready=True,
+                    type_classified=True,
+                    claims_extracted=True,
+                    evidence_assigned=True,
+                    issues_classified=True,
+                ),
+                required_review_step=6,
+                review_turn_action="await_context",
+                blocked_steps=(7, 8),
+            ),
+        ),
+    ),
+    vcase(
+        "RTS-15",
+        "review-technical-solution",
+        "流程场景层",
+        "review-solution-complete-inputs",
+        "前六步都已完成，但输出前自检尚未通过时，review-technical-solution 必须停在第 7 步。",
+        "验证未完成第 7 步时不会进入第 8 步",
+        "STOP_AND_ASK",
+        assert_semantics=("当前停在输出前自检",),
+        assert_safety=("未完成第 7 步不得进入第 8 步",),
+        forbidden_behavior=("进入第 8 步",),
+        turns=(
+            ConversationTurn(
+                user_input="类型、主张、证据、分级和改进动作先按当前结果保留，但输出前自检还没通过，不要直接生成正式评审。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("输出前自检", "自检"),
+                assert_safety=("未完成第 7 步，不得进入第 8 步。",),
+                forbidden_behavior=("进入第 8 步", "正式输出"),
+                review_progress=ReviewProgress(
+                    inputs_ready=True,
+                    type_classified=True,
+                    claims_extracted=True,
+                    evidence_assigned=True,
+                    issues_classified=True,
+                    recommendations_defined=True,
+                ),
+                required_review_step=7,
+                review_turn_action="await_context",
+                blocked_steps=(8,),
+            ),
+            ConversationTurn(
+                user_input="先别出正式评审，自检还没闭合。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("输出前自检", "自检"),
+                assert_safety=("未完成第 7 步，不得进入第 8 步。",),
+                forbidden_behavior=("进入第 8 步",),
+                review_progress=ReviewProgress(
+                    inputs_ready=True,
+                    type_classified=True,
+                    claims_extracted=True,
+                    evidence_assigned=True,
+                    issues_classified=True,
+                    recommendations_defined=True,
+                ),
+                required_review_step=7,
+                review_turn_action="await_context",
+                blocked_steps=(8,),
+            ),
+        ),
+    ),
 )
 
 
@@ -778,6 +1062,12 @@ PHASE_1_CASE_IDS = (
     "RTS-01",
     "RTS-02",
     "RTS-03",
+    "RTS-10",
+    "RTS-11",
+    "RTS-12",
+    "RTS-13",
+    "RTS-14",
+    "RTS-15",
 )
 
 PHASE_2_CASE_IDS = (

@@ -26,6 +26,12 @@ EXPECTED_PHASE_1 = {
     "RTS-01",
     "RTS-02",
     "RTS-03",
+    "RTS-10",
+    "RTS-11",
+    "RTS-12",
+    "RTS-13",
+    "RTS-14",
+    "RTS-15",
 }
 
 EXPECTED_PHASE_1_ORDER = (
@@ -45,6 +51,12 @@ EXPECTED_PHASE_1_ORDER = (
     "RTS-01",
     "RTS-02",
     "RTS-03",
+    "RTS-10",
+    "RTS-11",
+    "RTS-12",
+    "RTS-13",
+    "RTS-14",
+    "RTS-15",
 )
 
 EXPECTED_PHASE_2 = {
@@ -114,7 +126,7 @@ class CaseCatalogTests(unittest.TestCase):
         self.assertEqual(len(case_ids), len(set(case_ids)))
 
     def test_catalog_contains_all_design_cases(self) -> None:
-        self.assertEqual(len(ALL_CASES), 39)
+        self.assertEqual(len(ALL_CASES), 45)
         self.assertEqual({case.case_id for case in ALL_CASES}, EXPECTED_CASE_IDS)
         self.assertEqual(PHASE_1_CASE_IDS, EXPECTED_PHASE_1_ORDER)
         self.assertEqual(PHASE_2_CASE_IDS, EXPECTED_PHASE_2_ORDER)
@@ -208,6 +220,12 @@ class CaseCatalogTests(unittest.TestCase):
 
     def test_sa_15_to_sa_17_stay_in_phase_1(self) -> None:
         for case_id in ("SA-15", "SA-16", "SA-17"):
+            with self.subTest(case_id=case_id):
+                self.assertIn(case_id, PHASE_1_CASE_IDS)
+                self.assertEqual(CASE_INDEX[case_id].expected_result, "STOP_AND_ASK")
+
+    def test_rts_10_to_rts_15_stay_in_phase_1(self) -> None:
+        for case_id in ("RTS-10", "RTS-11", "RTS-12", "RTS-13", "RTS-14", "RTS-15"):
             with self.subTest(case_id=case_id):
                 self.assertIn(case_id, PHASE_1_CASE_IDS)
                 self.assertEqual(CASE_INDEX[case_id].expected_result, "STOP_AND_ASK")
