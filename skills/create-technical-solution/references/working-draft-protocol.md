@@ -1,0 +1,67 @@
+# 技术方案 working draft 协议
+
+这个文档定义 `create-technical-solution` 在生成过程中的唯一 working draft 载体、稳定区块和生命周期规则。
+
+## 1. 固定路径与单稿约束
+
+- working draft 固定写入 `.architecture/technical-solutions/working-drafts/[slug].working.md`。
+- `slug` 必须与最终技术方案目标文件使用同一份短横线文件名。
+- 整个一次技术方案生成过程只维护一份 working draft。
+- 若用户改变主题并导致 `slug` 改变，应停止当前流程并基于新 `slug` 重新开始，而不是并行保留多份 working draft。
+
+## 2. 稳定区块
+
+下列 `WD-*` 区块只定义稳定区块身份、working draft 落位与最小索引字段。
+
+每个区块的完整正文仍必须遵循 `references/solution-process.md` 中对应阶段的 canonical schema。
+
+这些字段只是帮助定位、引用与回退的最小索引字段，不构成第二套更弱的替代 schema。
+
+## WD-CTX 共享上下文清单
+
+- `上下文编号`
+- `来源`
+- `结论或约束`
+- `适用槽位`
+- `可信度或缺口`
+
+## WD-TASK 模板任务单
+
+- `槽位标识`
+- `槽位语义`
+- `本槽位必须消费的共享上下文`
+- `参与专家`
+- `缺失即停止的上下文`
+
+## WD-EXP-[expert-slug] 专家产物
+
+- `是否参与该槽位`
+- `建议写法或建议内容`
+- `已使用的共享上下文编号`
+- `结论是否超出上下文支持`
+
+## WD-SYN 协作收敛纪要
+
+- `共同结论`
+- `选定写法`
+- `本槽位已核销的共享上下文`
+- `仍缺哪条共享上下文`
+
+## WD-IMPACT-[n] 变更影响说明
+
+- `触发变更`
+- `受影响内容`
+- `最近受影响的阶段边界`
+- `保持有效的内容`
+- `下一步动作`
+
+## 3. 写入规则
+
+- 每个阶段完成后，必须先把完整 canonical schema 写入 working draft，再对用户展示摘要。
+- 下游阶段只能消费 working draft 中已存在的稳定区块；未写入则视为不存在。
+- working draft 不保存 scratchpad、原始推理链路或聊天记录。
+
+## 4. 生命周期
+
+- 最终文档生成后，必须先执行吸收检查。
+- 吸收检查通过后，删除 working draft。
