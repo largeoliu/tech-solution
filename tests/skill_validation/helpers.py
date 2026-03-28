@@ -14,22 +14,6 @@ ASSISTANT_TARGETS = {
     "generic": ".agents/skills",
 }
 
-SKILL_INSTALL_LAYOUT = {
-    "setup-architect": (
-        "SKILL.md",
-        "references",
-        "templates",
-    ),
-    "create-technical-solution": (
-        "SKILL.md",
-        "references",
-    ),
-    "review-technical-solution": (
-        "SKILL.md",
-        "references",
-    ),
-}
-
 
 def repo_path(*parts: str) -> Path:
     return REPO_ROOT.joinpath(*parts)
@@ -37,6 +21,11 @@ def repo_path(*parts: str) -> Path:
 
 def read_repo_text(relative_path: str) -> str:
     return repo_path(relative_path).read_text(encoding="utf-8")
+
+
+def skill_directory_names() -> list[str]:
+    skills_root = repo_path("skills")
+    return sorted(path.name for path in skills_root.iterdir() if path.is_dir())
 
 
 def load_setup_contract_sources() -> dict[str, str]:
@@ -147,12 +136,8 @@ def copy_repo_asset(source: Path, destination: Path) -> None:
 
 
 def install_validation_skills(target_root: Path) -> None:
-    for skill_name, assets in SKILL_INSTALL_LAYOUT.items():
-        for asset in assets:
-            copy_repo_asset(
-                repo_path("skills", skill_name, asset),
-                target_root / skill_name / asset,
-            )
+    for skill_name in skill_directory_names():
+        copy_repo_asset(repo_path("skills", skill_name), target_root / skill_name)
 
 
 @contextmanager

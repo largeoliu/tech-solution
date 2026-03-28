@@ -7,6 +7,7 @@ from tests.skill_validation.case_catalog import CASE_INDEX, PHASE_1_CASE_IDS, PH
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = REPO_ROOT / ".github/workflows/skills-integration-tests.yml"
 RUNBOOK_PATH = REPO_ROOT / "docs/superpowers/testing/skill-validation.md"
+INSTALLATION_PATH = REPO_ROOT / "INSTALLATION.md"
 
 
 def section_body(markdown: str, heading: str) -> str:
@@ -19,13 +20,32 @@ def section_body(markdown: str, heading: str) -> str:
 
 
 class WorkflowIntegrationTests(unittest.TestCase):
+    def test_installation_doc_keeps_skill_copy_scope_generic(self) -> None:
+        installation = INSTALLATION_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("全部一级 skill 目录", installation)
+        self.assertIn("不要只复制后续将要执行的某一个 skill", installation)
+        self.assertIn('for skill_dir in ./tech-solution-tmp/skills/*; do', installation)
+        self.assertIn("不是 Stage 2 的安装范围", installation)
+        self.assertNotIn("3 个 skill", installation)
+
     def test_workflow_runs_skill_validation_contract_suite(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
 
         self.assertIn("- name: Run skill validation contract suite", workflow)
-        self.assertIn("review-technical-solution", workflow)
         self.assertIn(
             'python3 -m unittest discover -s tests/skill_validation -p "test_*.py" -v',
+            workflow,
+        )
+
+    def test_workflow_derives_expected_skill_set_from_repo_directory(self) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('repo_root="$(git rev-parse --show-toplevel)"', workflow)
+        self.assertIn('for skill_dir in "$repo_root"/skills/*; do', workflow)
+        self.assertIn('skill_name="$(basename "$skill_dir")"', workflow)
+        self.assertNotIn(
+            "printf '%s\\n' create-technical-solution review-technical-solution setup-architect",
             workflow,
         )
 

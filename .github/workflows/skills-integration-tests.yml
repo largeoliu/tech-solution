@@ -94,20 +94,23 @@ jobs:
         run: |
           cd "test-projects/${{ matrix.assistant }}"
           target="${{ matrix.target }}"
+          repo_root="$(git rev-parse --show-toplevel)"
 
           expected_skills="$(mktemp)"
           actual_skills="$(mktemp)"
 
-          printf '%s\n' create-technical-solution review-technical-solution setup-architect | sort > "$expected_skills"
+          for skill_dir in "$repo_root"/skills/*; do
+            [ -d "$skill_dir" ] || continue
+            skill_name="$(basename "$skill_dir")"
+            printf '%s\n' "$skill_name" >> "$expected_skills"
+            [ -f "$target/$skill_name/SKILL.md" ] || (echo "Missing $skill_name/SKILL.md" && exit 1)
+          done
+
+          sort -o "$expected_skills" "$expected_skills"
           find "$target" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort > "$actual_skills"
 
           diff -u "$expected_skills" "$actual_skills" || (echo "Installed skill list mismatch for $target" && exit 1)
 
-          [ -f "$target/create-technical-solution/SKILL.md" ] || (echo "Missing create-technical-solution/SKILL.md" && exit 1)
-          [ -f "$target/review-technical-solution/SKILL.md" ] || (echo 'Missing review-technical-solution/SKILL.md' && exit 1)
-          [ -f "$target/review-technical-solution/references/review-process.md" ] || (echo 'Missing review-process.md' && exit 1)
-          [ -f "$target/review-technical-solution/references/review-analysis-guide.md" ] || (echo 'Missing review-analysis-guide.md' && exit 1)
-          [ -f "$target/review-technical-solution/references/review-output-contract.md" ] || (echo 'Missing review-output-contract.md' && exit 1)
           [ -f "$target/setup-architect/SKILL.md" ] || (echo "Missing setup-architect/SKILL.md" && exit 1)
           [ -f "$target/setup-architect/references/installation-procedures.md" ] || (echo "Missing installation-procedures.md" && exit 1)
           [ -f "$target/setup-architect/references/member-customization.md" ] || (echo "Missing member-customization.md" && exit 1)
