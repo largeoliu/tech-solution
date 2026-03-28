@@ -72,6 +72,9 @@ def load_create_solution_contract_sources() -> dict[str, str]:
         "progress_transparency": read_repo_text(
             "skills/create-technical-solution/references/progress-transparency.md"
         ),
+        "working_draft_protocol": read_repo_text(
+            "skills/create-technical-solution/references/working-draft-protocol.md"
+        ),
         "analysis_guide": read_repo_text(
             "skills/create-technical-solution/references/solution-analysis-guide.md"
         ),

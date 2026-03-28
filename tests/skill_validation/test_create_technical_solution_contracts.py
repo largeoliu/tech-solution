@@ -39,6 +39,7 @@ class CreateTechnicalSolutionContractTests(unittest.TestCase):
             self,
             self.sources["main"],
             (
+                "若 `.architecture/technical-solutions/working-drafts/` 缺失，则自动创建该目录后继续，以便承载唯一 working draft。",
                 "若三个关键文件齐全但 `.architecture/technical-solutions/` 缺失，则自动创建该目录后继续。",
                 "将最终文档写入 `.architecture/technical-solutions/[主题-短横线文件名].md`。",
                 "若目标文件已存在且用户未明确要求更新，先确认覆盖还是另存；不要静默覆盖无关文档。",
@@ -98,7 +99,7 @@ class CreateTechnicalSolutionContractTests(unittest.TestCase):
                 "3. 再选择参与成员。",
                 "4. 第 6 步必须先产出 `共享上下文清单`。",
                 "5. 再生成 `模板任务单`。",
-                "6. 再按阶段先展示 `共享上下文清单`，后展示 `模板任务单`，再展示按模板逐槽位组织的 `专家产物` 与 `协作收敛纪要`。",
+                "6. `共享上下文清单`、`模板任务单`、各份 `专家产物`、`协作收敛纪要` 和 `变更影响说明` 必须先写入同一份 working draft，再按阶段对外展示摘要。",
             ),
         )
 
@@ -267,12 +268,12 @@ class CreateTechnicalSolutionContractTests(unittest.TestCase):
             (
                 "### 7. 生成模板任务单",
                 "先基于当前生效模板生成一份 `模板任务单`",
-                "按 [references/progress-transparency.md](references/progress-transparency.md) 在对话中展示这份 `模板任务单`。",
+                "完成后，必须先按 [references/working-draft-protocol.md](references/working-draft-protocol.md) 将这份 `模板任务单` 写入 `WD-TASK`，再在对话中展示摘要。",
                 "### 8. 组织专家按模板逐槽位分析",
             ),
         )
         self.assertIn(
-            "过程可见产物：已展示 1 份共享上下文清单、1 份模板任务单、[成员数] 份专家产物与 1 份协作收敛纪要",
+            "过程可见产物：已写入 1 份 working draft，并摘要展示 1 份共享上下文清单、1 份模板任务单、[成员数] 份专家产物与 1 份协作收敛纪要",
             self.sources["main"],
         )
 
@@ -329,6 +330,116 @@ class CreateTechnicalSolutionContractTests(unittest.TestCase):
                 "- 如果已展示的 `模板任务单` 内容受影响，必须明确说明其哪些槽位已作废或失效，不得继续视为当前有效版本。",
             ),
         )
+
+    def test_solution_process_requires_working_draft_before_user_display(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["solution_process"],
+            (
+                "适用于全部用户可见产物的共享规则如下：",
+                "`共享上下文清单`、`模板任务单`、`专家按模板逐槽位分析`、`按模板逐槽位协作收敛`、`变更影响说明` 都必须先补齐本文件要求的必填字段，再写入 working draft，再对用户展示。",
+                "对外展示时，默认只展示稳定摘要，并使用 `详见 working draft：WD-CTX（共享上下文清单）` 这类稳定引用指向完整内容。",
+                "阶段回退或重算时，先更新 working draft 中对应区块，再对外展示 `变更影响说明`。",
+                "最终文档生成后，先执行吸收检查，再删除 working draft。",
+            ),
+        )
+
+    def test_progress_transparency_switches_to_summary_plus_working_draft_references(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["progress_transparency"],
+            (
+                "中间产物必须先写入 working draft，再对用户展示摘要。",
+                "`详见 working draft：WD-CTX（共享上下文清单）`",
+                "`详见 working draft：WD-TASK（模板任务单）`",
+                "`详见 working draft：WD-EXP-system-architect（系统架构师专家产物）`",
+                "`详见 working draft：WD-SYN（协作收敛纪要）`",
+                "`详见 working draft：WD-IMPACT-[n]（变更影响说明）`",
+            ),
+        )
+        self.assertNotIn(
+            "中间产物默认只在当前对话中展示，不新增正式文档或侧车文件。",
+            self.sources["progress_transparency"],
+        )
+
+    def test_working_draft_protocol_defines_single_draft_path_blocks_and_lifecycle(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["working_draft_protocol"],
+            (
+                "`.architecture/technical-solutions/working-drafts/[slug].working.md`",
+                "整个一次技术方案生成过程只维护一份 working draft。",
+                "## WD-CTX 共享上下文清单",
+                "## WD-TASK 模板任务单",
+                "## WD-EXP-[expert-slug] 专家产物",
+                "## WD-SYN 协作收敛纪要",
+                "## WD-IMPACT-[n] 变更影响说明",
+                "每个阶段完成后，必须先把完整 canonical schema 写入 working draft，再对用户展示摘要。",
+                "working draft 不保存 scratchpad、原始推理链路或聊天记录。",
+                "吸收检查通过后，删除 working draft。",
+            ),
+        )
+
+    def test_working_draft_protocol_requires_restart_on_slug_change(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["working_draft_protocol"],
+            (
+                "`slug` 必须与最终技术方案目标文件使用同一份短横线文件名。",
+                "若用户改变主题并导致 `slug` 改变，应停止当前流程并基于新 `slug` 重新开始，而不是并行保留多份 working draft。",
+            ),
+        )
+
+    def test_working_draft_protocol_defers_block_content_to_canonical_schemas(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["working_draft_protocol"],
+            (
+                "下列 `WD-*` 区块只定义稳定区块身份、working draft 落位与最小索引字段。",
+                "每个区块的完整正文仍必须遵循 `references/solution-process.md` 中对应阶段的 canonical schema。",
+                "这些字段只是帮助定位、引用与回退的最小索引字段，不构成第二套更弱的替代 schema。",
+                "## WD-TASK 模板任务单",
+                "## WD-EXP-[expert-slug] 专家产物",
+                "## WD-SYN 协作收敛纪要",
+            ),
+        )
+
+    def test_main_skill_requires_working_draft_round_trip(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["main"],
+            (
+                "## 完成标准",
+                "分阶段中间产物先写入 `.architecture/technical-solutions/working-drafts/[主题-短横线文件名].working.md`，再按 [references/progress-transparency.md](references/progress-transparency.md) 在对话中展示摘要；过程中不新增除最终技术方案文档外的正式交付物。",
+                "生成最终文档后，先执行吸收检查；通过后删除 working draft。",
+                "## 高层工作流",
+            ),
+        )
+        require_snippets_in_order(
+            self,
+            self.sources["main"],
+            (
+                "`.architecture/technical-solutions/working-drafts/[主题-短横线文件名].working.md`",
+                "完成后，必须先按 [references/working-draft-protocol.md](references/working-draft-protocol.md) 将 `共享上下文清单` 写入 `WD-CTX`，再按 [references/progress-transparency.md](references/progress-transparency.md) 在对话中展示摘要。",
+                "完成后，必须先按 [references/working-draft-protocol.md](references/working-draft-protocol.md) 将这份 `模板任务单` 写入 `WD-TASK`，再在对话中展示摘要。",
+                "每个成员完成独立输入后，先写入对应 `WD-EXP-[expert-slug]` 区块，再展示摘要。",
+                "完成收敛后、生成最终文档前，必须先将 `协作收敛纪要` 写入 `WD-SYN`，再在对话中展示摘要。",
+                "过程可见产物：已写入 1 份 working draft，并摘要展示 1 份共享上下文清单、1 份模板任务单、[成员数] 份专家产物与 1 份协作收敛纪要",
+                "生成最终文档后，先执行吸收检查；通过后删除 working draft。",
+            ),
+        )
+        require_snippets_in_order(
+            self,
+            self.sources["main"],
+            (
+                "## 行为契约",
+                "`共享上下文清单`、`模板任务单`、各份 `专家产物`、`协作收敛纪要` 和 `变更影响说明` 必须先写入同一份 working draft，再按阶段对外展示摘要。",
+                "最终文档生成后，先执行吸收检查；通过后删除 working draft。",
+                "最终保持当前模板现有结构，不新增任何模板外可见结构；最终只把已收敛内容写回当前模板已有位置。",
+                "缺少语义前置、无法展示稳定中间产物、无法安全落位，或任一槽位缺少可回溯的共享上下文编号时停止并确认。",
+            ),
+        )
+        self.assertNotIn("这些中间产物默认不作为侧车文档落盘", self.sources["main"])
 
     def test_solution_analysis_guide_requires_architect_and_union_behavior(self) -> None:
         require_snippets_in_order(
