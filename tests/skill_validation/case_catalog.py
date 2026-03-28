@@ -3,6 +3,13 @@ from typing import Tuple
 
 
 @dataclass(frozen=True)
+class SetupProgress:
+    members_customized: bool = False
+    principles_customized: bool = False
+    structure_verified: bool = False
+
+
+@dataclass(frozen=True)
 class ConversationTurn:
     user_input: str
     expected_result: str
@@ -11,6 +18,10 @@ class ConversationTurn:
     assert_semantics: Tuple[str, ...] = ()
     assert_safety: Tuple[str, ...] = ()
     forbidden_behavior: Tuple[str, ...] = ()
+    setup_progress: SetupProgress | None = None
+    required_setup_step: int | None = None
+    setup_turn_action: str | None = None
+    blocked_steps: Tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -272,6 +283,13 @@ SETUP_ARCHITECT_CASES = (
                 assert_semantics=("询问是否需要自定义模板",),
                 assert_safety=("暂停等待模板决策",),
                 forbidden_behavior=("直接输出最终总结",),
+                setup_progress=SetupProgress(
+                    members_customized=True,
+                    principles_customized=True,
+                    structure_verified=True,
+                ),
+                required_setup_step=6,
+                setup_turn_action="await_template_decision",
             ),
             ConversationTurn(
                 user_input="不用自定义，保持当前模板即可。",
@@ -280,6 +298,13 @@ SETUP_ARCHITECT_CASES = (
                 assert_semantics=("模板最终状态明确为保留当前模板",),
                 assert_safety=("不发生模板替换",),
                 forbidden_behavior=("无用户请求时覆盖模板",),
+                setup_progress=SetupProgress(
+                    members_customized=True,
+                    principles_customized=True,
+                    structure_verified=True,
+                ),
+                required_setup_step=6,
+                setup_turn_action="keep_current_template",
             ),
         ),
     ),
@@ -302,6 +327,13 @@ SETUP_ARCHITECT_CASES = (
                 assert_semantics=("询问是否需要自定义模板",),
                 assert_safety=("暂停等待模板输入",),
                 forbidden_behavior=("直接输出最终总结",),
+                setup_progress=SetupProgress(
+                    members_customized=True,
+                    principles_customized=True,
+                    structure_verified=True,
+                ),
+                required_setup_step=6,
+                setup_turn_action="await_template_decision",
             ),
             ConversationTurn(
                 user_input="请用下面这份完整 Markdown 模板整体替换当前模板：# 技术方案\n\n## 背景\n\n## 目标\n\n## 方案设计\n\n## 风险与验证",
@@ -310,6 +342,121 @@ SETUP_ARCHITECT_CASES = (
                 assert_structure=("整体替换单个目标文件",),
                 assert_safety=("不做局部 merge",),
                 forbidden_behavior=("局部编辑", "内容合并"),
+                setup_progress=SetupProgress(
+                    members_customized=True,
+                    principles_customized=True,
+                    structure_verified=True,
+                ),
+                required_setup_step=6,
+                setup_turn_action="replace_template",
+            ),
+        ),
+    ),
+    vcase(
+        "SA-15",
+        "setup-architect",
+        "流程场景层",
+        "empty-project",
+        "setup-architect 在成员定制所需上下文不足时，必须停在第 3 步。",
+        "验证未完成第 3 步时不会进入第 4 到 6 步",
+        "STOP_AND_ASK",
+        assert_semantics=("当前停在成员定制",),
+        assert_safety=("未完成第 3 步不得进入第 4 步",),
+        forbidden_behavior=("进入第 4 步", "进入第 5 步", "进入第 6 步"),
+        turns=(
+            ConversationTurn(
+                user_input="当前仓库上下文几乎没有可用于成员定制的信息。你不能跳到下一步，先处理 setup。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("成员定制", "要求补充成员所需项目上下文"),
+                assert_safety=("未完成第 3 步，不得进入第 4 步。",),
+                forbidden_behavior=("进入第 4 步", "原则定制", "模板确认"),
+                setup_progress=SetupProgress(),
+                required_setup_step=3,
+                setup_turn_action="await_context",
+                blocked_steps=(4, 5, 6),
+            ),
+            ConversationTurn(
+                user_input="模板的事情先不要问，也不要做原则定制；当前成员信息还是不够。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("成员定制", "项目上下文不足"),
+                assert_safety=("未完成第 3 步，不得进入第 4 步。",),
+                forbidden_behavior=("进入第 4 步", "进入第 5 步", "进入第 6 步"),
+                setup_progress=SetupProgress(),
+                required_setup_step=3,
+                setup_turn_action="await_context",
+                blocked_steps=(4, 5, 6),
+            ),
+        ),
+    ),
+    vcase(
+        "SA-16",
+        "setup-architect",
+        "流程场景层",
+        "complete-architecture-default-template",
+        "成员定制完成但原则定制上下文不足时，setup-architect 必须停在第 4 步。",
+        "验证未完成第 4 步时不会进入第 5 到 6 步",
+        "STOP_AND_ASK",
+        assert_semantics=("当前停在原则定制",),
+        assert_safety=("未完成第 4 步不得进入第 5 步",),
+        forbidden_behavior=("进入第 5 步", "进入第 6 步"),
+        turns=(
+            ConversationTurn(
+                user_input="成员先按现状保留，但原则文档需要的项目判断基线还不够。不要继续往后。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("原则定制", "要求补充原则定制所需项目上下文"),
+                assert_safety=("未完成第 4 步，不得进入第 5 步。",),
+                forbidden_behavior=("进入第 5 步", "结构复核", "模板确认"),
+                setup_progress=SetupProgress(members_customized=True),
+                required_setup_step=4,
+                setup_turn_action="await_context",
+                blocked_steps=(5, 6),
+            ),
+            ConversationTurn(
+                user_input="还是先别做结构复核，原则这一步的信息依然不够。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("原则定制", "项目上下文不足"),
+                assert_safety=("未完成第 4 步，不得进入第 5 步。",),
+                forbidden_behavior=("进入第 5 步", "进入第 6 步"),
+                setup_progress=SetupProgress(members_customized=True),
+                required_setup_step=4,
+                setup_turn_action="await_context",
+                blocked_steps=(5, 6),
+            ),
+        ),
+    ),
+    vcase(
+        "SA-17",
+        "setup-architect",
+        "流程场景层",
+        "complete-architecture-default-template",
+        "成员和原则都已完成，但正式结构尚未复核时，setup-architect 必须停在第 5 步。",
+        "验证未完成第 5 步时不会进入第 6 步",
+        "STOP_AND_ASK",
+        assert_semantics=("当前停在结构复核",),
+        assert_safety=("未完成第 5 步不得进入第 6 步",),
+        forbidden_behavior=("进入第 6 步",),
+        turns=(
+            ConversationTurn(
+                user_input="成员和原则先按当前结果保留，但正式结构还没复核完，现在不能问模板。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("结构复核", "结构验证"),
+                assert_safety=("未完成第 5 步，不得进入第 6 步。",),
+                forbidden_behavior=("进入第 6 步", "模板确认"),
+                setup_progress=SetupProgress(members_customized=True, principles_customized=True),
+                required_setup_step=5,
+                setup_turn_action="await_context",
+                blocked_steps=(6,),
+            ),
+            ConversationTurn(
+                user_input="先别问模板，结构复核这一步还是没完成。",
+                expected_result="STOP_AND_ASK",
+                assert_semantics=("结构复核", "结构验证"),
+                assert_safety=("未完成第 5 步，不得进入第 6 步。",),
+                forbidden_behavior=("进入第 6 步",),
+                setup_progress=SetupProgress(members_customized=True, principles_customized=True),
+                required_setup_step=5,
+                setup_turn_action="await_context",
+                blocked_steps=(6,),
             ),
         ),
     ),
@@ -618,6 +765,9 @@ PHASE_1_CASE_IDS = (
     "SA-01",
     "SA-02",
     "SA-13",
+    "SA-15",
+    "SA-16",
+    "SA-17",
     "SA-07",
     "SA-08",
     "CTS-01",

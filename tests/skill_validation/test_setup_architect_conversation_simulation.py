@@ -22,6 +22,9 @@ class SetupArchitectConversationSimulationTests(unittest.TestCase):
 
         self.assertIn("SA-13", multi_turn_case_ids)
         self.assertIn("SA-14", multi_turn_case_ids)
+        self.assertIn("SA-15", multi_turn_case_ids)
+        self.assertIn("SA-16", multi_turn_case_ids)
+        self.assertIn("SA-17", multi_turn_case_ids)
 
     def test_sa_13_simulates_confirm_then_keep_current_template(self) -> None:
         case = cast(Any, CASE_INDEX["SA-13"])
@@ -81,6 +84,39 @@ class SetupArchitectConversationSimulationTests(unittest.TestCase):
                     ),
                     case_id,
                 )
+
+    def test_sa_15_stops_before_entering_step_4(self) -> None:
+        case = cast(Any, CASE_INDEX["SA-15"])
+
+        self.assertEqual(tuple(turn.expected_result for turn in case.turns), ("STOP_AND_ASK", "STOP_AND_ASK"))
+        first_turn, second_turn = case.turns
+        self.assertTrue(_contains_any(first_turn.assert_semantics, "成员定制", "成员"))
+        self.assertTrue(_contains_any(first_turn.assert_safety, "第 4 步", "不得进入"))
+        self.assertTrue(_contains_any(first_turn.forbidden_behavior, "第 4 步", "原则定制"))
+        self.assertTrue(_contains_any(second_turn.assert_semantics, "成员定制", "项目上下文"))
+        self.assertTrue(_contains_any(second_turn.assert_safety, "第 4 步", "不得进入"))
+
+    def test_sa_16_stops_before_entering_step_5(self) -> None:
+        case = cast(Any, CASE_INDEX["SA-16"])
+
+        self.assertEqual(tuple(turn.expected_result for turn in case.turns), ("STOP_AND_ASK", "STOP_AND_ASK"))
+        first_turn, second_turn = case.turns
+        self.assertTrue(_contains_any(first_turn.assert_semantics, "原则定制", "原则"))
+        self.assertTrue(_contains_any(first_turn.assert_safety, "第 5 步", "不得进入"))
+        self.assertTrue(_contains_any(first_turn.forbidden_behavior, "第 5 步", "结构复核"))
+        self.assertTrue(_contains_any(second_turn.assert_semantics, "原则定制", "项目上下文"))
+        self.assertTrue(_contains_any(second_turn.assert_safety, "第 5 步", "不得进入"))
+
+    def test_sa_17_stops_before_entering_step_6(self) -> None:
+        case = cast(Any, CASE_INDEX["SA-17"])
+
+        self.assertEqual(tuple(turn.expected_result for turn in case.turns), ("STOP_AND_ASK", "STOP_AND_ASK"))
+        first_turn, second_turn = case.turns
+        self.assertTrue(_contains_any(first_turn.assert_semantics, "结构复核", "结构验证"))
+        self.assertTrue(_contains_any(first_turn.assert_safety, "第 6 步", "不得进入"))
+        self.assertTrue(_contains_any(first_turn.forbidden_behavior, "第 6 步", "模板"))
+        self.assertTrue(_contains_any(second_turn.assert_semantics, "结构复核", "结构验证"))
+        self.assertTrue(_contains_any(second_turn.assert_safety, "第 6 步", "不得进入"))
 
 
 if __name__ == "__main__":

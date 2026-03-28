@@ -13,6 +13,9 @@ EXPECTED_PHASE_1 = {
     "SA-01",
     "SA-02",
     "SA-13",
+    "SA-15",
+    "SA-16",
+    "SA-17",
     "SA-07",
     "SA-08",
     "CTS-01",
@@ -29,6 +32,9 @@ EXPECTED_PHASE_1_ORDER = (
     "SA-01",
     "SA-02",
     "SA-13",
+    "SA-15",
+    "SA-16",
+    "SA-17",
     "SA-07",
     "SA-08",
     "CTS-01",
@@ -108,7 +114,7 @@ class CaseCatalogTests(unittest.TestCase):
         self.assertEqual(len(case_ids), len(set(case_ids)))
 
     def test_catalog_contains_all_design_cases(self) -> None:
-        self.assertEqual(len(ALL_CASES), 36)
+        self.assertEqual(len(ALL_CASES), 39)
         self.assertEqual({case.case_id for case in ALL_CASES}, EXPECTED_CASE_IDS)
         self.assertEqual(PHASE_1_CASE_IDS, EXPECTED_PHASE_1_ORDER)
         self.assertEqual(PHASE_2_CASE_IDS, EXPECTED_PHASE_2_ORDER)
@@ -185,7 +191,7 @@ class CaseCatalogTests(unittest.TestCase):
                         )
 
     def test_setup_architect_multi_turn_cases_have_actionable_case_metadata(self) -> None:
-        for case_id in ("SA-13", "SA-14"):
+        for case_id in ("SA-13", "SA-14", "SA-15", "SA-16", "SA-17"):
             case = CASE_INDEX[case_id]
             with self.subTest(case_id=case_id):
                 self.assertTrue(case.prompt)
@@ -199,6 +205,12 @@ class CaseCatalogTests(unittest.TestCase):
     def test_sa_14_stays_in_phase_2(self) -> None:
         self.assertIn("SA-14", PHASE_2_CASE_IDS)
         self.assertEqual(CASE_INDEX["SA-14"].expected_result, "SUCCESS_REPLACE_TEMPLATE")
+
+    def test_sa_15_to_sa_17_stay_in_phase_1(self) -> None:
+        for case_id in ("SA-15", "SA-16", "SA-17"):
+            with self.subTest(case_id=case_id):
+                self.assertIn(case_id, PHASE_1_CASE_IDS)
+                self.assertEqual(CASE_INDEX[case_id].expected_result, "STOP_AND_ASK")
 
     def test_cts_13_tracks_missing_shared_context_consumption(self) -> None:
         self.assertEqual(CASE_INDEX["CTS-13"].expected_result, "STOP_AND_ASK")

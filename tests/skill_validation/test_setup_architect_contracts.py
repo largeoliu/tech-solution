@@ -58,6 +58,21 @@ class SetupArchitectContractTests(unittest.TestCase):
             ),
         )
 
+    def test_main_skill_enforces_strict_step_by_step_gates_from_3_to_6(self) -> None:
+        require_snippets_in_order(
+            self,
+            self.sources["main"],
+            (
+                "### 3. 定制架构团队",
+                "未完成第 3 步，不得进入第 4 步。",
+                "### 4. 定制架构原则",
+                "未完成第 4 步，不得进入第 5 步。",
+                "### 5. 复核正式项目结构",
+                "未完成第 5 步，不得进入第 6 步。",
+                "### 6. 确认当前生效模板并收尾",
+            ),
+        )
+
     def test_installation_reference_creates_minimum_structure(self) -> None:
         require_all_snippets(
             self,

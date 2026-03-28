@@ -20,7 +20,7 @@ python3 -m unittest discover -s tests/skill_validation -p "test_*.py" -v
 ### 流程场景层
 
 - Focus: stop/redirect behavior, prerequisite enforcement, and primary success-path branching.
-- Representative cases: `SA-01`, `SA-13`, `CTS-01`, `CTS-11`, `RTS-01`, `RTS-02`.
+- Representative cases: `SA-01`, `SA-13`, `SA-15`, `SA-16`, `SA-17`, `CTS-01`, `CTS-11`, `RTS-01`, `RTS-02`.
 
 ### 行为回归层
 
@@ -39,7 +39,7 @@ python3 -m unittest discover -s tests/skill_validation -p "test_*.py" -v
 ### Phase 1
 
 - Goal: lock the hard rules first so the suite catches unsafe continuation, unsafe inference, silent overwrite behavior, and invalid formal review starts early.
-- Cases: `SA-01`, `SA-02`, `SA-07`, `SA-08`, `SA-13`, `CTS-01`, `CTS-02`, `CTS-04`, `CTS-07`, `CTS-08`, `RTS-01`, `RTS-02`, `RTS-03`.
+- Cases: `SA-01`, `SA-02`, `SA-07`, `SA-08`, `SA-13`, `SA-15`, `SA-16`, `SA-17`, `CTS-01`, `CTS-02`, `CTS-04`, `CTS-07`, `CTS-08`, `RTS-01`, `RTS-02`, `RTS-03`.
 - Use when: validating the first enforcement baseline for contract and boundary-sensitive behavior after changes to skill rules, references, or prompts.
 
 ### Phase 2

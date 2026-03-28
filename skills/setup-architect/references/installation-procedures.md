@@ -27,6 +27,10 @@ test -f .architecture/principles.md || cp "$SKILL_ROOT/templates/principles-temp
 
 ## 验证与清理
 
+- 这里的验证结果用于完成第 5 步“复核正式项目结构”。
+- 若结构复核尚未完成，则返回 `STOP_AND_ASK`，继续等待；未完成第 5 步，不得进入第 6 步模板确认。
+- 若结构复核已完成但结构不符，则返回第 1 步重新安装。
+
 ```bash
 test -d .architecture/technical-solutions && echo "✅ Solutions 目录存在"
 test -d .architecture/templates && echo "✅ Templates 目录存在"

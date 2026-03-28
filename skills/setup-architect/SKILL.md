@@ -46,13 +46,23 @@ description: 在项目中安装并初始化 Tech Solution，或在已完成 setu
 
 按 [references/member-customization.md](references/member-customization.md) 设置专家成员。
 
+- 未完成第 3 步，不得进入第 4 步。
+- 若当前项目上下文不足以完成成员定制，则返回 `STOP_AND_ASK`，继续等待。
+
 ### 4. 定制架构原则
 
 按 [references/principles-customization.md](references/principles-customization.md) 把 `.architecture/principles.md` 定制成宿主项目的上下文和判断基线；后续技术方案编写与架构评审会将这些原则作为必需输入。
 
+- 未完成第 4 步，不得进入第 5 步。
+- 若当前项目上下文不足以完成原则定制，则返回 `STOP_AND_ASK`，继续等待。
+
 ### 5. 复核正式项目结构
 
 按安装文档验证最终结构，若结构不符，返回第 1 步重新安装。
+
+- 未完成第 5 步，不得进入第 6 步。
+- 若结构复核尚未完成，则返回 `STOP_AND_ASK`，继续等待。
+- 只有结构复核通过后，才允许进入模板确认与收尾。
 
 ### 6. 确认当前生效模板并收尾
 
