@@ -23,6 +23,15 @@ EXPECTED_PHASE_1 = {
     "CTS-04",
     "CTS-07",
     "CTS-08",
+    "CTS-14",
+    "CTS-15",
+    "CTS-16",
+    "CTS-17",
+    "CTS-18",
+    "CTS-19",
+    "CTS-20",
+    "CTS-21",
+    "CTS-22",
     "RTS-01",
     "RTS-02",
     "RTS-03",
@@ -48,6 +57,15 @@ EXPECTED_PHASE_1_ORDER = (
     "CTS-04",
     "CTS-07",
     "CTS-08",
+    "CTS-14",
+    "CTS-15",
+    "CTS-16",
+    "CTS-17",
+    "CTS-18",
+    "CTS-19",
+    "CTS-20",
+    "CTS-21",
+    "CTS-22",
     "RTS-01",
     "RTS-02",
     "RTS-03",
@@ -126,7 +144,7 @@ class CaseCatalogTests(unittest.TestCase):
         self.assertEqual(len(case_ids), len(set(case_ids)))
 
     def test_catalog_contains_all_design_cases(self) -> None:
-        self.assertEqual(len(ALL_CASES), 45)
+        self.assertEqual(len(ALL_CASES), 54)
         self.assertEqual({case.case_id for case in ALL_CASES}, EXPECTED_CASE_IDS)
         self.assertEqual(PHASE_1_CASE_IDS, EXPECTED_PHASE_1_ORDER)
         self.assertEqual(PHASE_2_CASE_IDS, EXPECTED_PHASE_2_ORDER)
