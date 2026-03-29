@@ -70,6 +70,6 @@ rm -rf ./tech-solution-tmp
 
 完成标准：
 
-- 创建 `.architecture/technical-solutions`、`.architecture/templates`
 - 生成 `.architecture/members.yml`、`.architecture/principles.md`
-- 生成 `.architecture/templates/technical-solution-template.md`，并在初始化结束前确认该文件最终保留默认模板还是被用户提供的完整 Markdown 整体替换
+- 生成 `.architecture/templates/technical-solution-template.md`，在初始化结束前确认该文件最终保留默认模板还是被用户提供的完整 Markdown 整体替换
+

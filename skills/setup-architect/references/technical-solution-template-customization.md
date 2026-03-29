@@ -17,26 +17,13 @@
 
 当前生效模板可能是默认模板，也可能是用户替换后的自定义模板。
 
-## 通用前置校验
-
-先确认 setup 所需文件完整：
-
-```bash
-test -d .architecture/templates && echo "✅ Templates 目录存在"
-test -f .architecture/templates/technical-solution-template.md && echo "✅ technical solution 模板存在"
-test -f .architecture/members.yml && echo "✅ members.yml 存在"
-test -f .architecture/principles.md && echo "✅ principles.md 存在"
-```
-
-若任一校验失败，则视为 setup 不完整，应停止并要求用户先执行完整初始化；不要静默补文件。
-
 ## 通用输入与替换规则
 
 - 接受用户直接提供的完整 Markdown 模板内容、文件路径或者链接地址。
-- 收到后整体替换 `.architecture/templates/technical-solution-template.md`。
+- 收到后按需创建 `.architecture/templates/` 目录，整体替换 `.architecture/templates/technical-solution-template.md`。
 - 若用户尚未提供完整 Markdown、文件路径或链接地址，则继续索要。
 - 不支持恢复默认模板。
-- 更准确地说，模板替换分支不接受“恢复默认模板”作为单独输入；如需保留当前模板，应明确走“不需要定制 / 保留当前模板”分支。
+- 更准确地说，模板替换分支不接受"恢复默认模板"作为单独输入；如需保留当前模板，应明确走"不需要定制 / 保留当前模板"分支。
 - 不支持自动生成模板、局部编辑或内容合并。
 
 ## 通用输出约定
@@ -51,9 +38,9 @@ test -f .architecture/principles.md && echo "✅ principles.md 存在"
 
 - 必须先询问用户是否需要定制技术方案模板。
 - 若用户尚未明确回答，则返回 `STOP_AND_ASK`，继续等待；此时不允许输出最终 `Tech Solution 设置完成` 摘要。
-- 若回答“不需要”，保留当前 `.architecture/templates/technical-solution-template.md`。首次安装通常保留默认模板；重跑初始化时保留现有项目模板。
-- 若用户以其他明确措辞表示保留当前模板，按“不需要”处理。
-- 若回答“需要”，先执行“通用前置校验”；校验通过后按“通用输入与替换规则”处理。
+- 若回答"不需要"，按需创建 `.architecture/templates/` 目录，复制默认模板到 `.architecture/templates/technical-solution-template.md`。
+- 若用户以其他明确措辞表示保留当前模板，按"不需要"处理。
+- 若回答"需要"，按需创建 `.architecture/templates/` 目录，接受用户提供的完整 Markdown、文件路径或链接地址，写入 `.architecture/templates/technical-solution-template.md`。
 - 只有在用户明确选择保留当前模板，或已提供有效完整输入并完成整体替换后，才允许输出最终 `Tech Solution 设置完成` 摘要。
 
 初始化场景摘要：
@@ -71,10 +58,10 @@ Tech Solution 设置完成
 
 该场景特有逻辑：
 
-- 先执行“通用前置校验”。
-- 直接要求用户提供完整 Markdown 模板内容，不存在“保留当前模板”的分支。
+- 先校验 `.architecture/templates/technical-solution-template.md` 已存在。
+- 直接要求用户提供完整 Markdown 模板内容，不存在"保留当前模板"的分支。
 - 可接受的输入形式与主 skill 一致：完整 Markdown、文件路径或链接地址。
-- 收到后按“通用输入与替换规则”处理。
+- 收到后按"通用输入与替换规则"处理。
 
 安装后替换场景摘要：
 

@@ -2,36 +2,30 @@
 
 根据你的项目框架和技术栈定制这个名册： `.architecture/members.yml`
 
+## 初始化方式
+
+- 从模板 [../templates/members-template.yml](../templates/members-template.yml) 中识别项目需要的成员。
+- 结合你的项目框架和技术栈，添加模板中不存在的成员（如需要）。
+- 生成定制后的 `.architecture/members.yml`。
+
 ## 编辑成员
 
-初始化 `.architecture/members.yml` 时，先复制 [../templates/members-template.yml](../templates/members-template.yml) 作为起点。完成初始化后，如需新增技术专家，再从同一文件末尾的注释模板复制一个成员块并追加到 `members:` 数组中。
-
-- 复制模板只是初始化起点，不是成员定制完成。
-- 第 3 步的完成标准是：当前项目所需的核心成员保留到位，且是否需要增补专家已经结合宿主项目上下文做出明确判断。
-- 若当前项目上下文不足以完成成员定制，则返回 `STOP_AND_ASK`，继续等待；未完成第 3 步，不得进入第 4 步。
+完成初始化后，如需新增技术专家，从模板文件末尾的注释模板复制一个成员块并追加到 `members:` 数组中。
 
 **添加成员**：
+
 1. 从 `members-template.yml` 末尾的注释模板复制一个成员块
 2. 适当填写所有字段
 3. 添加到 `.architecture/members.yml` 的 `members:` 数组中
 4. 选择唯一的 `id`（使用小写和下划线）
 
 **移除成员**：
+
 1. 从 `.architecture/members.yml` 删除其条目
 
 **修改成员**：
+
 1. 编辑他们在 `.architecture/members.yml` 中的条目
 
+   <br />
 
-## 核心成员（保留这些）
-
-这些核心成员应该为所有项目保留：
-- **系统架构师**：整体架构一致性
-- **领域专家**：业务领域表示
-- **安全专家**：安全分析
-- **性能专家**：性能和可扩展性
-- **可维护性专家**：代码质量和技术债务
-
-这些核心成员已内置在 [../templates/members-template.yml](../templates/members-template.yml) 中，可直接用来初始化 `.architecture/members.yml`。
-
-**添加技术专家，不要替换核心成员。**

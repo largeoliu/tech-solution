@@ -4,12 +4,11 @@
 
 ## 初始化方式
 
-- 先用 [../templates/principles-template.md](../templates/principles-template.md) 初始化 `.architecture/principles.md`。
-- 复制模板只是初始化起点，不是原则定制完成。
+- 直接根据模板 [../templates/principles-template.md](../templates/principles-template.md) 定制生成 `.architecture/principles.md`。
 - 按七个主章节填写宿主项目事实、边界、底线和当前现实。
-- 这里的“七个主章节”指模板中“文档目的与使用方式”到“方案编写与评审准绳”的七个正文章节；“原则映射表”是单独的映射辅助表，不算正文章节。
+- 这里的"七个主章节"指模板中"文档目的与使用方式"到"方案编写与评审准绳"的七个正文章节；"原则映射表"是单独的映射辅助表，不算正文章节。
 - 每个章节都要写清 `本项目事实 / 为什么重要 / 对方案与评审的要求`。
-- 若当前项目上下文不足以完成原则定制，则返回 `STOP_AND_ASK`，继续等待；未完成第 4 步，不得进入第 5 步。
+- 若当前项目上下文不足以完成原则定制，则返回 `STOP_AND_ASK`，继续等待；未完成第 3 步，不得进入第 4 步。
 
 ## 定制要求
 
@@ -36,6 +35,6 @@
 - **务实的简洁性**：优先选择实用、可工作的方案
 - **变更影响意识**：在决策前显式评估影响范围、可逆性和时机
 
-这些核心原则已内置在 [../templates/principles-template.md](../templates/principles-template.md) 中，可直接用来初始化 `.architecture/principles.md`。
+这些核心原则已内置在 [../templates/principles-template.md](../templates/principles-template.md) 中。
 
-项目定制应补充或收紧这些原则，不要删除下方“核心原则（保留这些）”中的基础原则。
+项目定制应补充或收紧这些原则，不要删除下方"核心原则（保留这些）"中的基础原则。
