@@ -58,18 +58,19 @@ done
 rm -rf ./tech-solution-tmp
 ```
 
-### Stage 3: 在同一次流程内完成项目初始化
+### Stage 3: 在同一次流程内转入项目初始化
 
-确认 Stage 2 已将 `skills/` 下当前全部一级 skill 目录安装到目标目录后，继续读取并执行本地 `setup-architect` 的初始化流程，不要等待用户追加输入。
+确认 Stage 2 已将 `skills/` 下当前全部一级 skill 目录安装到目标目录后，继续读取并执行本地 `bootstrap-architecture` 的初始化流程，不要等待用户追加输入。
+
+`INSTALLATION.md` 是外部安装入口，不是 Skill。它的职责止于完成安装并转入初始化。
 
 这里指定的是安装完成后的下一步执行入口，不是 Stage 2 的安装范围。
 
 必须基于以下目录下的文件完成当前项目初始化：
 
-- `"$TARGET/setup-architect"`
+- `"$TARGET/bootstrap-architecture"`
 
 完成标准：
 
 - 生成 `.architecture/members.yml`、`.architecture/principles.md`
 - 生成 `.architecture/templates/technical-solution-template.md`，在初始化结束前确认该文件最终保留默认模板还是被用户提供的完整 Markdown 整体替换
-
