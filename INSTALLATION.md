@@ -4,7 +4,7 @@
 
 Stage 1 必须先识别当前 AI 助手运行时，再将结果标准化为 `assistant_id`，然后按 `TARGETS[assistant_id][scope]` 解析目标目录。
 
-`assistant_id` 只能来自当前 AI 助手宿主或运行时环境。
+`assistant_id` 只能来自当前 AI 助手或运行时环境。
 
 不能根据项目里是否存在 `.qoder/`、`.trae/`、`.claude/` 等目录推断当前助手。
 
@@ -20,9 +20,9 @@ Stage 1 必须先识别当前 AI 助手运行时，再将结果标准化为 `ass
 - `trae -> .trae/skills`
 - `generic -> .agents/skills`
 
-判定顺序必须是：先读取宿主显式信号，再读取宿主进程、启动器、路径、元数据等宿主特征信号，然后标准化为 `assistant_id`，最后解析 `TARGETS[assistant_id][scope]`。
+判定顺序必须是：先读取显式信号，再读取进程、启动器、路径、元数据等特征信号，然后标准化为 `assistant_id`，最后解析 `TARGETS[assistant_id][scope]`。
 
-低优先级信号不能覆盖高优先级显式身份；如果宿主显式信号与宿主特征识别结果冲突，也必须停止安装。
+低优先级信号不能覆盖高优先级显式身份；如果显式信号与特征识别结果冲突，也必须停止安装。
 
 若无法唯一识别当前助手，则停止安装并输出诊断。
 

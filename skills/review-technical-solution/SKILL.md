@@ -1,6 +1,6 @@
 ---
 name: review-technical-solution
-description: Use when reviewing a technical solution against requirement details, architecture principles, and existing project code, especially when missing context, unverified assumptions, implementation-fit risks, or code-reality mismatches could invalidate the proposal.
+description: 在评审技术方案与需求详情、架构原则及现有项目代码时使用，特别是当缺失上下文、未经验证的假设、实现适配风险或代码与实际情况不匹配可能导致提案无效时。
 ---
 
 # 技术方案评审
