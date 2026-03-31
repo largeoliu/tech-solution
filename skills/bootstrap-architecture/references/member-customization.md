@@ -27,5 +27,4 @@
 
 1. 编辑他们在 `.architecture/members.yml` 中的条目
 
-   <br />
 

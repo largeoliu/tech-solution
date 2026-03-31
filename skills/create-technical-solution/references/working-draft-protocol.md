@@ -13,9 +13,7 @@
 
 下列 `WD-*` 区块只定义稳定区块身份、working draft 落位与最小索引字段。
 
-每个区块的完整正文仍必须遵循 `references/solution-process.md` 中对应阶段的 canonical schema。
-
-这些字段只是帮助定位、引用与回退的最小索引字段，不构成第二套更弱的替代 schema。
+每个区块的完整正文与必填字段以 `skills/create-technical-solution/SKILL.md` 为准；本文件只补充落位和生命周期提醒。
 
 ## WD-CTX 共享上下文清单
 
@@ -60,6 +58,7 @@
 - 每个阶段必须按顺序串行执行：写入当前阶段的 WD 区块并展示摘要后，才能开始下一阶段的工作。不允许跳过某个阶段的写入和展示而直接进入后续阶段。
 - 下游阶段只能消费 working draft 中已存在的稳定区块；未写入则视为不存在。
 - working draft 不保存 scratchpad、原始推理链路或聊天记录。
+- `WD-IMPACT-[n]` 只在发生阶段回退、重算或重进时追加。
 
 ## 4. 生命周期
 
