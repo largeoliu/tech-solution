@@ -2,21 +2,27 @@
 
 ## 输入
 - 步骤 1 的项目上下文（状态文件 checkpoints.step-1）
-- references/member-customization.md
 - templates/members-template.yml
 
 ## 操作
-1. 遍历模板中每个成员角色
-2. 检查步骤 1 上下文中是否存在相关依据
-3. 有依据则生成并引用上下文编号；无依据则跳过
-4. 每位成员生成时必须标注"依据"字段引用步骤 1 上下文编号
-5. 记录汇总：模板 N 个角色中 M 个有依据生成/X 个跳过
+
+### 生成流程
+1. 从模板 `templates/members-template.yml` 中识别项目需要的成员
+2. 遍历模板中每个成员角色
+3. 检查步骤 1 上下文中是否存在相关依据
+4. 有依据则生成并引用上下文编号；无依据则跳过
+5. 每位成员生成时必须标注"依据"字段引用步骤 1 上下文编号
+6. 记录汇总：模板 N 个角色中 M 个有依据生成/X 个跳过
+
+### 输出边界约束
+- members.yml 只包含模板定义的字段：id, name, title, specialties, disciplines, skillsets, domains, perspective, 依据
+- 不包含 sources 等模板之外的字段
 
 ## 完成标准
 - .architecture/members.yml 存在
 - 成员集合涵盖当前项目关键专家角色
 - 每位成员都有依据引用
-- 来源汇总已记录
+- 来源汇总已记录（模板 N 个角色中 M 个有依据生成/X 个跳过）
 - 验证所有在项目上下文中有依据的专家角色都已存在于 members.yml
 - 如有遗漏，输出具体遗漏的专家角色及其依据编号
 - 验证结果记录到状态文件 checkpoints.step-2

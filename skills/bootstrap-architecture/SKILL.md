@@ -72,3 +72,9 @@ Tech Solution 设置完成
 - 编写技术方案文档（使用 create-technical-solution）
 - 定制技术方案模板（使用 manage-technical-solution-template）
 ```
+
+## 完成后清理
+
+Skill 执行完成（step_status: completed）后，删除 `state/current.yaml`。
+
+阻塞状态（blocked: true）时保留状态文件，以便恢复执行。
