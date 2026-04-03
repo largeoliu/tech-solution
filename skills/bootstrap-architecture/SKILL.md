@@ -75,6 +75,6 @@ Tech Solution 设置完成
 
 ## 完成后清理
 
-Skill 执行完成（step_status: completed）后，删除 `state/current.yaml`。
+Skill 执行完成（step_status: completed）后，删除整个 `state` 目录。
 
-阻塞状态（blocked: true）时保留状态文件，以便恢复执行。
+阻塞状态（blocked: true）时保留 state 目录，以便恢复执行。
