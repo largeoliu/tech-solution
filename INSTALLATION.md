@@ -47,7 +47,17 @@ Stage 2 必须将仓库 `skills/` 目录下当前存在的全部一级 skill 目
 ```bash
 mkdir -p "$TARGET"
 git clone https://github.com/largeoliu/tech-solution.git ./tech-solution-tmp
-cp -r ./tech-solution-tmp/skills/* "$TARGET"/
+
+for skill_dir in ./tech-solution-tmp/skills/*; do
+  [ -d "$skill_dir" ] || continue
+  skill_name="$(basename "$skill_dir")"
+  if [ -d "$TARGET/$skill_name" ]; then
+    echo "跳过已存在的 skill: $skill_name"
+  else
+    cp -r "$skill_dir" "$TARGET/"
+    echo "已安装 skill: $skill_name"
+  fi
+done
 
 for skill_dir in ./tech-solution-tmp/skills/*; do
   [ -d "$skill_dir" ] || continue
