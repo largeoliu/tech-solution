@@ -1,14 +1,14 @@
 # 步骤 3：定制架构原则
 
 ## 输入
-- 步骤 1 的项目上下文（状态文件 checkpoints.step-1）
+- 步骤 1 的项目上下文与 `project_signals`（状态文件 checkpoints.step-1）
 - templates/principles-template.md
 
 ## 操作
 
 ### 生成流程
 1. 从模板 `templates/principles-template.md` 定制生成 `.architecture/principles.md`
-2. 按七个主章节填写项目事实、边界、底线和当前现实
+2. 按七个主章节填写项目事实、边界、底线和当前现实，必要时引用步骤 1 的 `project_signals`
 3. 遍历模板七个章节，有依据则生成，无依据则跳过
 4. 记录汇总：模板 7 个章节中 M 个有依据生成/X 个跳过
 
@@ -41,7 +41,7 @@
 - 写入 .architecture/principles.md
 
 ## 门控
-项目上下文不足以进行原则定制时返回 STOP_AND_ASK；步骤 3 必须在步骤 4 之前完成
+项目上下文或 `project_signals` 不足以进行原则定制时返回 STOP_AND_ASK；步骤 3 必须在步骤 4 之前完成
 
 ## 回退信号
 项目上下文变化导致原则需要调整

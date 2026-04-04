@@ -1,22 +1,24 @@
 # 步骤 2：定制架构团队
 
 ## 输入
-- 步骤 1 的项目上下文（状态文件 checkpoints.step-1）
+- 步骤 1 的项目上下文与 `project_signals`（状态文件 checkpoints.step-1）
 - templates/members-template.yml
 
 ## 操作
 
 ### 生成流程
-1. 从模板 `templates/members-template.yml` 中识别项目需要的成员
-2. 遍历模板中每个成员角色
-3. 检查步骤 1 上下文中是否存在相关依据
-4. 有依据则生成；无依据则跳过
-5. 检查步骤 1 上下文中是否存在模板未覆盖的项目特有专家需求
-6. 如有，新增这些专家角色，填写完整字段
-7. 将成员 ID 与依据编号的映射记录到状态文件 checkpoints.step-2
-8. 记录汇总：模板 N 个角色中 M 个有依据生成/X 个跳过，新增 Y 个项目特有专家
+1. 读取 `templates/members-template.yml` 中的模板角色，以及步骤 1 输出的 `project_signals`
+2. 先遍历模板中每个成员角色，判断它是否覆盖一个或多个 `project_signals`
+3. 能覆盖则生成该模板角色；不能覆盖则跳过并记录原因
+4. 完成模板遍历后，检查仍未覆盖的 `project_signals`
+5. 将语义相近、可由同一专家承担的未覆盖 signals 合并，尽量用最少的新增角色完成覆盖，同时满足核心团队 5-7 名专家的规模控制
+6. 为每组未覆盖 signals 新增项目特有专家角色，填写完整成员字段；允许一个新增角色覆盖多个 signals
+7. 将最终成员集合写入 `.architecture/members.yml`，严格遵循模板字段边界
+8. 将 `expert_coverage` 记录到状态文件 `checkpoints.step-2`，至少包含 `template_roles`、`custom_roles`、`signal_coverage`；每个角色条目记录其覆盖的 signals 和依据
+9. 记录汇总：模板 N 个角色中 M 个生成/X 个跳过，新增 Y 个项目特有专家，覆盖 K 个 `project_signals`
 
 ### 核心原则
+- 信号驱动：成员选择必须显式响应步骤 1 的 `project_signals`
 - 技术栈匹配：成员技术能力与项目技术栈保持一致
 - 规模控制：核心团队 5-7 名专家
 - 视角多样：成员具备不同专业背景和技术专长
@@ -31,19 +33,21 @@
 - .architecture/members.yml 存在
 - 成员集合涵盖当前项目关键专家角色
 - members.yml 严格遵循模板格式
-- 依据映射已记录到状态文件 checkpoints.step-2
-- 来源汇总已记录（模板 N 个角色中 M 个有依据生成/X 个跳过，新增 Y 个项目特有专家）
-- 验证所有在项目上下文中有依据的专家角色都已存在于 members.yml
-- 如有遗漏，输出具体遗漏的专家角色及其依据编号
+- `expert_coverage` 已记录到状态文件 checkpoints.step-2
+- 来源汇总已记录（模板 N 个角色中 M 个生成/X 个跳过，新增 Y 个项目特有专家，覆盖 K 个 `project_signals`）
+- 已验证 `template_roles` 中 `action=generate` 的角色都存在于 `members.yml`
+- 已验证 `custom_roles` 中列出的角色都存在于 `members.yml`
+- 已验证所有 `project_signals` 都至少有一个角色覆盖
+- 如有遗漏，输出缺失角色或未覆盖 signal 及其依据编号
 - 验证结果记录到状态文件 checkpoints.step-2
 
 ## 输出
 - 更新状态文件 checkpoints.step-2
 - 写入 .architecture/members.yml
-- 验证结果摘要（包含已验证角色数、遗漏角色列表）
+- 验证结果摘要（包含已覆盖 signal 数、未覆盖 signal 列表、生成/跳过/新增角色统计，以及 signal 到角色的覆盖关系）
 
 ## 门控
-项目上下文不足以进行成员定制时返回 STOP_AND_ASK；步骤 2 必须在步骤 3 之前完成
+项目上下文或 `project_signals` 不足以进行成员定制时返回 STOP_AND_ASK；步骤 2 必须在步骤 3 之前完成
 
 ## 回退信号
 项目上下文变化导致成员角色需要调整

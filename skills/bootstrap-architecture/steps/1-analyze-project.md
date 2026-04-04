@@ -7,19 +7,24 @@
 1. 识别项目的语言/框架/测试CI/部署方式/目录结构
 2. 形成项目上下文清单（带上下文编号）
 3. 每项结论标注来源类型（代码结构/目录语义/现有文档）和具体依据
-4. 标注哪些成员角色和原则章节有依据/无依据
+4. 基于项目上下文提取结构化 `project_signals`，只表达会影响后续成员或原则定制的项目事实和关键信号，不提前下成员角色结论
+5. `project_signals` 仅使用固定类别：`platform`（如 `web` / `mobile` / `backend` / `cli`）、`capability`（如 `frontend` / `data` / `ai` / `infra` / `security` / `performance` / `compliance`）、`constraint`（如 `real_time` / `high_scale` / `complex_integration`）
+6. 每条 signal 必须包含 signal 编号、类别、取值、依据编号；必要时补充简短说明，解释该 signal 为什么会影响后续成员或原则定制
+7. 标注哪些原则章节有依据/无依据
 
 ## 完成标准
 - 项目上下文清单完整
 - 每项结论都有来源类型和具体依据
-- 覆盖检查完成（标注有依据和无依据的角色/章节）
+- `project_signals` 已形成且每条 signal 都有依据
+- `project_signals` 只包含会影响后续成员或原则定制的项目事实和关键信号，不包含成员角色或专家建议
+- 原则章节覆盖检查完成（标注有依据和无依据的章节）
 
 ## 输出
 - 更新状态文件 checkpoints.step-1
-- 上下文清单写入状态文件
+- 将 `context_items` 和 `project_signals` 写入状态文件
 
 ## 门控
-仓库上下文不足以安全确定成员或原则时返回 STOP_AND_ASK
+仓库上下文不足以安全确定项目事实、关键信号或原则时返回 STOP_AND_ASK
 
 ## 回退信号
 项目基础上下文发生重大变化（框架迁移/目录重构等）

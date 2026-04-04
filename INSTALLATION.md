@@ -82,5 +82,6 @@ rm -rf ./tech-solution-tmp
 
 完成标准：
 
-- 生成 `.architecture/members.yml`、`.architecture/principles.md`
+- 生成 `.architecture/members.yml`，且成员集合反映当前项目所需的关键专家覆盖；当默认模板不足时，结果中包含新增的项目特有专家
+- 生成 `.architecture/principles.md`
 - 生成 `.architecture/templates/technical-solution-template.md`，在初始化结束前确认该文件最终保留默认模板还是被用户提供的完整 Markdown 整体替换
