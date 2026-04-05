@@ -9,3 +9,16 @@ blocked: false
 block_reason: null
 checkpoints: {}
 active_references: []
+flow_tier: full
+required_artifacts: []
+produced_artifacts: []
+selected_members: []
+template_slots: []
+blocked_slots: []
+can_enter_step_8: false
+can_enter_step_9: false
+can_enter_step_10: false
+can_enter_step_11: false
+can_enter_step_12: false
+absorption_check_passed: false
+cleanup_allowed: false
