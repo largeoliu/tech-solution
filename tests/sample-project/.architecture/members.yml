@@ -1,0 +1,17 @@
+members:
+  - slug: architect
+    name: 系统架构师
+    role: system-architect
+    skills: [api-design, database, deployment]
+  - slug: backend-dev
+    name: 后端工程师
+    role: backend-developer
+    skills: [api, microservices]
+  - slug: frontend-dev
+    name: 前端工程师
+    role: frontend-developer
+    skills: [ui, frontend]
+  - slug: security-expert
+    name: 安全专家
+    role: security-specialist
+    skills: [auth, encryption, audit]

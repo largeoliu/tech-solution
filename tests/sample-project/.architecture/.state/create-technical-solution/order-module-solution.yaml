@@ -1,0 +1,21 @@
+slug: order-module-solution-v2
+version: 1
+flow_tier: full
+current_step: 1
+completed_steps: []
+required_artifacts: [WD-CTX, WD-TASK, WD-EXP, WD-SYN]
+produced_artifacts: []
+selected_members: []
+blocked: false
+block_reason: "检测到同名 slug (order-module-solution) 状态文件已存在，终止当前流程并以新 slug 重启"
+can_enter_step_8: false
+can_enter_step_9: false
+can_enter_step_10: false
+can_enter_step_11: false
+can_enter_step_12: false
+absorption_check_passed: false
+cleanup_allowed: false
+checkpoints:
+  step-1: "检测到 slug 冲突: order-module-solution 已存在, 终止并重启新 slug: order-module-solution-v2"
+created_at: "2026-04-06T17:15:00"
+updated_at: "2026-04-06T17:15:00"

@@ -1,0 +1,22 @@
+slug: order-system-design
+version: 1
+flow_tier: ""
+current_step: 2
+completed_steps: [1]
+required_artifacts: []
+produced_artifacts: []
+selected_members: []
+blocked: true
+block_reason: "前置文件缺失: principles.md"
+can_enter_step_8: false
+can_enter_step_9: false
+can_enter_step_10: false
+can_enter_step_11: false
+can_enter_step_12: false
+absorption_check_passed: false
+cleanup_allowed: false
+checkpoints:
+  step-1: "主题: 设计订单系统架构方案, slug: order-system-design"
+  step-2: "阻塞: principles.md 缺失, 无法继续"
+created_at: "2026-04-06T17:10:00"
+updated_at: "2026-04-06T17:10:00"

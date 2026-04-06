@@ -1,0 +1,21 @@
+slug: improve-ux
+version: 1
+flow_tier: ""
+current_step: 1
+completed_steps: []
+required_artifacts: []
+produced_artifacts: []
+selected_members: []
+blocked: true
+block_reason: "主题过于模糊，需澄清: 1) 改善哪些具体模块的体验? 2) 现有问题是什么? 3) 目标指标是什么?"
+can_enter_step_8: false
+can_enter_step_9: false
+can_enter_step_10: false
+can_enter_step_11: false
+can_enter_step_12: false
+absorption_check_passed: false
+cleanup_allowed: false
+checkpoints:
+  step-1: "阻塞: 主题'改善用户体验'过于模糊，需澄清具体模块、现有问题、目标指标"
+created_at: "2026-04-06T17:05:00"
+updated_at: "2026-04-06T17:05:00"

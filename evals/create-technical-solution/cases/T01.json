@@ -1,0 +1,308 @@
+[
+  {
+    "skills": ["create-technical-solution"],
+    "query": "为电商平台新增微信和支付宝双通道支付模块，需要支持退款、对账、异步回调，不影响现有订单流程",
+    "files": [
+      ".architecture/members.yml",
+      ".architecture/principles.md",
+      ".architecture/templates/technical-solution-template.md"
+    ],
+    "expected_behavior": [
+      "状态文件初始化，slug 为 ASCII kebab-case",
+      "步骤 2 确认三前置文件存在",
+      "步骤 3 提取模板一级章节并编号 SLOT-01, SLOT-02, ...",
+      "步骤 4 判定 flow_tier = full，required_artifacts 含 WD-CTX, WD-TASK, WD-EXP, WD-SYN",
+      "步骤 5 selected_members 全部来自 .architecture/members.yml 实际条目",
+      "步骤 6 检测 repowiki（存在或不存在均报告）",
+      "步骤 7 WD-CTX 写入 working draft，每条来源可追溯至少 2 个文件",
+      "步骤 8 运行 validate-state.py 门禁通过，WD-TASK 写入，必答问题具体",
+      "步骤 9 每位专家仅对参与槽位写 WD-EXP-*，新建结论含不可复用/不可改造证据",
+      "步骤 10 按槽位增量写入 WD-SYN，三路径比较完整",
+      "步骤 11 最终文档一级章节与模板完全一致",
+      "步骤 12 absorption_check_passed 为 true 后才清理中间产物"
+    ],
+    "tags": ["train", "full", "步骤覆盖"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "在用户模块加一个邮箱字段用来发通知",
+    "files": [
+      ".architecture/members.yml",
+      ".architecture/principles.md",
+      ".architecture/templates/technical-solution-template.md"
+    ],
+    "expected_behavior": [
+      "flow_tier 判定为 light",
+      "required_artifacts 仅含 WD-CTX, WD-SYN-LIGHT",
+      "不生成 WD-TASK 和 WD-EXP-*",
+      "生成 WD-CTX 和 WD-SYN-LIGHT",
+      "步骤 8/9 显式跳过并记录原因",
+      "最终文档写入 .architecture/technical-solutions/[slug].md"
+    ],
+    "tags": ["train", "light", "步骤覆盖"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "将现有 Session 鉴权迁移到 JWT，需要保持现有登录接口兼容，用户无需重新登录",
+    "files": [
+      ".architecture/members.yml",
+      ".architecture/principles.md",
+      ".architecture/templates/technical-solution-template.md"
+    ],
+    "expected_behavior": [
+      "flow_tier 判定为 moderate",
+      "required_artifacts 含 WD-CTX, WD-TASK, WD-SYN，不含 WD-EXP",
+      "生成 WD-TASK 和 WD-SYN（非 WD-SYN-LIGHT）",
+      "不执行步骤 9，不生成 WD-EXP-*",
+      "WD-SYN 候选方案对比覆盖复用/改造/新建三路径",
+      "若已有同名文件，输出带时间戳后缀而非直接覆盖"
+    ],
+    "tags": ["train", "moderate", "步骤覆盖"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "实现多租户数据隔离方案，采用行级租户标识方案，需要隔离用户数据，现有 API 需要增加租户过滤",
+    "files": [
+      ".architecture/members.yml",
+      ".architecture/principles.md",
+      ".architecture/templates/technical-solution-template.md",
+      "repowiki/"
+    ],
+    "expected_behavior": [
+      "flow_tier 判定为 full",
+      "步骤 6 检测并记录 repowiki 路径，后续分析引用其中内容",
+      "专家分析的关键结论仍绑定 CTX 编号，repowiki 仅作补充",
+      "每个需要专家判断的槽位均有对应的 WD-EXP-* 区块",
+      "每位专家仅对参与槽位写判断，参与槽位字段非全部",
+      "WD-SYN 按槽位逐个写入，checkpoint 展示逐槽位收敛过程",
+      "若结论无法在现有模板承载，记录模板承载缺口并阻塞",
+      "最终文档一级章节与模板完全一致"
+    ],
+    "tags": ["train", "full", "repowiki", "步骤覆盖"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "在现有 API 层前面加一层 Redis 缓存，优化读取性能，缓存需要设置合理的过期策略",
+    "files": [
+      ".architecture/members.yml",
+      ".architecture/principles.md",
+      ".architecture/templates/technical-solution-template.md"
+    ],
+    "expected_behavior": [
+      "flow_tier 判定为 moderate",
+      "repowiki 不存在时步骤 6 报告未找到并跳过",
+      "生成 WD-CTX, WD-TASK, WD-SYN，不生成 WD-EXP",
+      "required_artifacts 与 tier 匹配"
+    ],
+    "tags": ["validation", "moderate", "步骤覆盖"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "将单体通知服务拆分为消息网关和推送服务两个独立服务，消息网关负责消息路由和队列，推送服务负责实际发送",
+    "files": [
+      ".architecture/members.yml",
+      ".architecture/principles.md",
+      ".architecture/templates/technical-solution-template.md"
+    ],
+    "expected_behavior": [
+      "flow_tier 判定为 full",
+      "拆分方案中选定路径附带职责边界证据和兼容性证据",
+      "决策类型为新建的条目同时回答不可复用和不可改造",
+      "completed_steps 无跳号为 1 到 12"
+    ],
+    "tags": ["validation", "full", "拆分", "步骤覆盖"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "为现有日志模块添加错误告警功能，支持邮件和 Webhook 通知",
+    "files": [
+      ".architecture/members.yml",
+      ".architecture/principles.md",
+      ".architecture/templates/technical-solution-template.md"
+    ],
+    "notes": "members.yml 仅含 1 名成员",
+    "expected_behavior": [
+      "流程不因成员少而阻塞，selected_members 仅含此人",
+      "若 flow_tier 为 full，仍有 WD-EXP 区块"
+    ],
+    "tags": ["train", "边缘"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "改善用户体验",
+    "files": [
+      ".architecture/members.yml",
+      ".architecture/principles.md"
+    ],
+    "expected_behavior": [
+      "步骤 1 阻塞，blocked=true，block_reason 说明具体模糊项",
+      "输出列出需要用户澄清的具体问题，而非直接猜测继续"
+    ],
+    "tags": ["train", "边缘"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "设计一个新的订单系统架构方案",
+    "files": [
+      ".architecture/members.yml",
+      ".architecture/templates/technical-solution-template.md"
+    ],
+    "notes": "principles.md 缺失",
+    "expected_behavior": [
+      "步骤 2 检测到 principles.md 缺失",
+      "输出缺失文件清单",
+      "引导使用 bootstrap-architecture 技能初始化"
+    ],
+    "tags": ["train", "边缘"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "为订单模块创建技术方案",
+    "files": [
+      ".architecture/members.yml",
+      ".architecture/principles.md",
+      ".architecture/templates/technical-solution-template.md"
+    ],
+    "notes": "已存在同 slug 的状态文件 .architecture/.state/create-technical-solution/order-module.yaml",
+    "expected_behavior": [
+      "检测到同 slug 状态文件已存在",
+      "终止当前流程并以新 slug 重启",
+      "不并行保留多份草稿"
+    ],
+    "tags": ["validation", "边缘"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "修改用户模块和订单模块的日志格式，统一使用 JSON 格式输出",
+    "files": [
+      ".architecture/members.yml",
+      ".architecture/principles.md",
+      ".architecture/templates/technical-solution-template.md"
+    ],
+    "expected_behavior": [
+      "flow_tier 判定为 moderate（涉及两模块但无新建核心能力）",
+      "不判定为 full"
+    ],
+    "tags": ["validation", "边缘"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "新建一个实时通讯模块，基于 WebSocket 实现",
+    "files": [
+      ".architecture/members.yml",
+      ".architecture/principles.md",
+      ".architecture/templates/technical-solution-template.md"
+    ],
+    "notes": "模拟步骤 9 某位专家 WD-EXP 缺少必填字段",
+    "expected_behavior": [
+      "validate-state.py 检测到缺失决策类型或关键证据引用时返回 exit code 2",
+      "门禁拒绝进入 step 10，不放行不完整产物"
+    ],
+    "tags": ["validation", "边缘"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "帮我补写一份技术方案，之前只有口头约定没落文档",
+    "files": [
+      ".architecture/members.yml",
+      ".architecture/principles.md",
+      ".architecture/templates/technical-solution-template.md"
+    ],
+    "expected_behavior": [
+      "Skill 被加载并产出技术方案文档",
+      "同样经过完整流程，不跳步或简化"
+    ],
+    "tags": ["train", "描述边界", "正向触发"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "把已有的技术方案更新一下，加入新的安全合规要求",
+    "files": [
+      ".architecture/members.yml",
+      ".architecture/principles.md",
+      ".architecture/templates/technical-solution-template.md",
+      ".architecture/technical-solutions/"
+    ],
+    "expected_behavior": [
+      "Skill 被加载并产出更新后的方案文档",
+      "输出带时间戳后缀而非悄无声息覆盖原文件"
+    ],
+    "tags": ["train", "描述边界", "正向触发"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "总结一下我们现在的技术架构",
+    "expected_behavior": [
+      "不触发 create-technical-solution 技能",
+      "不创建 .architecture/.state/ 下任何文件",
+      "不生成 .architecture/technical-solutions/ 下任何文件"
+    ],
+    "tags": ["validation", "描述边界", "负向"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "帮我规划一下这个功能的任务分解",
+    "expected_behavior": [
+      "不触发 create-technical-solution 技能",
+      "不生成 working draft 或状态文件",
+      "不走 12 步流程"
+    ],
+    "tags": ["validation", "描述边界", "负向"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "帮我分析一下这个 CSV 文件的销售数据趋势",
+    "files": ["data/sales.csv"],
+    "expected_behavior": [
+      "不触发 create-technical-solution 技能",
+      "不创建 .architecture/.state/ 下的任何文件",
+      "不生成 working draft 或技术方案文档"
+    ],
+    "tags": ["train", "负向"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "用 Python 写一个脚本批量处理日志文件",
+    "expected_behavior": [
+      "不触发 create-technical-solution 技能",
+      "不生成 .architecture/ 产物"
+    ],
+    "tags": ["train", "负向"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "帮我画一下现有系统的架构图",
+    "expected_behavior": [
+      "不触发 create-technical-solution 技能",
+      "不生成 .architecture/technical-solutions/ 中的文件"
+    ],
+    "tags": ["train", "负向"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "帮我把这个接口从 REST 改成 gRPC",
+    "expected_behavior": [
+      "不触发 create-technical-solution 技能",
+      "不创建状态文件或 working draft"
+    ],
+    "tags": ["validation", "负向"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "review 一下这个 PR 的代码质量问题",
+    "expected_behavior": [
+      "不触发 create-technical-solution 技能",
+      "不创建技术架构文档或状态文件"
+    ],
+    "tags": ["validation", "负向"]
+  },
+  {
+    "skills": ["create-technical-solution"],
+    "query": "帮我写一份 API 使用文档",
+    "expected_behavior": [
+      "不触发 create-technical-solution 技能",
+      "不生成 .architecture/technical-solutions/ 方案文档"
+    ],
+    "tags": ["validation", "负向"]
+  }
+]

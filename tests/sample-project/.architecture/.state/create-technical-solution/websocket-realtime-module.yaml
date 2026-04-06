@@ -1,0 +1,32 @@
+slug: websocket-realtime-module
+version: 1
+flow_tier: full
+current_step: 9
+completed_steps: [1,2,3,4,5,6,7,8,9]
+required_artifacts: [WD-CTX, WD-TASK, WD-EXP, WD-SYN]
+produced_artifacts: [WD-CTX, WD-TASK, WD-EXP-architect]
+selected_members: [architect, backend-dev]
+blocked: false
+block_reason: ""
+can_enter_step_8: true
+can_enter_step_9: true
+can_enter_step_10: false
+can_enter_step_11: false
+can_enter_step_12: false
+absorption_check_passed: false
+cleanup_allowed: false
+checkpoints:
+  step-1: "主题: 新建实时通讯模块基于WebSocket, slug: websocket-realtime-module"
+  step-2: "前置文件全部存在: members.yml, principles.md, template"
+  step-3: "模板读取完成, 4 个一级章节"
+  step-4: "flow_tier=full, 新建核心能力模块"
+  step-5: "选定成员: architect, backend-dev"
+  step-6: "repowiki 不存在, 跳过"
+  step-7: "WD-CTX 写入 working draft, 6 条 ctx"
+  step-8: "WD-TASK 写入 working draft, 5 个任务项"
+  step-9: "WD-EXP-architect 写入 (WD-EXP-backend-dev 缺失关键决策类型字段)"
+  step-10: "待修复: WD-EXP-backend-dev 缺少决策类型"
+  step-11: "blocked"
+  step-12: "blocked"
+created_at: "2026-04-06T16:10:00"
+updated_at: "2026-04-06T16:20:00"
