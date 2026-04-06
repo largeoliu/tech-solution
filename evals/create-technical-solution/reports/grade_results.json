@@ -1,13 +1,160 @@
 {
-  "graded_at": "2026-04-06T15:35:00",
-  "cases_checked": 6,
+  "graded_at": "2026-04-06T17:30:23.683271",
+  "cases_checked": 22,
   "validate_state_results": {
-    "order-payment": {"passed": true, "message": "状态文件门禁全部通过"},
-    "user-email-field": {"passed": true, "message": "状态文件门禁全部通过"},
-    "session-to-jwt-auth": {"passed": true, "message": "状态文件门禁全部通过"},
-    "multi-tenant-isolation": {"passed": true, "message": "状态文件门禁全部通过"},
-    "redis-cache-layer": {"passed": true, "message": "状态文件门禁全部通过"},
-    "notification-service-split": {"passed": true, "message": "状态文件门禁全部通过"}
+    "validate_state": {
+      "passed": false,
+      "issues": [
+        {
+          "code": "gate_flag_false",
+          "message": "步骤 12: can_enter_step_12 为 false",
+          "step": 12,
+          "flow_tier": "full",
+          "field": "can_enter_step_12",
+          "missing_artifacts": [],
+          "recommended_rollback_step": 11,
+          "recommended_repair_step": 11,
+          "skip_instead_of_retry": false,
+          "repair_guidance": "检查前一步是否已完成，并正确更新状态文件中的 can_enter_step_12 字段。"
+        },
+        {
+          "code": "absorption_incomplete",
+          "message": "步骤 12: absorption_check_passed 为 false",
+          "step": 12,
+          "flow_tier": "full",
+          "field": "absorption_check_passed",
+          "missing_artifacts": [],
+          "recommended_rollback_step": 12,
+          "recommended_repair_step": 12,
+          "skip_instead_of_retry": false,
+          "repair_guidance": "先完成吸收检查并修正未闭合项，再重试步骤 12。"
+        }
+      ],
+      "repair_plan": [
+        {
+          "step": 11,
+          "action_types": [
+            "update_state",
+            "rerun_validation"
+          ],
+          "depends_on_steps": [],
+          "generate_artifacts": [],
+          "fix_fields": [
+            "can_enter_step_12"
+          ],
+          "state_patch_hint": [
+            {
+              "field": "can_enter_step_12",
+              "operation": "set",
+              "value": true,
+              "summary": "将 can_enter_step_12 置为 true"
+            }
+          ],
+          "artifact_write_hint": [],
+          "working_draft_context_hint": [],
+          "issues": [
+            "gate_flag_false"
+          ],
+          "guidance": [
+            "检查前一步是否已完成，并正确更新状态文件中的 can_enter_step_12 字段。"
+          ],
+          "completion_checks": [
+            {
+              "type": "field_equals",
+              "field": "can_enter_step_12",
+              "expected": true,
+              "summary": "can_enter_step_12 已为 true"
+            }
+          ],
+          "retry_command": {
+            "command": "python scripts/validate-state.py",
+            "args": [
+              "--state",
+              "<状态文件路径>",
+              "--step",
+              "12",
+              "--flow-tier",
+              "full",
+              "--format",
+              "json"
+            ],
+            "format": "json",
+            "target_step": 12,
+            "flow_tier": "full",
+            "display": "python scripts/validate-state.py --state <状态文件路径> --step 12 --flow-tier full --format json"
+          },
+          "retry_validation": true
+        },
+        {
+          "step": 12,
+          "action_types": [
+            "update_state",
+            "rerun_validation"
+          ],
+          "depends_on_steps": [
+            11
+          ],
+          "generate_artifacts": [],
+          "fix_fields": [
+            "absorption_check_passed"
+          ],
+          "state_patch_hint": [
+            {
+              "field": "absorption_check_passed",
+              "operation": "set",
+              "value": true,
+              "summary": "吸收检查通过后置为 true"
+            },
+            {
+              "field": "cleanup_allowed",
+              "operation": "set",
+              "value": true,
+              "summary": "允许清理时置为 true"
+            }
+          ],
+          "artifact_write_hint": [],
+          "working_draft_context_hint": [],
+          "issues": [
+            "absorption_incomplete"
+          ],
+          "guidance": [
+            "先完成吸收检查并修正未闭合项，再重试步骤 12。"
+          ],
+          "completion_checks": [
+            {
+              "type": "field_equals",
+              "field": "absorption_check_passed",
+              "expected": true,
+              "summary": "absorption_check_passed 已为 true"
+            },
+            {
+              "type": "field_equals",
+              "field": "cleanup_allowed",
+              "expected": true,
+              "summary": "cleanup_allowed 已为 true"
+            }
+          ],
+          "retry_command": {
+            "command": "python scripts/validate-state.py",
+            "args": [
+              "--state",
+              "<状态文件路径>",
+              "--step",
+              "12",
+              "--flow-tier",
+              "full",
+              "--format",
+              "json"
+            ],
+            "format": "json",
+            "target_step": 12,
+            "flow_tier": "full",
+            "display": "python scripts/validate-state.py --state <状态文件路径> --step 12 --flow-tier full --format json"
+          },
+          "retry_validation": true
+        }
+      ]
+    }
   },
-  "grading_note": "validate-state.py 门禁全部通过。完整评估需要 Claude Code 实际运行 skill。"
+  "grading_note": "请在 Claude 运行 skill 后提供输出内容以自动评估。当前仅检查了状态文件（如果提供）。"
 }

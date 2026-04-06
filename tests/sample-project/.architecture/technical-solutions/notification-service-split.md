@@ -4,13 +4,17 @@
 
 将单体通知服务拆分为消息网关和推送服务两个独立服务。消息网关负责消息路由和队列管理，推送服务负责实际发送（短信、邮件、App推送）。拆分后两个服务独立部署、独立扩展，通过消息队列解耦。
 
-## 架构设计
+## 服务拆分方案
 
-### 拆分方案选择：按职责分离
-**结论：拆分为消息网关 + 推送服务，理由如下：**
-- 消息网关聚焦路由、队列、重试逻辑，计算密集度低
-- 推送服务聚焦通道适配（短信/邮件/推送），IO密集度高
-- 两者扩展策略不同，拆分后可独立扩缩容
+### 拆分策略选择
+
+**结论：采用职责分离拆分方案，拆分为消息网关 + 推送服务**
+
+| 方案 | 可行性 | 理由 |
+|------|--------|------|
+| 职责分离（推荐） | 可行 | 消息网关聚焦路由和队列，推送服务聚焦通道发送，职责单一清晰 |
+| 通道分离 | 不可行 | 按短信/邮件/推送通道拆分会导致推送服务过于碎片化 |
+| 保留单体 | 不推荐 | 无法独立扩展，路由和发送耦合维护成本高 |
 
 **不可复用原因：**
 - 现有服务耦合路由和推送逻辑，无法通过改造实现解耦
@@ -20,16 +24,87 @@
 - 改造风险高，影响现有通知链路稳定性
 - 拆分后架构更清晰，长期维护成本更低
 
-### 新服务职责边界
-| 服务 | 职责 | 技术栈 |
-|------|------|--------|
-| 消息网关 | 消息接入、路由、队列、死信处理 | Kafka, Gateway |
-| 推送服务 | 通道适配、发送、重试、模板管理 | RabbitMQ, SMTP, SMS SDK |
-
 ### 兼容性设计
+
 - 消息网关提供与现有通知服务相同的 API 接口
 - 存量业务代码无需修改，仅变更服务发现地址
 - 双写期间两个服务同时运行，逐步切流
+
+## 职责边界
+
+### 服务职责定义
+
+| 服务 | 职责范围 | 核心能力 |
+|------|----------|----------|
+| 消息网关 | 消息接入、路由、队列、死信处理 | Kafka 消息持久化、优先级队列、死信队列管理 |
+| 推送服务 | 通道适配、发送、重试、模板管理 | 短信通道（阿里云）、邮件通道（SMTP）、App推送（极光/华为） |
+
+### 接口边界
+
+**消息网关 API（对外接口）：**
+- `POST /api/v1/notifications/send` - 发送通知请求
+- `GET /api/v1/notifications/{id}/status` - 查询发送状态
+- `POST /api/v1/notifications/batch` - 批量发送
+
+**消息网关 -> 推送服务（内部接口）：**
+- 通过 Kafka Topic `notification.push.sms` 传输短信任务
+- 通过 Kafka Topic `notification.push.email` 传输邮件任务
+- 通过 Kafka Topic `notification.push.app` 传输App推送任务
+
+### 部署边界
+
+| 服务 | 部署规格 | 扩展策略 |
+|------|----------|----------|
+| 消息网关 | 2核4G * 2副本 | CPU密集型，独立扩缩容 |
+| 推送服务 | 4核8G * 3副本 | IO密集型，根据发送量弹性扩展 |
+
+## 数据模型
+
+### 消息网关数据模型
+
+```
+Topic: notification.inbox
+├── notification_id      (string, 主键)
+├── source_service        (string, 来源服务)
+├── target_user          (string, 目标用户)
+├── channel              (enum: sms/email/app/push)
+├── priority             (enum: high/normal/low)
+├── payload              (json, 消息内容)
+├── scheduled_at         (timestamp, 计划发送时间)
+├── created_at           (timestamp, 创建时间)
+└── status               (enum: pending/routed/failed)
+
+Topic: notification.dlq (死信队列)
+├── notification_id
+├── original_topic
+├── error_reason
+├── retry_count
+└── failed_at
+```
+
+### 推送服务数据模型
+
+```
+Table: push_task
+├── id                    (bigint, 主键)
+├── notification_id      (string, 关联消息网关)
+├── channel               (enum: sms/email/app)
+├── recipient             (string, 手机号/邮箱/device_token)
+├── template_id           (string, 模板标识)
+├── template_params       (json, 模板参数)
+├── status                (enum: pending/sending/success/failed)
+├── retry_count           (int, 重试次数)
+├── sent_at               (timestamp, 发送时间)
+└── created_at            (timestamp, 创建时间)
+
+Table: push_template
+├── id                    (bigint, 主键)
+├── template_code         (string, 模板编码)
+├── channel               (enum: sms/email/app)
+├── content_template      (text, 内容模板)
+├── variables             (json, 变量定义)
+└── status                (enum: active/inactive)
+```
 
 ## 实现方案
 
@@ -55,6 +130,7 @@
 5. 下线存量通知服务
 
 ### 任务分解
+
 | 任务 | 负责人 | 依赖 |
 |------|--------|------|
 | Kafka 集群搭建 | backend-dev | 运维 |
@@ -65,13 +141,3 @@
 | 邮件通道对接 | backend-dev | SMTP |
 | 推送通道对接 | frontend-dev | 极光/华为 |
 | 监控告警 | backend-dev | 全流程 |
-
-## 风险评估
-
-| 风险项 | 影响 | 缓解措施 |
-|--------|------|----------|
-| 消息丢失 | 极高 | Kafka 持久化 + 消费确认机制 |
-| 重复发送 | 高 | 消费者幂等性设计，消息去重 |
-| 服务拆分后链路变长 | 中 | 全链路监控，消息延迟告警 |
-| 外部通道不可用 | 高 | 多通道备份，降级策略 |
-| 切流风险 | 中 | 双写验证，小流量切流，监控回滚 |
