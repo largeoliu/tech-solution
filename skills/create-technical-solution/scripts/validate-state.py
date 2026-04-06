@@ -81,6 +81,20 @@ def remediation_for_issue(issue: dict) -> str:
         return "先完成吸收检查并修正未闭合项，再重试步骤 12。"
     if code == "completed_steps_invalid":
         return "修正 completed_steps 与 current_step 的一致性后再重试。"
+    if code == "missing_slug":
+        return "先回到步骤 1，生成 ASCII kebab-case slug 并写入状态文件。"
+    if code == "missing_topic_summary":
+        return "先回到步骤 1，明确方案主题并写入 topic_summary。"
+    if code == "prerequisites_not_checked":
+        return "先回到步骤 2，检查 .architecture/members.yml、principles.md、templates/technical-solution-template.md 是否存在，并在 checkpoints.step-2 中标记 prerequisites_checked: true。"
+    if code == "template_not_loaded":
+        return "先回到步骤 3，读取模板文件并在 checkpoints.step-3 中标记 template_loaded: true。"
+    if code == "missing_working_draft_path":
+        return "先回到步骤 3，创建 working draft 文件并记录路径到 working_draft_path。"
+    if code == "missing_solution_type":
+        return "先回到步骤 4，确定方案类型并写入 checkpoints.step-4.solution_type。"
+    if code == "repowiki_not_checked":
+        return "先回到步骤 6，执行 repowiki 检测并在 checkpoints.step-6 中标记 repowiki_checked: true。"
     return "根据错误条目补齐缺失产物或修正状态文件后重试。"
 
 
@@ -153,6 +167,24 @@ def format_issue(issue: dict) -> str:
 
 def expected_artifacts_for_step(step: int, flow_tier: str) -> list[str]:
     mapping = {
+        (1, "light"): [],
+        (1, "moderate"): [],
+        (1, "full"): [],
+        (2, "light"): [],
+        (2, "moderate"): [],
+        (2, "full"): [],
+        (3, "light"): [],
+        (3, "moderate"): [],
+        (3, "full"): [],
+        (4, "light"): [],
+        (4, "moderate"): [],
+        (4, "full"): [],
+        (5, "light"): [],
+        (5, "moderate"): [],
+        (5, "full"): [],
+        (6, "light"): [],
+        (6, "moderate"): [],
+        (6, "full"): [],
         (7, "light"): ["WD-CTX"],
         (7, "moderate"): ["WD-CTX"],
         (7, "full"): ["WD-CTX"],
@@ -196,6 +228,129 @@ class GateValidator:
                     flow_tier=flow_tier,
                     field="completed_steps",
                 )
+
+    def step_1(self, flow_tier: str, errors: list[dict]) -> None:
+        self.common(1, flow_tier, errors)
+        s = self.state
+        require(
+            s.get("slug") and len(str(s.get("slug")).strip()) > 0,
+            errors,
+            code="missing_slug",
+            message="步骤 1: slug 未生成或为空",
+            step=1,
+            flow_tier=flow_tier,
+            field="slug",
+            recommended_rollback_step=1,
+            recommended_repair_step=1,
+        )
+        require(
+            s.get("topic_summary") and len(str(s.get("topic_summary")).strip()) > 0,
+            errors,
+            code="missing_topic_summary",
+            message="步骤 1: 主题摘要缺失或为空",
+            step=1,
+            flow_tier=flow_tier,
+            field="topic_summary",
+            recommended_rollback_step=1,
+            recommended_repair_step=1,
+        )
+
+    def step_2(self, flow_tier: str, errors: list[dict]) -> None:
+        self.common(2, flow_tier, errors)
+        s = self.state
+        require(
+            s.get("checkpoints", {}).get("step-2", {}).get("prerequisites_checked") is True,
+            errors,
+            code="prerequisites_not_checked",
+            message="步骤 2: 前置文件检查未完成",
+            step=2,
+            flow_tier=flow_tier,
+            field="checkpoints.step-2.prerequisites_checked",
+            recommended_rollback_step=2,
+            recommended_repair_step=2,
+        )
+
+    def step_3(self, flow_tier: str, errors: list[dict]) -> None:
+        self.common(3, flow_tier, errors)
+        s = self.state
+        require(
+            s.get("checkpoints", {}).get("step-3", {}).get("template_loaded") is True,
+            errors,
+            code="template_not_loaded",
+            message="步骤 3: 模板未加载",
+            step=3,
+            flow_tier=flow_tier,
+            field="checkpoints.step-3.template_loaded",
+            recommended_rollback_step=3,
+            recommended_repair_step=3,
+        )
+        require(
+            s.get("working_draft_path") and len(str(s.get("working_draft_path")).strip()) > 0,
+            errors,
+            code="missing_working_draft_path",
+            message="步骤 3: working draft 路径未创建",
+            step=3,
+            flow_tier=flow_tier,
+            field="working_draft_path",
+            recommended_rollback_step=3,
+            recommended_repair_step=3,
+        )
+
+    def step_4(self, flow_tier: str, errors: list[dict]) -> None:
+        self.common(4, flow_tier, errors)
+        s = self.state
+        require(
+            s.get("flow_tier") in ("light", "moderate", "full"),
+            errors,
+            code="invalid_flow_tier",
+            message="步骤 4: flow_tier 必须为 light/moderate/full",
+            step=4,
+            flow_tier=flow_tier,
+            field="flow_tier",
+            recommended_rollback_step=4,
+            recommended_repair_step=4,
+        )
+        require(
+            s.get("checkpoints", {}).get("step-4", {}).get("solution_type") and len(str(s.get("checkpoints", {}).get("step-4", {}).get("solution_type")).strip()) > 0,
+            errors,
+            code="missing_solution_type",
+            message="步骤 4: 方案类型未确定",
+            step=4,
+            flow_tier=flow_tier,
+            field="checkpoints.step-4.solution_type",
+            recommended_rollback_step=4,
+            recommended_repair_step=4,
+        )
+
+    def step_5(self, flow_tier: str, errors: list[dict]) -> None:
+        self.common(5, flow_tier, errors)
+        s = self.state
+        require(
+            bool(s.get("selected_members")) and len(s.get("selected_members", [])) > 0,
+            errors,
+            code="missing_selected_members",
+            message="步骤 5: selected_members 为空",
+            step=5,
+            flow_tier=flow_tier,
+            field="selected_members",
+            recommended_rollback_step=5,
+            recommended_repair_step=5,
+        )
+
+    def step_6(self, flow_tier: str, errors: list[dict]) -> None:
+        self.common(6, flow_tier, errors)
+        s = self.state
+        require(
+            s.get("checkpoints", {}).get("step-6", {}).get("repowiki_checked") is True,
+            errors,
+            code="repowiki_not_checked",
+            message="步骤 6: repowiki 检测未完成",
+            step=6,
+            flow_tier=flow_tier,
+            field="checkpoints.step-6.repowiki_checked",
+            recommended_rollback_step=6,
+            recommended_repair_step=6,
+        )
 
     def step_7(self, flow_tier: str, errors: list[dict]) -> None:
         self.common(7, flow_tier, errors)
@@ -557,6 +712,20 @@ def completion_checks_for_issue(issue: dict) -> list[dict]:
             "type": "custom",
             "summary": "completed_steps 无跳号、无越级完成",
         })
+    elif code == "missing_slug":
+        checks.append(check_field_non_empty("slug", "slug 已生成且非空"))
+    elif code == "missing_topic_summary":
+        checks.append(check_field_non_empty("topic_summary", "topic_summary 已写入且非空"))
+    elif code == "prerequisites_not_checked":
+        checks.append(check_field_equals("checkpoints.step-2.prerequisites_checked", True, "checkpoints.step-2.prerequisites_checked 已为 true"))
+    elif code == "template_not_loaded":
+        checks.append(check_field_equals("checkpoints.step-3.template_loaded", True, "checkpoints.step-3.template_loaded 已为 true"))
+    elif code == "missing_working_draft_path":
+        checks.append(check_field_non_empty("working_draft_path", "working_draft_path 已创建且非空"))
+    elif code == "missing_solution_type":
+        checks.append(check_field_non_empty("checkpoints.step-4.solution_type", "checkpoints.step-4.solution_type 已写入且非空"))
+    elif code == "repowiki_not_checked":
+        checks.append(check_field_equals("checkpoints.step-6.repowiki_checked", True, "checkpoints.step-6.repowiki_checked 已为 true"))
 
     if not checks and field:
         checks.append({
@@ -670,6 +839,55 @@ def state_patch_hints_for_issue(issue: dict) -> list[dict]:
                 "value": artifact,
                 "summary": f"将 {artifact} 追加到 produced_artifacts",
             })
+    elif code == "missing_slug":
+        hints.append({
+            "field": "slug",
+            "operation": "set",
+            "value": "<ASCII kebab-case slug>",
+            "summary": "生成并写入 slug",
+        })
+    elif code == "missing_topic_summary":
+        hints.append({
+            "field": "topic_summary",
+            "operation": "set",
+            "value": "<方案主题一句话摘要>",
+            "summary": "写入 topic_summary",
+        })
+    elif code == "prerequisites_not_checked":
+        hints.append({
+            "field": "checkpoints.step-2.prerequisites_checked",
+            "operation": "set",
+            "value": True,
+            "summary": "标记前置文件检查完成",
+        })
+    elif code == "template_not_loaded":
+        hints.append({
+            "field": "checkpoints.step-3.template_loaded",
+            "operation": "set",
+            "value": True,
+            "summary": "标记模板加载完成",
+        })
+    elif code == "missing_working_draft_path":
+        hints.append({
+            "field": "working_draft_path",
+            "operation": "set",
+            "value": "<working draft 文件路径>",
+            "summary": "写入 working draft 路径",
+        })
+    elif code == "missing_solution_type":
+        hints.append({
+            "field": "checkpoints.step-4.solution_type",
+            "operation": "set",
+            "value": "<方案类型>",
+            "summary": "写入方案类型",
+        })
+    elif code == "repowiki_not_checked":
+        hints.append({
+            "field": "checkpoints.step-6.repowiki_checked",
+            "operation": "set",
+            "value": True,
+            "summary": "标记 repowiki 检测完成",
+        })
     elif field:
         hints.append({
             "field": field,
@@ -851,7 +1069,7 @@ def build_state_snapshot(state: dict) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="验证 create-technical-solution 状态文件")
     parser.add_argument("--state", required=True, help="状态文件 YAML 路径")
-    parser.add_argument("--step", type=int, required=True, help="当前步骤号 (7-12)")
+    parser.add_argument("--step", type=int, required=True, help="当前步骤号 (1-12)")
     parser.add_argument("--flow-tier", choices=["light", "moderate", "full"], default="full", help="流程级别")
     parser.add_argument("--format", choices=["text", "json"], default="text", help="输出格式")
     args = parser.parse_args()
@@ -861,6 +1079,12 @@ def main() -> None:
 
     validator = GateValidator(state)
     dispatch = {
+        1: validator.step_1,
+        2: validator.step_2,
+        3: validator.step_3,
+        4: validator.step_4,
+        5: validator.step_5,
+        6: validator.step_6,
         7: validator.step_7,
         8: validator.step_8,
         9: validator.step_9,
@@ -870,7 +1094,7 @@ def main() -> None:
     }
 
     if args.step not in dispatch:
-        print(f"不支持验证步骤 {args.step}。仅支持 7-12 的门控检查。", file=sys.stderr)
+        print(f"不支持验证步骤 {args.step}。仅支持 1-12 的门控检查。", file=sys.stderr)
         sys.exit(1)
 
     dispatch[args.step](args.flow_tier, issues)

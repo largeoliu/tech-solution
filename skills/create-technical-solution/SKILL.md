@@ -49,7 +49,7 @@ compatibility:
 - 参与成员必须来自 `.architecture/members.yml` 的实际条目——虚构角色会导致后续专家分析步骤加载不到真实视角，产出无效。
 - 步骤 9 必须实际加载对应专家的角色和视角，不得模拟 `WD-EXP-*` 产出——跳过专家分析等于跳过多视角验证，方案会遗漏关键风险。
 - 步骤 10 必须保留 `WD-SYN` 收敛区块，不得以最终文档替代——中间产物和最终文档职责不同，缺少 WD-SYN 会导致回退时无法追溯决策依据。
-- 步骤 8/10/11/12 进入前必须运行 `python scripts/validate-state.py` 验证门禁；若未通过，优先消费 `--format json` 返回的 `repair_plan[]`，并按其中 `action_types` 判断修复动作类别、按 `depends_on_steps` 指定的前置关系执行修复、按 `state_patch_hint` 更新状态字段、按 `artifact_write_hint` 落盘缺失产物、按 `working_draft_context_hint` 选择允许消费的上游稳定区块、按结构化 `completion_checks` 确认每项修复已闭合，并优先使用结构化 `retry_command` 重跑校验；其次再参考 `summary.recommended_repair_sequence`、`summary.recommended_rollback_step`、`summary.missing_artifacts` 与 `issues[*].repair_guidance` 后重试，直到通过后继续
+- 步骤 1-12 进入前必须运行 `python scripts/validate-state.py` 验证门禁；若未通过，优先消费 `--format json` 返回的 `repair_plan[]`，并按其中 `action_types` 判断修复动作类别、按 `depends_on_steps` 指定的前置关系执行修复、按 `state_patch_hint` 更新状态字段、按 `artifact_write_hint` 落盘缺失产物、按 `working_draft_context_hint` 选择允许消费的上游稳定区块、按结构化 `completion_checks` 确认每项修复已闭合，并优先使用结构化 `retry_command` 重跑校验；其次再参考 `summary.recommended_repair_sequence`、`summary.recommended_rollback_step`、`summary.missing_artifacts` 与 `issues[*].repair_guidance` 后重试，直到通过后继续
 
 ## 复杂度评估与流程裁剪
 - 步骤 4 必须产出 `flow_tier`，并据此决定本次流程需要的最小中间产物集合

@@ -48,10 +48,10 @@ FULL checkpoint.step-9 摘要示例：
 
 ## 验证脚本
 
-步骤 8/10/11/12 进入前必须调用验证脚本：
+步骤 1-12 进入前必须调用验证脚本：
 
 ```bash
-python scripts/validate-state.py --state <状态文件路径> --step <8|10|11|12> --flow-tier <light|moderate|full>
+python scripts/validate-state.py --state <状态文件路径> --step <1-12> --flow-tier <light|moderate|full>
 ```
 
 退出码：0=通过，2=门控检查失败（详见 stderr 输出与修复建议）。

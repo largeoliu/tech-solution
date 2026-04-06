@@ -5,10 +5,16 @@
 - 状态文件
 
 ## 操作
-1. 执行 `find . -type d -name "repowiki"`
-2. 存在则记录路径并标记下一步必须纳入
-3. 不存在则报告跳过
-4. 检测结果向用户展示
+1. **【强制】前置条件自检**：
+   - 运行 `python scripts/validate-state.py --state <状态文件路径> --step 6 --flow-tier <flow_tier> --format json`
+   - 确认步骤 5 已完成（selected_members 已写入且非空）
+   - 若验证失败，按 `repair_plan[]` 修复后重试
+   - 展示自检结果（通过/不通过 + 具体原因）
+2. 执行 `find . -type d -name "repowiki"`
+3. 存在则记录路径并标记下一步必须纳入
+4. 不存在则报告跳过
+5. 将 `repowiki_checked: true` 写入状态文件 `checkpoints.step-6`
+6. 检测结果向用户展示
 
 ## 完成标准
 - 已明确报告 repowiki 是否存在
