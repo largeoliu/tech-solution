@@ -106,6 +106,14 @@ def read_markdown(path: Path) -> str:
         return ""
 
 
+def find_heading_titles(markdown: str, prefix: str) -> list[str]:
+    titles: list[str] = []
+    pattern = re.compile(rf"^\s*#{{2,6}}\s+{re.escape(prefix)}(.+?)\s*$", re.MULTILINE)
+    for match in pattern.finditer(markdown):
+        titles.append(normalize_text(match.group(1)))
+    return titles
+
+
 def looks_like_legacy_solution_path(path: Path) -> bool:
     return "/.architecture/solutions" in path.as_posix()
 
@@ -179,6 +187,10 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
         return "回到步骤 11，生成最终文档并写入 final_document_path。"
     if code == "final_document_headings_mismatch":
         return "回到步骤 11，按当前模板快照重新成稿，确保最终文档槽位顺序与模板一致。"
+    if code == "task_slots_incomplete":
+        return "回到步骤 8，按 template_snapshot 为每个真实槽位生成任务条目，并把缺失槽位补进 WD-TASK。"
+    if code == "missing_step_summary":
+        return "补齐对应 step checkpoint 的结构化 summary 后再重试。"
     return "根据错误条目补齐缺失产物或修正状态文件后重试。"
 
 
@@ -456,12 +468,13 @@ class GateValidator:
         snapshot = self.check_template_snapshot(errors, step_num, flow_tier)
         if not snapshot:
             return
-        slot_level = snapshot[0].get("level") if snapshot else None
-        current = self.current_template_headings(slot_level if isinstance(slot_level, int) else None)
-        if not current:
+        current_auto = self.current_template_headings(None)
+        if not current_auto:
             return
         snapshot_titles = [item["normalized_title"] for item in snapshot]
-        current_titles = [item["normalized_title"] for item in current]
+        current_titles = [item["normalized_title"] for item in current_auto]
+        snapshot_level = snapshot[0].get("level") if snapshot else None
+        current_level = current_auto[0].get("level") if current_auto else None
         if snapshot_titles != current_titles:
             add_issue(
                 errors,
@@ -473,7 +486,12 @@ class GateValidator:
                     field="template_snapshot",
                     recommended_rollback_step=3,
                     recommended_repair_step=3,
-                    details={"snapshot_headings": snapshot_titles, "current_headings": current_titles},
+                    details={
+                        "snapshot_headings": snapshot_titles,
+                        "current_headings": current_titles,
+                        "snapshot_slot_level": snapshot_level,
+                        "current_slot_level": current_level,
+                    },
                 ),
             )
 
@@ -562,6 +580,67 @@ class GateValidator:
                         details={"working_draft_path": str(working_draft)},
                     ),
                 )
+
+    def expert_artifacts(self) -> list[str]:
+        selected = self.state.get("selected_members") or []
+        if not isinstance(selected, list):
+            return []
+        artifacts: list[str] = []
+        for member in selected:
+            slug = str(member).strip()
+            if slug:
+                artifacts.append(f"WD-EXP-{slug.upper()}")
+        return artifacts
+
+    def check_expert_blocks(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        working_draft = self.working_draft_path(require_explicit=True)
+        if not working_draft or not working_draft.exists():
+            return
+        content = read_markdown(working_draft)
+        expected = self.expert_artifacts()
+        for artifact in expected:
+            present_in_state = artifact in self.state.get("produced_artifacts", [])
+            present_in_draft = re.search(rf"^\s*#{{2,6}}\s+{re.escape(artifact)}\b", content, re.MULTILINE) is not None
+            if present_in_state and not present_in_draft:
+                add_issue(
+                    errors,
+                    make_issue(
+                        code="missing_working_draft_block",
+                        message=f"步骤 {step_num}: working draft 缺少 {artifact} 区块",
+                        step=step_num,
+                        flow_tier=flow_tier,
+                        field="produced_artifacts",
+                        missing_artifacts=[artifact],
+                        recommended_rollback_step=9,
+                        recommended_repair_step=9,
+                        details={"working_draft_path": str(working_draft)},
+                    ),
+                )
+
+    def check_task_slots_cover_snapshot(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        working_draft = self.working_draft_path(require_explicit=True)
+        if not working_draft or not working_draft.exists():
+            return
+        snapshot = self.check_template_snapshot(errors, step_num, flow_tier)
+        if not snapshot:
+            return
+        content = read_markdown(working_draft)
+        expected_titles = [item["normalized_title"] for item in snapshot]
+        missing_titles = [title for title in expected_titles if title not in normalize_text(content)]
+        if missing_titles:
+            add_issue(
+                errors,
+                make_issue(
+                    code="task_slots_incomplete",
+                    message=f"步骤 {step_num}: WD-TASK 未覆盖当前模板全部槽位",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="template_snapshot",
+                    recommended_rollback_step=8,
+                    recommended_repair_step=8,
+                    details={"missing_slots": missing_titles},
+                ),
+            )
 
     def check_final_document(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
         final_document = self.final_document_path(require_explicit=True)
@@ -763,6 +842,7 @@ class GateValidator:
         )
         self.check_solution_paths(errors, 3, flow_tier)
         self.check_template_snapshot(errors, 3, flow_tier)
+        self.check_template_still_matches_snapshot(errors, 3, flow_tier)
 
     def step_4(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(4, flow_tier, errors)
@@ -892,6 +972,7 @@ class GateValidator:
             recommended_repair_step=7,
         )
         self.check_working_draft(["WD-CTX"], errors, 8, flow_tier)
+        self.check_task_slots_cover_snapshot(errors, 8, flow_tier)
 
     def step_9(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(9, flow_tier, errors)
@@ -956,6 +1037,8 @@ class GateValidator:
             recommended_repair_step=8,
         )
         self.check_working_draft(["WD-CTX", "WD-TASK"], errors, 9, flow_tier)
+        self.check_task_slots_cover_snapshot(errors, 9, flow_tier)
+        self.check_expert_blocks(errors, 9, flow_tier)
 
     def step_10(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(10, flow_tier, errors)
@@ -1014,8 +1097,10 @@ class GateValidator:
                 recommended_rollback_step=9,
                 recommended_repair_step=9,
             )
-            artifacts.append("WD-EXP-*")
+            artifacts.extend(self.expert_artifacts() or ["WD-EXP-*"])
         self.check_working_draft(artifacts, errors, 10, flow_tier)
+        if flow_tier == "full":
+            self.check_expert_blocks(errors, 10, flow_tier)
 
     def step_11(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(11, flow_tier, errors)
@@ -1043,10 +1128,12 @@ class GateValidator:
                 flow_tier=flow_tier,
                 field="produced_artifacts",
                 missing_artifacts=[artifact],
-                recommended_rollback_step=ARTIFACT_REPAIR_STEP[artifact],
-                recommended_repair_step=ARTIFACT_REPAIR_STEP[artifact],
+                recommended_rollback_step=ARTIFACT_REPAIR_STEP.get(artifact, 9 if str(artifact).startswith("WD-EXP-") else 11),
+                recommended_repair_step=ARTIFACT_REPAIR_STEP.get(artifact, 9 if str(artifact).startswith("WD-EXP-") else 11),
             )
         self.check_working_draft(artifacts, errors, 11, flow_tier)
+        if flow_tier == "full":
+            self.check_expert_blocks(errors, 11, flow_tier)
 
     def step_12(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(12, flow_tier, errors)
@@ -1064,6 +1151,18 @@ class GateValidator:
             recommended_repair_step=11,
         )
         self.check_final_document(errors, 12, flow_tier)
+        checkpoint = self.checkpoint(12, errors, flow_tier)
+        require(
+            bool(str(checkpoint.get("summary") or "").strip()),
+            errors,
+            code="missing_step_summary",
+            message="步骤 12: checkpoints.step-12.summary 不能为空",
+            step=12,
+            flow_tier=flow_tier,
+            field="checkpoints.step-12.summary",
+            recommended_rollback_step=12,
+            recommended_repair_step=12,
+        )
 
 
 def build_summary(issues: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1136,6 +1235,10 @@ def completion_checks_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
         checks.append(check_field_equals("cleanup_allowed", False, "cleanup_allowed 已回退为 false"))
     elif code == "completed_steps_invalid":
         checks.append({"type": "custom", "summary": "completed_steps 已恢复连续且与 current_step 一致"})
+    elif code == "task_slots_incomplete":
+        checks.append({"type": "custom", "summary": "WD-TASK 已覆盖 template_snapshot 的全部槽位"})
+    elif code == "missing_step_summary":
+        checks.append(check_field_non_empty("checkpoints.step-12.summary", "step-12.summary 已补齐"))
 
     if not checks:
         checks.append({"type": "custom", "summary": "相关状态与产物已修正，再次验证不再报该问题"})
@@ -1165,7 +1268,7 @@ def action_types_for_issue(issue: dict[str, Any]) -> list[str]:
     code = issue.get("code")
     if code == "invalid_step_for_tier":
         return ["skip_step"]
-    if code in {"missing_artifact", "missing_working_draft_block", "final_document_missing", "final_document_headings_mismatch"}:
+    if code in {"missing_artifact", "missing_working_draft_block", "final_document_missing", "final_document_headings_mismatch", "task_slots_incomplete"}:
         return ["generate_artifact", "update_state", "rerun_validation"]
     if code in {"schema_mismatch", "missing_working_draft_path", "missing_solution_root", "missing_template_snapshot", "template_changed_since_snapshot", "legacy_path_detected", "premature_cleanup_flags"}:
         return ["update_state", "rerun_validation"]
@@ -1220,6 +1323,10 @@ def state_patch_hints_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
             hints.append({"field": "produced_artifacts", "operation": "append_unique", "value": artifact, "summary": f"同步 {artifact} 到 produced_artifacts"})
     elif code == "final_document_missing":
         hints.append({"field": "final_document_path", "operation": "set", "value": ".architecture/technical-solutions/<slug>.md", "summary": "写入 final_document_path"})
+    elif code == "task_slots_incomplete":
+        hints.append({"field": "checkpoints.step-8", "operation": "update", "value": None, "summary": "按 template_snapshot 补齐 WD-TASK 槽位任务单"})
+    elif code == "missing_step_summary":
+        hints.append({"field": "checkpoints.step-12.summary", "operation": "set_non_empty", "value": "<步骤12摘要>", "summary": "补齐 step-12.summary"})
     elif field:
         hints.append({"field": field, "operation": "update", "value": None, "summary": f"按当前问题修正 {field}"})
 
@@ -1252,6 +1359,18 @@ def artifact_write_hints_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]
                 "status_sync_field": "final_document_path",
                 "status_sync_operation": "set",
                 "summary": "生成最终技术方案文档并写入 final_document_path",
+            }
+        )
+    if code == "task_slots_incomplete":
+        hints.append(
+            {
+                "artifact": "WD-TASK",
+                "target": "working_draft",
+                "block": "WD-TASK",
+                "write_mode": "replace_block",
+                "status_sync_field": "produced_artifacts",
+                "status_sync_operation": "append_unique",
+                "summary": "按 template_snapshot 补齐 WD-TASK 的槽位任务单并同步 produced_artifacts",
             }
         )
     return hints

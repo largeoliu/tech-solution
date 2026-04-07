@@ -33,6 +33,58 @@ DEFAULT_TEMPLATE = """# 技术方案文档
 """
 
 
+UGC_REAL_RUN_TEMPLATE = """# 技术方案文档
+
+## 一、需求背景与综合评估
+
+### 1.1 需求概述
+
+### 1.2 核心目标
+
+### 1.3 影响范围
+
+### 1.4 风险等级
+
+### 1.5 发布环境
+
+## 二、总体设计
+
+### 2.1 业务流程梳理
+
+### 2.2 术语表
+
+### 2.3 涉及组件
+
+## 三、详细设计
+
+### 3.1 数据库设计
+
+### 3.2 HTTP接口设计
+
+### 3.3 RPC接口设计
+
+### 3.4 配置与依赖
+
+## 四、测试方案&数据兼容
+
+### 4.1 历史数据处理
+
+### 4.2 重点测试场景
+
+## 五、上线方案
+
+### 5.1 发布顺序
+
+### 5.2 可观察性
+
+### 5.3 可灰度
+
+### 5.4 可回滚与应急预案
+
+### 5.5 服务上线检查项清单
+"""
+
+
 @pytest.fixture()
 def workspace(tmp_path: Path) -> dict[str, Path]:
     repo = tmp_path / "sample-project"
@@ -69,6 +121,27 @@ def make_template_snapshot(template_path: Path) -> dict:
         "headings": headings,
         "captured_at": "2026-04-07T12:00:00Z",
     }
+
+
+def make_template_snapshot_with_level(template_path: Path, level: int) -> dict:
+    headings = vs.extract_slot_headings(template_path.read_text(encoding="utf-8"), slot_level=level)
+    return {
+        "path": str(template_path),
+        "slot_level": level,
+        "headings": headings,
+        "captured_at": "2026-04-07T12:00:00Z",
+    }
+
+
+def render_custom_template(sections: list[tuple[str, list[str]]]) -> str:
+    lines = ["# 自定义技术方案", ""]
+    for section_title, slots in sections:
+        lines.append(f"## {section_title}")
+        lines.append("")
+        for slot in slots:
+            lines.append(f"### {slot}")
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def make_state(workspace: dict[str, Path], **overrides) -> dict:
@@ -162,6 +235,21 @@ class TestWorkingDraft:
 
 
 class TestTemplateDrivenValidation:
+    def test_step_3_fails_when_snapshot_uses_wrong_granularity(self, workspace: dict[str, Path]) -> None:
+        custom_template = render_custom_template(
+            [
+                ("A. 背景", ["A1 需求概述", "A2 核心目标"]),
+                ("B. 设计", ["B1 组件设计", "B2 接口设计", "B3 风险控制"]),
+            ]
+        )
+        workspace["template_path"].write_text(custom_template, encoding="utf-8")
+        bad_snapshot = make_template_snapshot_with_level(workspace["template_path"], level=2)
+        state = make_state(workspace, current_step=3, completed_steps=[1, 2], template_snapshot=bad_snapshot, template_slots=[item["title"] for item in bad_snapshot["headings"]])
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_3("full", errors)
+        assert any(error["code"] == "template_changed_since_snapshot" for error in errors)
+
     def test_step_12_passes_for_custom_template(self, workspace: dict[str, Path]) -> None:
         custom_template = """# 自定义方案\n\n## A\n\n### A1 目标\n\n### A2 范围\n\n## B\n\n### B1 设计\n\n### B2 验证\n"""
         workspace["template_path"].write_text(custom_template, encoding="utf-8")
@@ -178,6 +266,13 @@ class TestTemplateDrivenValidation:
             produced_artifacts=["WD-CTX", "WD-TASK", "WD-SYN"],
             template_snapshot=make_template_snapshot(workspace["template_path"]),
             template_slots=[item["title"] for item in make_template_snapshot(workspace["template_path"])["headings"]],
+            checkpoints={
+                "step-2": {"summary": "前置文件检查完成", "prerequisites_checked": True},
+                "step-3": {"summary": "模板快照已提取", "template_loaded": True},
+                "step-4": {"summary": "方案类型完成", "solution_type": "现有资产改造"},
+                "step-6": {"summary": "repowiki 检测完成", "repowiki_checked": True, "repowiki_exists": False},
+                "step-12": {"summary": "吸收检查通过，待清理", "working_draft_deleted": False, "state_file_deleted": False},
+            },
         )
         validator = make_validator(state, workspace)
         errors: list[dict] = []
@@ -227,6 +322,75 @@ class TestPathPolicy:
         errors: list[dict] = []
         validator.step_3("moderate", errors)
         assert any(error["code"] == "legacy_path_detected" for error in errors)
+
+
+class TestRealRunRegression:
+    def test_step_8_detects_task_slots_incomplete(self, workspace: dict[str, Path]) -> None:
+        workspace["template_path"].write_text(UGC_REAL_RUN_TEMPLATE, encoding="utf-8")
+        workspace["working_draft_path"].write_text(
+            "## WD-CTX\n\n内容\n\n## WD-TASK\n\n### 一、需求背景与综合评估\n\n粗粒度任务\n",
+            encoding="utf-8",
+        )
+        snapshot = make_template_snapshot(workspace["template_path"])
+        state = make_state(
+            workspace,
+            current_step=8,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7],
+            flow_tier="full",
+            can_enter_step_8=True,
+            template_snapshot=snapshot,
+            template_slots=[item["title"] for item in snapshot["headings"]],
+            produced_artifacts=["WD-CTX", "WD-TASK"],
+        )
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_8("full", errors)
+        assert any(error["code"] == "task_slots_incomplete" for error in errors)
+
+    def test_step_10_detects_missing_per_expert_blocks(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text(
+            "## WD-CTX\n\n内容\n\n## WD-TASK\n\n### 1.1 需求概述\n\n任务\n\n## WD-EXP\n\n总块，不是逐专家块\n",
+            encoding="utf-8",
+        )
+        state = make_state(
+            workspace,
+            current_step=10,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9],
+            flow_tier="full",
+            selected_members=["systems_architect", "domain_expert"],
+            produced_artifacts=["WD-CTX", "WD-TASK", "WD-EXP-SYSTEMS_ARCHITECT", "WD-EXP-DOMAIN_EXPERT"],
+            can_enter_step_10=True,
+        )
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_10("full", errors)
+        assert any(error["code"] == "missing_working_draft_block" and error["missing_artifacts"] == ["WD-EXP-SYSTEMS_ARCHITECT"] for error in errors)
+        assert any(error["code"] == "missing_working_draft_block" and error["missing_artifacts"] == ["WD-EXP-DOMAIN_EXPERT"] for error in errors)
+
+    def test_step_12_requires_non_empty_summary(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n## WD-SYN\n", encoding="utf-8")
+        workspace["final_document_path"].write_text(
+            "# 技术方案文档\n\n## 一、背景\n\n### 1.1 需求概述\n\n内容\n\n### 1.2 核心目标\n\n内容\n\n## 二、设计\n\n### 2.1 方案设计\n\n内容\n\n### 2.2 风险与验证\n\n内容\n",
+            encoding="utf-8",
+        )
+        state = make_state(
+            workspace,
+            current_step=12,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            can_enter_step_12=True,
+            produced_artifacts=["WD-CTX", "WD-TASK", "WD-SYN"],
+            checkpoints={
+                "step-2": {"summary": "前置文件检查完成", "prerequisites_checked": True},
+                "step-3": {"summary": "模板快照已提取", "template_loaded": True},
+                "step-4": {"summary": "方案类型完成", "solution_type": "现有资产改造"},
+                "step-6": {"summary": "repowiki 检测完成", "repowiki_checked": True, "repowiki_exists": False},
+                "step-12": {"summary": "", "working_draft_deleted": False, "state_file_deleted": False},
+            },
+        )
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_12("moderate", errors)
+        assert any(error["code"] == "missing_step_summary" for error in errors)
 
 
 class TestRepairPlan:

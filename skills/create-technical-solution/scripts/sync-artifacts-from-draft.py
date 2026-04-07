@@ -1,0 +1,80 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["pyyaml>=6.0"]
+# ///
+"""从 working draft 反推稳定产物，并可回写状态文件。"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+ARTIFACT_PATTERNS = {
+    "WD-CTX": re.compile(r"^\s*#{2,6}\s+WD-CTX\b", re.MULTILINE),
+    "WD-TASK": re.compile(r"^\s*#{2,6}\s+WD-TASK\b", re.MULTILINE),
+    "WD-SYN": re.compile(r"^\s*#{2,6}\s+WD-SYN\b", re.MULTILINE),
+    "WD-SYN-LIGHT": re.compile(r"^\s*#{2,6}\s+WD-SYN-LIGHT\b", re.MULTILINE),
+}
+
+
+def load_yaml(path: Path) -> dict[str, Any]:
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise SystemExit(f"状态文件必须是 YAML 对象: {path}")
+    return data
+
+
+def dump_yaml(path: Path, data: dict[str, Any]) -> None:
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+
+def sync_artifacts(content: str, selected_members: list[str]) -> list[str]:
+    artifacts: list[str] = []
+    for artifact, pattern in ARTIFACT_PATTERNS.items():
+        if pattern.search(content):
+            artifacts.append(artifact)
+    for member in selected_members:
+        artifact = f"WD-EXP-{str(member).upper()}"
+        if re.search(rf"^\s*#{{2,6}}\s+{re.escape(artifact)}\b", content, re.MULTILINE):
+            artifacts.append(artifact)
+    return artifacts
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="从 working draft 反推产物列表并可回写状态")
+    parser.add_argument("--working-draft", required=True, help="working draft 路径")
+    parser.add_argument("--state", help="状态文件路径；若提供则回写 produced_artifacts")
+    parser.add_argument("--write", action="store_true", help="是否回写状态文件")
+    args = parser.parse_args()
+
+    draft_path = Path(args.working_draft).resolve()
+    if not draft_path.exists():
+        print(f"working draft 不存在: {draft_path}", file=sys.stderr)
+        return 1
+    content = draft_path.read_text(encoding="utf-8")
+    state: dict[str, Any] = {}
+    selected_members: list[str] = []
+    if args.state:
+        state = load_yaml(Path(args.state).resolve())
+        raw_members = state.get("selected_members") or []
+        if isinstance(raw_members, list):
+            selected_members = [str(item) for item in raw_members if str(item).strip()]
+    artifacts = sync_artifacts(content, selected_members)
+    output = {"produced_artifacts": artifacts}
+
+    if args.write and args.state:
+        state["produced_artifacts"] = artifacts
+        dump_yaml(Path(args.state).resolve(), state)
+
+    print(json.dumps(output, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
