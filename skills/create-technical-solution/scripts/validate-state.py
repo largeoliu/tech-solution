@@ -187,6 +187,12 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
         return "回到步骤 11，生成最终文档并写入 final_document_path。"
     if code == "final_document_headings_mismatch":
         return "回到步骤 11，按当前模板快照重新成稿，确保最终文档槽位顺序与模板一致。"
+    if code == "flow_tier_state_mismatch":
+        return "回到步骤 4，原子修正 flow_tier、checkpoints.step-4.flow_tier、required_artifacts 与 skipped_steps，避免先推进后补状态。"
+    if code == "step_skipped_without_checkpoint":
+        return "回到被跳过的步骤，补齐 skipped_steps 与 checkpoints.step-N 的显式 skip 记录；若误记为 completed_steps，需同步移除。"
+    if code == "cleanup_attempt_before_validation":
+        return "步骤 12 必须先通过 validator，再置 absorption_check_passed/cleanup_allowed。请先回退这些标志，并使用 finalize-cleanup.py 完成清理。"
     if code == "task_slots_incomplete":
         return "回到步骤 8，按 template_snapshot 为每个真实槽位生成任务条目，并把缺失槽位补进 WD-TASK。"
     if code == "missing_step_summary":
@@ -282,6 +288,14 @@ def expected_artifacts_for_step(step: int, flow_tier: str) -> list[str]:
         (11, "full"): ["WD-CTX", "WD-TASK", "WD-SYN"],
     }
     return mapping.get((step, flow_tier), [])
+
+
+def expected_required_artifacts(flow_tier: str) -> dict[str, Any]:
+    if flow_tier == "light":
+        return {"required": ["WD-CTX", "WD-SYN-LIGHT"], "forbidden_prefixes": ["WD-EXP-"], "forbidden_exact": ["WD-TASK", "WD-SYN"]}
+    if flow_tier == "moderate":
+        return {"required": ["WD-CTX", "WD-TASK", "WD-SYN"], "forbidden_prefixes": ["WD-EXP-"], "forbidden_exact": ["WD-SYN-LIGHT"]}
+    return {"required": ["WD-CTX", "WD-TASK", "WD-SYN"], "forbidden_prefixes": [], "forbidden_exact": ["WD-SYN-LIGHT"]}
 
 
 class GateValidator:
@@ -592,6 +606,133 @@ class GateValidator:
                 artifacts.append(f"WD-EXP-{slug.upper()}")
         return artifacts
 
+    def skipped_steps(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> list[int]:
+        raw = self.state.get("skipped_steps", [])
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            add_issue(
+                errors,
+                make_issue(
+                    code="schema_mismatch",
+                    message=f"步骤 {step_num}: skipped_steps 必须为数组",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="skipped_steps",
+                    recommended_rollback_step=4,
+                    recommended_repair_step=4,
+                    details={"expected_type": "list", "actual_type": type(raw).__name__},
+                ),
+            )
+            return []
+        normalized: list[int] = []
+        for index, item in enumerate(raw):
+            if isinstance(item, int):
+                normalized.append(item)
+            else:
+                add_issue(
+                    errors,
+                    make_issue(
+                        code="schema_mismatch",
+                        message=f"步骤 {step_num}: skipped_steps[{index}] 必须为整数",
+                        step=step_num,
+                        flow_tier=flow_tier,
+                        field="skipped_steps",
+                        recommended_rollback_step=4,
+                        recommended_repair_step=4,
+                        details={"expected_type": "int", "actual_type": type(item).__name__},
+                    ),
+                )
+        return normalized
+
+    def check_flow_tier_contract(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        state_tier = self.state.get("flow_tier")
+        if state_tier not in {"light", "moderate", "full"}:
+            return
+        if step_num >= 4 and flow_tier != state_tier:
+            add_issue(
+                errors,
+                make_issue(
+                    code="flow_tier_state_mismatch",
+                    message=f"步骤 {step_num}: 传入的 flow_tier={flow_tier} 与状态文件中的 flow_tier={state_tier} 不一致",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="flow_tier",
+                    recommended_rollback_step=4,
+                    recommended_repair_step=4,
+                    details={"state_flow_tier": state_tier, "requested_flow_tier": flow_tier},
+                ),
+            )
+
+        checkpoint4 = self.checkpoint(4, errors, flow_tier)
+        checkpoint_tier = checkpoint4.get("flow_tier")
+        if step_num >= 4 and checkpoint_tier not in {None, "", state_tier}:
+            add_issue(
+                errors,
+                make_issue(
+                    code="flow_tier_state_mismatch",
+                    message=f"步骤 {step_num}: checkpoints.step-4.flow_tier 与顶层 flow_tier 不一致",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="checkpoints.step-4.flow_tier",
+                    recommended_rollback_step=4,
+                    recommended_repair_step=4,
+                    details={"state_flow_tier": state_tier, "checkpoint_flow_tier": checkpoint_tier},
+                ),
+            )
+
+        if step_num >= 4:
+            contract = expected_required_artifacts(state_tier)
+            required_artifacts = [str(item) for item in self.state.get("required_artifacts", [])]
+            missing = [artifact for artifact in contract["required"] if artifact not in required_artifacts]
+            forbidden = [
+                artifact
+                for artifact in required_artifacts
+                if artifact in contract["forbidden_exact"] or any(str(artifact).startswith(prefix) for prefix in contract["forbidden_prefixes"])
+            ]
+            if missing or forbidden:
+                add_issue(
+                    errors,
+                    make_issue(
+                        code="flow_tier_state_mismatch",
+                        message=f"步骤 {step_num}: required_artifacts 与 flow_tier={state_tier} 不一致",
+                        step=step_num,
+                        flow_tier=flow_tier,
+                        field="required_artifacts",
+                        recommended_rollback_step=4,
+                        recommended_repair_step=4,
+                        details={"missing_required_artifacts": missing, "forbidden_artifacts": forbidden, "state_flow_tier": state_tier},
+                    ),
+                )
+
+    def check_skip_record(self, skipped_step: int, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        skipped_steps = self.skipped_steps(errors, step_num, flow_tier)
+        checkpoint = self.checkpoint(skipped_step, errors, flow_tier)
+        completed_steps = self.state.get("completed_steps", [])
+        if not isinstance(completed_steps, list):
+            completed_steps = []
+
+        has_checkpoint_skip = checkpoint.get("skipped") is True and bool(str(checkpoint.get("reason") or checkpoint.get("summary") or "").strip())
+        if skipped_step in completed_steps or skipped_step not in skipped_steps or not has_checkpoint_skip:
+            add_issue(
+                errors,
+                make_issue(
+                    code="step_skipped_without_checkpoint",
+                    message=f"步骤 {step_num}: step-{skipped_step} 被 flow_tier={flow_tier} 跳过时，必须显式记录 skip，且不得写入 completed_steps",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="skipped_steps",
+                    recommended_rollback_step=skipped_step,
+                    recommended_repair_step=skipped_step,
+                    details={
+                        "skipped_step": skipped_step,
+                        "skipped_steps": skipped_steps,
+                        "completed_steps": completed_steps,
+                        "checkpoint": checkpoint,
+                    },
+                ),
+            )
+
     def check_expert_blocks(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
         working_draft = self.working_draft_path(require_explicit=True)
         if not working_draft or not working_draft.exists():
@@ -697,6 +838,7 @@ class GateValidator:
 
     def common(self, step_num: int, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         state = self.state
+        self.check_flow_tier_contract(errors, step_num, flow_tier)
         require(
             state.get("blocked") is False,
             errors,
@@ -868,6 +1010,18 @@ class GateValidator:
             field="checkpoints.step-4.solution_type",
             recommended_rollback_step=4,
             recommended_repair_step=4,
+        )
+        require(
+            checkpoint.get("flow_tier") == self.state.get("flow_tier"),
+            errors,
+            code="flow_tier_state_mismatch",
+            message="步骤 4: checkpoints.step-4.flow_tier 必须与顶层 flow_tier 一致",
+            step=4,
+            flow_tier=flow_tier,
+            field="checkpoints.step-4.flow_tier",
+            recommended_rollback_step=4,
+            recommended_repair_step=4,
+            details={"state_flow_tier": self.state.get("flow_tier"), "checkpoint_flow_tier": checkpoint.get("flow_tier")},
         )
         self.check_template_still_matches_snapshot(errors, 4, flow_tier)
 
@@ -1044,6 +1198,11 @@ class GateValidator:
         self.common(10, flow_tier, errors)
         self.check_solution_paths(errors, 10, flow_tier)
         self.check_template_still_matches_snapshot(errors, 10, flow_tier)
+        if flow_tier == "light":
+            self.check_skip_record(8, errors, 10, flow_tier)
+            self.check_skip_record(9, errors, 10, flow_tier)
+        elif flow_tier == "moderate":
+            self.check_skip_record(9, errors, 10, flow_tier)
         require(
             self.state.get("can_enter_step_10") is True,
             errors,
@@ -1106,6 +1265,11 @@ class GateValidator:
         self.common(11, flow_tier, errors)
         self.check_solution_paths(errors, 11, flow_tier)
         self.check_template_still_matches_snapshot(errors, 11, flow_tier)
+        if flow_tier == "light":
+            self.check_skip_record(8, errors, 11, flow_tier)
+            self.check_skip_record(9, errors, 11, flow_tier)
+        elif flow_tier == "moderate":
+            self.check_skip_record(9, errors, 11, flow_tier)
         require(
             self.state.get("can_enter_step_11") is True,
             errors,
@@ -1139,6 +1303,11 @@ class GateValidator:
         self.common(12, flow_tier, errors)
         self.check_solution_paths(errors, 12, flow_tier)
         self.check_template_still_matches_snapshot(errors, 12, flow_tier)
+        if flow_tier == "light":
+            self.check_skip_record(8, errors, 12, flow_tier)
+            self.check_skip_record(9, errors, 12, flow_tier)
+        elif flow_tier == "moderate":
+            self.check_skip_record(9, errors, 12, flow_tier)
         require(
             self.state.get("can_enter_step_12") is True,
             errors,
@@ -1152,6 +1321,18 @@ class GateValidator:
         )
         self.check_final_document(errors, 12, flow_tier)
         checkpoint = self.checkpoint(12, errors, flow_tier)
+        if self.state.get("absorption_check_passed") or self.state.get("cleanup_allowed"):
+            require(
+                checkpoint.get("validator_passed") is True,
+                errors,
+                code="cleanup_attempt_before_validation",
+                message="步骤 12: 未记录 validator_passed=true 就提前设置了 cleanup 标志",
+                step=12,
+                flow_tier=flow_tier,
+                field="checkpoints.step-12.validator_passed",
+                recommended_rollback_step=12,
+                recommended_repair_step=12,
+            )
         require(
             bool(str(checkpoint.get("summary") or "").strip()),
             errors,
@@ -1233,8 +1414,14 @@ def completion_checks_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
     elif code == "premature_cleanup_flags":
         checks.append(check_field_equals("absorption_check_passed", False, "absorption_check_passed 已回退为 false"))
         checks.append(check_field_equals("cleanup_allowed", False, "cleanup_allowed 已回退为 false"))
+    elif code == "cleanup_attempt_before_validation":
+        checks.append(check_field_equals("checkpoints.step-12.validator_passed", True, "step-12.validator_passed 已为 true"))
     elif code == "completed_steps_invalid":
         checks.append({"type": "custom", "summary": "completed_steps 已恢复连续且与 current_step 一致"})
+    elif code == "flow_tier_state_mismatch":
+        checks.append({"type": "custom", "summary": "flow_tier、step-4 checkpoint、required_artifacts 与 skipped_steps 已保持同源"})
+    elif code == "step_skipped_without_checkpoint":
+        checks.append({"type": "custom", "summary": "被跳过步骤已写入 skipped_steps 与结构化 checkpoint，且不在 completed_steps 中"})
     elif code == "task_slots_incomplete":
         checks.append({"type": "custom", "summary": "WD-TASK 已覆盖 template_snapshot 的全部槽位"})
     elif code == "missing_step_summary":
@@ -1270,7 +1457,7 @@ def action_types_for_issue(issue: dict[str, Any]) -> list[str]:
         return ["skip_step"]
     if code in {"missing_artifact", "missing_working_draft_block", "final_document_missing", "final_document_headings_mismatch", "task_slots_incomplete"}:
         return ["generate_artifact", "update_state", "rerun_validation"]
-    if code in {"schema_mismatch", "missing_working_draft_path", "missing_solution_root", "missing_template_snapshot", "template_changed_since_snapshot", "legacy_path_detected", "premature_cleanup_flags"}:
+    if code in {"schema_mismatch", "missing_working_draft_path", "missing_solution_root", "missing_template_snapshot", "template_changed_since_snapshot", "legacy_path_detected", "premature_cleanup_flags", "flow_tier_state_mismatch", "step_skipped_without_checkpoint", "cleanup_attempt_before_validation"}:
         return ["update_state", "rerun_validation"]
     if issue.get("field"):
         return ["update_state", "rerun_validation"]
@@ -1288,6 +1475,11 @@ def state_patch_hints_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
         hints.append({"field": "selected_members", "operation": "set_non_empty", "value": "<步骤 5 选定成员列表>", "summary": "写入非空 selected_members"})
     elif code == "invalid_flow_tier":
         hints.append({"field": "flow_tier", "operation": "set", "value": "<light|moderate|full>", "summary": "修正 flow_tier"})
+    elif code == "flow_tier_state_mismatch":
+        hints.append({"field": "flow_tier", "operation": "set", "value": "<light|moderate|full>", "summary": "统一 flow_tier"})
+        hints.append({"field": "checkpoints.step-4.flow_tier", "operation": "set", "value": "<与顶层 flow_tier 一致>", "summary": "同步 step-4.flow_tier"})
+        hints.append({"field": "required_artifacts", "operation": "set", "value": "<与 flow_tier 匹配的产物列表>", "summary": "同步 required_artifacts"})
+        hints.append({"field": "skipped_steps", "operation": "set", "value": "<与 flow_tier 匹配的显式跳过步骤列表>", "summary": "同步 skipped_steps"})
     elif code == "missing_slug":
         hints.append({"field": "slug", "operation": "set", "value": "<ASCII kebab-case slug>", "summary": "写入 slug"})
     elif code == "missing_topic_summary":
@@ -1318,6 +1510,16 @@ def state_patch_hints_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
     elif code == "premature_cleanup_flags":
         hints.append({"field": "absorption_check_passed", "operation": "set", "value": False, "summary": "回退 absorption_check_passed"})
         hints.append({"field": "cleanup_allowed", "operation": "set", "value": False, "summary": "回退 cleanup_allowed"})
+    elif code == "cleanup_attempt_before_validation":
+        hints.append({"field": "absorption_check_passed", "operation": "set", "value": False, "summary": "先回退 absorption_check_passed"})
+        hints.append({"field": "cleanup_allowed", "operation": "set", "value": False, "summary": "先回退 cleanup_allowed"})
+        hints.append({"field": "checkpoints.step-12.validator_passed", "operation": "set", "value": True, "summary": "在 validator 通过后写入 step-12.validator_passed"})
+    elif code == "step_skipped_without_checkpoint":
+        skipped_step = issue.get("skipped_step", "<step>")
+        hints.append({"field": "skipped_steps", "operation": "set", "value": f"<包含 {skipped_step} 的步骤列表>", "summary": "补齐 skipped_steps"})
+        hints.append({"field": f"checkpoints.step-{skipped_step}.skipped", "operation": "set", "value": True, "summary": f"标记 step-{skipped_step} 为显式跳过"})
+        hints.append({"field": f"checkpoints.step-{skipped_step}.reason", "operation": "set_non_empty", "value": "<跳过原因>", "summary": f"补齐 step-{skipped_step} 的跳过原因"})
+        hints.append({"field": "completed_steps", "operation": "update", "value": None, "summary": f"若误将 step-{skipped_step} 记为完成，需从 completed_steps 移除"})
     elif code in {"missing_artifact", "missing_working_draft_block"} and field == "produced_artifacts":
         for artifact in issue.get("missing_artifacts", []):
             hints.append({"field": "produced_artifacts", "operation": "append_unique", "value": artifact, "summary": f"同步 {artifact} 到 produced_artifacts"})
@@ -1498,7 +1700,9 @@ def build_repair_plan(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def build_state_snapshot(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "current_step": state.get("current_step"),
+        "flow_tier": state.get("flow_tier"),
         "completed_steps": state.get("completed_steps", []),
+        "skipped_steps": state.get("skipped_steps", []),
         "required_artifacts": state.get("required_artifacts", []),
         "produced_artifacts": state.get("produced_artifacts", []),
         "selected_members": state.get("selected_members", []),
@@ -1514,6 +1718,7 @@ def build_state_snapshot(state: dict[str, Any]) -> dict[str, Any]:
         "can_enter_step_12": state.get("can_enter_step_12"),
         "absorption_check_passed": state.get("absorption_check_passed"),
         "cleanup_allowed": state.get("cleanup_allowed"),
+        "step_12_validator_passed": ((state.get("checkpoints") or {}).get("step-12") or {}).get("validator_passed") if isinstance(state.get("checkpoints"), dict) else None,
     }
 
 

@@ -26,6 +26,19 @@ checkpoints:
   step-4:
     summary: ""
     solution_type: ""
+    flow_tier: ""
+  step-8:
+    summary: ""
+    task_list_generated: false
+  step-9:
+    summary: ""
+    skipped: false
+    reason: ""
+  step-12:
+    summary: ""
+    validator_passed: false
+    working_draft_deleted: false
+    state_file_deleted: false
   step-6:
     summary: ""
     repowiki_checked: false

@@ -16,6 +16,10 @@ spec = importlib.util.spec_from_file_location("validate_state", scripts_path / "
 vs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(vs)
 
+cleanup_spec = importlib.util.spec_from_file_location("finalize_cleanup", scripts_path / "finalize-cleanup.py")
+fc = importlib.util.module_from_spec(cleanup_spec)
+cleanup_spec.loader.exec_module(fc)
+
 
 DEFAULT_TEMPLATE = """# 技术方案文档
 
@@ -157,14 +161,15 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
         "working_draft_path": str(workspace["working_draft_path"]),
         "final_document_path": str(workspace["final_document_path"]),
         "template_snapshot": make_template_snapshot(workspace["template_path"]),
-        "completed_steps": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "completed_steps": [1, 2, 3, 4, 5, 6, 7, 8],
         "blocked": False,
         "block_reason": None,
         "checkpoints": {
             "step-2": {"summary": "前置文件检查完成", "prerequisites_checked": True},
             "step-3": {"summary": "模板快照已提取", "template_loaded": True},
-            "step-4": {"summary": "方案类型完成", "solution_type": "现有资产改造"},
+            "step-4": {"summary": "方案类型完成", "solution_type": "现有资产改造", "flow_tier": "moderate"},
             "step-6": {"summary": "repowiki 检测完成", "repowiki_checked": True, "repowiki_exists": False},
+            "step-9": {"summary": "因流程级别跳过 step-9", "skipped": True, "reason": "moderate 跳过 step-9"},
         },
         "active_references": [],
         "flow_tier": "moderate",
@@ -173,6 +178,7 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
         "selected_members": ["systems_architect", "domain_expert"],
         "template_slots": [item["title"] for item in make_template_snapshot(workspace["template_path"])["headings"]],
         "blocked_slots": [],
+        "skipped_steps": [9],
         "can_enter_step_8": True,
         "can_enter_step_9": False,
         "can_enter_step_10": True,
@@ -203,7 +209,7 @@ class TestSchema:
         state = make_state(
             workspace,
             current_step=11,
-            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 10],
             produced_artifacts=["WD-CTX", "WD-TASK", "WD-SYN"],
             can_enter_step_11=True,
             absorption_check_passed=True,
@@ -235,6 +241,25 @@ class TestWorkingDraft:
 
 
 class TestTemplateDrivenValidation:
+    def test_step_4_detects_flow_tier_state_mismatch(self, workspace: dict[str, Path]) -> None:
+        state = make_state(
+            workspace,
+            current_step=4,
+            completed_steps=[1, 2, 3],
+            flow_tier="moderate",
+            required_artifacts=["WD-CTX", "WD-TASK", "WD-SYN", "WD-EXP-SYSTEMS_ARCHITECT"],
+            checkpoints={
+                "step-2": {"summary": "前置文件检查完成", "prerequisites_checked": True},
+                "step-3": {"summary": "模板快照已提取", "template_loaded": True},
+                "step-4": {"summary": "方案类型完成", "solution_type": "现有资产改造", "flow_tier": "full"},
+                "step-6": {"summary": "repowiki 检测完成", "repowiki_checked": True, "repowiki_exists": False},
+            },
+        )
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_4("moderate", errors)
+        assert any(error["code"] == "flow_tier_state_mismatch" for error in errors)
+
     def test_step_3_fails_when_snapshot_uses_wrong_granularity(self, workspace: dict[str, Path]) -> None:
         custom_template = render_custom_template(
             [
@@ -261,7 +286,7 @@ class TestTemplateDrivenValidation:
         state = make_state(
             workspace,
             current_step=12,
-            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 10, 11],
             can_enter_step_12=True,
             produced_artifacts=["WD-CTX", "WD-TASK", "WD-SYN"],
             template_snapshot=make_template_snapshot(workspace["template_path"]),
@@ -269,8 +294,9 @@ class TestTemplateDrivenValidation:
             checkpoints={
                 "step-2": {"summary": "前置文件检查完成", "prerequisites_checked": True},
                 "step-3": {"summary": "模板快照已提取", "template_loaded": True},
-                "step-4": {"summary": "方案类型完成", "solution_type": "现有资产改造"},
+                "step-4": {"summary": "方案类型完成", "solution_type": "现有资产改造", "flow_tier": "moderate"},
                 "step-6": {"summary": "repowiki 检测完成", "repowiki_checked": True, "repowiki_exists": False},
+                "step-9": {"summary": "因流程级别跳过 step-9", "skipped": True, "reason": "moderate 跳过 step-9"},
                 "step-12": {"summary": "吸收检查通过，待清理", "working_draft_deleted": False, "state_file_deleted": False},
             },
         )
@@ -288,7 +314,7 @@ class TestTemplateDrivenValidation:
         state = make_state(
             workspace,
             current_step=12,
-            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 10, 11],
             can_enter_step_12=True,
             produced_artifacts=["WD-CTX", "WD-TASK", "WD-SYN"],
         )
@@ -391,6 +417,87 @@ class TestRealRunRegression:
         errors: list[dict] = []
         validator.step_12("moderate", errors)
         assert any(error["code"] == "missing_step_summary" for error in errors)
+
+    def test_step_10_moderate_requires_explicit_skip_record_for_step_9(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text("## WD-CTX\n\n内容\n\n## WD-TASK\n\n### 1.1 需求概述\n\n任务\n", encoding="utf-8")
+        state = make_state(
+            workspace,
+            current_step=10,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9],
+            flow_tier="moderate",
+            produced_artifacts=["WD-CTX", "WD-TASK"],
+            skipped_steps=[],
+            can_enter_step_10=True,
+            checkpoints={
+                "step-2": {"summary": "前置文件检查完成", "prerequisites_checked": True},
+                "step-3": {"summary": "模板快照已提取", "template_loaded": True},
+                "step-4": {"summary": "方案类型完成", "solution_type": "现有资产改造", "flow_tier": "moderate"},
+                "step-6": {"summary": "repowiki 检测完成", "repowiki_checked": True, "repowiki_exists": False},
+            },
+        )
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_10("moderate", errors)
+        assert any(error["code"] == "step_skipped_without_checkpoint" for error in errors)
+
+    def test_step_12_flags_require_validator_passed(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n## WD-SYN\n", encoding="utf-8")
+        workspace["final_document_path"].write_text(
+            "# 技术方案文档\n\n## 一、背景\n\n### 1.1 需求概述\n\n内容\n\n### 1.2 核心目标\n\n内容\n\n## 二、设计\n\n### 2.1 方案设计\n\n内容\n\n### 2.2 风险与验证\n\n内容\n",
+            encoding="utf-8",
+        )
+        state = make_state(
+            workspace,
+            current_step=12,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 10, 11],
+            can_enter_step_12=True,
+            produced_artifacts=["WD-CTX", "WD-TASK", "WD-SYN"],
+            skipped_steps=[9],
+            absorption_check_passed=True,
+            cleanup_allowed=True,
+            checkpoints={
+                "step-2": {"summary": "前置文件检查完成", "prerequisites_checked": True},
+                "step-3": {"summary": "模板快照已提取", "template_loaded": True},
+                "step-4": {"summary": "方案类型完成", "solution_type": "现有资产改造", "flow_tier": "moderate"},
+                "step-6": {"summary": "repowiki 检测完成", "repowiki_checked": True, "repowiki_exists": False},
+                "step-9": {"summary": "因流程级别跳过", "skipped": True, "reason": "moderate 跳过 step-9"},
+                "step-12": {"summary": "准备清理", "validator_passed": False, "working_draft_deleted": False, "state_file_deleted": False},
+            },
+        )
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_12("moderate", errors)
+        assert any(error["code"] == "cleanup_attempt_before_validation" for error in errors)
+
+
+class TestCleanupScript:
+    def test_finalize_cleanup_success(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n## WD-SYN\n", encoding="utf-8")
+        workspace["final_document_path"].write_text(
+            "# 技术方案文档\n\n## 一、背景\n\n### 1.1 需求概述\n\n内容\n\n### 1.2 核心目标\n\n内容\n\n## 二、设计\n\n### 2.1 方案设计\n\n内容\n\n### 2.2 风险与验证\n\n内容\n",
+            encoding="utf-8",
+        )
+        state = make_state(
+            workspace,
+            current_step=12,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 10, 11],
+            can_enter_step_12=True,
+            produced_artifacts=["WD-CTX", "WD-TASK", "WD-SYN"],
+            skipped_steps=[9],
+            checkpoints={
+                "step-2": {"summary": "前置文件检查完成", "prerequisites_checked": True},
+                "step-3": {"summary": "模板快照已提取", "template_loaded": True},
+                "step-4": {"summary": "方案类型完成", "solution_type": "现有资产改造", "flow_tier": "moderate"},
+                "step-6": {"summary": "repowiki 检测完成", "repowiki_checked": True, "repowiki_exists": False},
+                "step-9": {"summary": "因流程级别跳过", "skipped": True, "reason": "moderate 跳过 step-9"},
+            },
+        )
+        workspace["state_path"].write_text(vs.yaml.safe_dump(state, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        exit_code, payload = fc.run_cleanup(workspace["state_path"], "moderate", "吸收检查通过，执行清理")
+        assert exit_code == 0
+        assert payload["passed"] is True
+        assert not workspace["working_draft_path"].exists()
+        assert not workspace["state_path"].exists()
 
 
 class TestRepairPlan:
