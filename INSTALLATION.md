@@ -52,11 +52,13 @@ for skill_dir in ./tech-solution-tmp/skills/*; do
   [ -d "$skill_dir" ] || continue
   skill_name="$(basename "$skill_dir")"
   if [ -d "$TARGET/$skill_name" ]; then
-    echo "跳过已存在的 skill: $skill_name"
-  else
-    cp -r "$skill_dir" "$TARGET/"
-    echo "已安装 skill: $skill_name"
+    backup_dir="$TARGET/.skill-backups/$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$backup_dir"
+    mv "$TARGET/$skill_name" "$backup_dir/$skill_name"
+    echo "已备份旧 skill: $skill_name -> $backup_dir/$skill_name"
   fi
+  cp -r "$skill_dir" "$TARGET/"
+  echo "已安装/更新 skill: $skill_name"
 done
 
 for skill_dir in ./tech-solution-tmp/skills/*; do

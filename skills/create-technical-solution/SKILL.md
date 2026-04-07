@@ -34,12 +34,17 @@ compatibility:
 1. 读取状态文件 → 2. 定位当前步骤 → 3. 加载对应 step card → 4. 执行操作 → 5. 更新状态 → 6. 检查门控，通过则进入下一步
 
 ## 状态文件初始化
-从 `templates/_template.yaml` 复制为 `.architecture/.state/create-technical-solution/[slug].yaml`，填充 slug 与时间戳。若目标目录不存在，先创建 `.architecture/.state/create-technical-solution/`。
+从 `templates/_template.yaml` 复制为 `.architecture/.state/create-technical-solution/[slug].yaml`，填充 slug、topic_summary、时间戳与 `solution_root`。若目标目录不存在，先创建 `.architecture/.state/create-technical-solution/`。
 
 ## 状态更新规则
 - 每步完成后写入 `checkpoints.step-N`，追加 `completed_steps`，更新 `updated_at`
 - 阻塞时设 `blocked: true` 并填写 `block_reason`
 - 回退时从 `completed_steps` 移除受影响步骤，重置 `current_step`
+- **严禁追加重复内容**：每次更新必须使用完整替换，不得追加到文件末尾
+- **状态文件唯一性**：全流程只维护一份状态文件，不得创建多个版本
+- **checkpoint 必须结构化**：`checkpoints.step-N` 必须写成对象，至少包含 `summary` 和该步门禁字段；不得只写自然语言字符串
+- **中间产物必须落在 working draft**：`produced_artifacts` 声明的 `WD-*` 必须对应到 working draft 中的稳定区块，不得只改状态不落盘
+- **目录策略固定为双读单写**：可以读取历史 `.architecture/solutions/`，但本次流程的新 working draft 与最终文档统一写入 `.architecture/technical-solutions/`
 
 ## 自动推进与过程证据
 - 流程默认自动连续执行，不要求用户逐步回复确认
@@ -50,6 +55,17 @@ compatibility:
 - 步骤 9 必须实际加载对应专家的角色和视角，不得模拟 `WD-EXP-*` 产出——跳过专家分析等于跳过多视角验证，方案会遗漏关键风险。
 - 步骤 10 必须保留 `WD-SYN` 收敛区块，不得以最终文档替代——中间产物和最终文档职责不同，缺少 WD-SYN 会导致回退时无法追溯决策依据。
 - 步骤 1-12 进入前必须运行 `python scripts/validate-state.py` 验证门禁；若未通过，优先消费 `--format json` 返回的 `repair_plan[]`，并按其中 `action_types` 判断修复动作类别、按 `depends_on_steps` 指定的前置关系执行修复、按 `state_patch_hint` 更新状态字段、按 `artifact_write_hint` 落盘缺失产物、按 `working_draft_context_hint` 选择允许消费的上游稳定区块、按结构化 `completion_checks` 确认每项修复已闭合，并优先使用结构化 `retry_command` 重跑校验；其次再参考 `summary.recommended_repair_sequence`、`summary.recommended_rollback_step`、`summary.missing_artifacts` 与 `issues[*].repair_guidance` 后重试，直到通过后继续
+
+<HARD-GATE>
+步骤门控强制要求：步骤 1-12 进入前必须运行 `python scripts/validate-state.py --state <状态文件路径> --step <step_number> --flow-tier <flow_tier> --format json` 验证门禁。验证脚本会检查：
+1. 状态文件字段完整性
+2. working draft 中 `WD-*` 区块与状态声明是否一致
+3. 门控标志位正确性
+4. 当前模板快照是否仍与 `.architecture/templates/technical-solution-template.md` 一致
+5. step-12 前最终文档与模板槽位顺序是否一致
+
+若未通过，优先消费 `--format json` 返回的 `repair_plan[]` 修复后重试。严禁跳过验证直接进入下一步。
+</HARD-GATE>
 
 ## 复杂度评估与流程裁剪
 - 步骤 4 必须产出 `flow_tier`，并据此决定本次流程需要的最小中间产物集合
@@ -91,6 +107,16 @@ compatibility:
 4. validate-state.py 步骤 11 门控检查通过（退出码 0）
 </HARD-GATE>
 
+<HARD-GATE>
+清理门控：步骤 12 完成后必须删除 working draft 和状态文件。必须满足以下全部条件才可删除：
+1. `absorption_check_passed: true`
+2. `cleanup_allowed: true`
+3. validate-state.py 步骤 12 门控检查通过（退出码 0）
+4. 最终技术方案文档已生成且内容完整
+
+删除后必须验证文件不存在，否则视为清理失败。
+</HARD-GATE>
+
 ## 产物 Schema 速查
 参见 `REFERENCE.md` 中的「产物 Schema 速查」。执行示例、汇报格式以及 repair contract 参见 `REFERENCE.md`。
 
@@ -113,7 +139,7 @@ compatibility:
 ## 示例
 
 **输入**：为订单系统增加退款功能
-**输出**：`.architecture/solutions/2025-04-refund-system.md`，包含背景、范围、方案设计、迁移计划、风险评估
+**输出**：`.architecture/technical-solutions/2025-04-refund-system.md`，包含背景、范围、方案设计、迁移计划、风险评估
 
 ## 故障排除
 
@@ -136,3 +162,4 @@ compatibility:
 - working draft 全流程只维护一份，若主题变化导致 slug 变化，必须终止当前流程并以新 slug 重启，不得并行保留多份草稿
 - 不得以"更清晰""更优雅"等空泛表述替代代码证据——这些主观判断无法验证，且容易跳过实际的代码搜索，导致方案建立在假设而非事实上。
 - 若现有模板槽位无法承载必要结论且必须改模板，必须阻塞并交由模板管理流程，不得擅自增删模板章节
+- **状态与模板快照必须同源**：步骤 3 后如果模板被替换或修改，必须回退到步骤 3 重新提取 `template_snapshot`，不得继续沿用旧槽位定义。

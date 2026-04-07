@@ -1,13 +1,36 @@
 skill: create-technical-solution
 slug: ""
+topic_summary: ""
 current_step: 1
 step_status: pending
 started_at: ""
 updated_at: ""
+solution_root: ".architecture/technical-solutions"
+working_draft_path: ""
+final_document_path: ""
+template_snapshot:
+  path: ".architecture/templates/technical-solution-template.md"
+  slot_level: null
+  headings: []
+  captured_at: ""
 completed_steps: []
 blocked: false
 block_reason: null
-checkpoints: {}
+checkpoints:
+  step-2:
+    summary: ""
+    prerequisites_checked: false
+  step-3:
+    summary: ""
+    template_loaded: false
+  step-4:
+    summary: ""
+    solution_type: ""
+  step-6:
+    summary: ""
+    repowiki_checked: false
+    repowiki_exists: false
+    repowiki_path: ""
 active_references: []
 flow_tier: full
 required_artifacts: []
@@ -15,6 +38,7 @@ produced_artifacts: []
 selected_members: []
 template_slots: []
 blocked_slots: []
+skipped_steps: []
 can_enter_step_8: false
 can_enter_step_9: false
 can_enter_step_10: false

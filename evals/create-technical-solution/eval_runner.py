@@ -65,25 +65,42 @@ VALIDATE_SCRIPT = SKILL_ROOT / "scripts" / "validate-state.py"
 
 # 状态文件模板
 STATE_TEMPLATE = {
+    "skill": "create-technical-solution",
     "slug": "",
-    "version": 1,
+    "topic_summary": "",
     "flow_tier": "",
     "current_step": 1,
+    "step_status": "pending",
+    "started_at": "",
+    "updated_at": "",
+    "solution_root": ".architecture/technical-solutions",
+    "working_draft_path": "",
+    "final_document_path": "",
+    "template_snapshot": {
+        "path": ".architecture/templates/technical-solution-template.md",
+        "slot_level": None,
+        "headings": [],
+        "captured_at": "",
+    },
     "completed_steps": [],
     "required_artifacts": [],
     "produced_artifacts": [],
     "selected_members": [],
     "blocked": False,
-    "block_reason": "",
+    "block_reason": None,
     "can_enter_step_8": False,
     "can_enter_step_9": False,
     "can_enter_step_10": False,
     "can_enter_step_11": False,
     "can_enter_step_12": False,
     "absorption_check_passed": False,
-    "checkpoints": {},
-    "created_at": "",
-    "updated_at": "",
+    "cleanup_allowed": False,
+    "checkpoints": {
+        "step-2": {"summary": "", "prerequisites_checked": False},
+        "step-3": {"summary": "", "template_loaded": False},
+        "step-4": {"summary": "", "solution_type": ""},
+        "step-6": {"summary": "", "repowiki_checked": False, "repowiki_exists": False, "repowiki_path": ""},
+    },
 }
 
 
@@ -175,6 +192,7 @@ def cmd_setup_project(path: str | None = None) -> None:
     (arch / "templates").mkdir(exist_ok=True)
     (arch / ".state" / "create-technical-solution").mkdir(parents=True, exist_ok=True)
     (arch / "technical-solutions").mkdir(exist_ok=True)
+    (arch / "technical-solutions" / "working-drafts").mkdir(parents=True, exist_ok=True)
     (target / "src").mkdir(exist_ok=True)
 
     # members.yml
@@ -207,7 +225,10 @@ def cmd_setup_project(path: str | None = None) -> None:
     # technical-solution-template.md
     template_file = arch / "templates" / "technical-solution-template.md"
     if not template_file.exists():
-        template_file.write_text("# {title}\n\n## 概述\n\n{summary}\n\n## 架构设计\n\n{architecture}\n\n## 实现方案\n\n{implementation}\n\n## 风险评估\n\n{risks}\n")
+        template_file.write_text(
+            "# 技术方案文档\n\n## 一、背景\n\n### 1.1 需求概述\n\n### 1.2 核心目标\n\n## 二、设计\n\n### 2.1 方案设计\n\n### 2.2 风险与验证\n",
+            encoding="utf-8",
+        )
 
     # src/__init__.py
     init_file = target / "src" / "__init__.py"
@@ -286,16 +307,21 @@ def cmd_grade(cases: list[dict], case_id: str = None, all_cases: bool = False, s
     if state_path:
         import subprocess
         try:
-            tier = "full"
-            step = 12
+            state_data = yaml.safe_load(Path(state_path).read_text(encoding="utf-8")) or {}
+            tier = state_data.get("flow_tier") or "full"
+            step = int(state_data.get("current_step") or 12)
+            if state_data.get("can_enter_step_12") or state_data.get("final_document_path"):
+                step = 12
             cmd = [sys.executable, str(VALIDATE_SCRIPT), "--state", state_path, "--step", str(step), "--flow-tier", tier, "--format", "json"]
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if proc.returncode == 0:
-                results["validate_state"] = {"passed": True, "message": "状态文件门禁全部通过"}
+                results["validate_state"] = {"passed": True, "message": f"状态文件门禁通过（step={step}, tier={tier}）"}
             elif proc.returncode == 2:
                 output = json.loads(proc.stdout) if proc.stdout else {}
                 results["validate_state"] = {
                     "passed": False,
+                    "step": step,
+                    "flow_tier": tier,
                     "issues": output.get("issues", []),
                     "repair_plan": output.get("repair_plan", []),
                 }
@@ -395,10 +421,15 @@ def cmd_report(fmt: str = "markdown") -> None:
 def cmd_test_validate() -> None:
     """运行 validate-state.py 的单元测试"""
     import subprocess
+    import shutil
     script = Path(__file__).parent / "test_validate_state.py"
     print("运行 validate-state.py 单元测试...\n")
+    if shutil.which("uv"):
+        command = ["uv", "run", "pytest", str(script), "-v"]
+    else:
+        command = [sys.executable, "-m", "pytest", str(script), "-v"]
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", str(script), "-v"],
+        command,
         capture_output=False,
     )
     sys.exit(proc.returncode)

@@ -12,9 +12,22 @@
    - 展示自检结果（通过/不通过 + 具体原因）
 2. 执行 `find . -type d -name "repowiki"`
 3. 存在则记录路径并标记下一步必须纳入
+   - **记录格式**：`repowiki_path: ".qoder/repowiki/zh/content"`
+   - **标记格式**：`repowiki_exists: true`
 4. 不存在则报告跳过
-5. 将 `repowiki_checked: true` 写入状态文件 `checkpoints.step-6`
+   - **记录格式**：`repowiki_exists: false`
+5. 将 `repowiki_checked: true` 和检测结果写入状态文件 `checkpoints.step-6`
 6. 检测结果向用户展示
+
+**checkpoint模板**：
+```yaml
+checkpoints:
+  step-6: |
+    repowiki检测完成
+    - repowiki_exists: true/false
+    - repowiki_path: ".qoder/repowiki/zh/content" (如存在)
+    - 下一步必须纳入: 是/否
+```
 
 ## 完成标准
 - 已明确报告 repowiki 是否存在

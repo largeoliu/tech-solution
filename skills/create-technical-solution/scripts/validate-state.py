@@ -1,11 +1,11 @@
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.9"
 # dependencies = ["pyyaml>=6.0"]
 # ///
 """验证 create-technical-solution 状态文件完整性。
 
 供 Agent 在步骤间门控检查时调用，替代人工阅读判断。
-检查失败不代表流程终止，而是提示 Agent 先补齐缺失产物或修正状态，再重试验证。
+检查失败不代表流程终止，而是提示 Agent 先补齐缺失产物或修正状态，再重试。
 
 用法：
     uv run scripts/validate-state.py --state <path_to_state_yaml> --step <step_number> [--flow-tier light|moderate|full]
@@ -16,10 +16,14 @@
     2  — 门控检查失败（Agent 应先修复再重试）
 """
 
+from __future__ import annotations
+
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
+from typing import Any, Optional
 
 try:
     import yaml  # type: ignore[import-untyped]
@@ -44,15 +48,78 @@ GATE_REPAIR_STEP = {
 }
 
 
-def load_state(path: Path) -> dict:
+def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
         print(f"状态文件不存在: {path}", file=sys.stderr)
         sys.exit(1)
-    with open(path) as f:
-        return yaml.safe_load(f)
+    with open(path, encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    if not isinstance(data, dict):
+        print(f"状态文件必须是 YAML 对象: {path}", file=sys.stderr)
+        sys.exit(1)
+    return data
 
 
-def remediation_for_issue(issue: dict) -> str:
+def normalize_text(value: str) -> str:
+    return " ".join(str(value).replace("\xa0", " ").split())
+
+
+def extract_slot_headings(markdown: str, slot_level: Optional[int] = None) -> list[dict[str, Any]]:
+    headings: list[tuple[int, str]] = []
+    for line in markdown.splitlines():
+        match = re.match(r"^(#{2,6})\s+(.+?)\s*$", line)
+        if not match:
+            continue
+        level = len(match.group(1))
+        title = normalize_text(match.group(2))
+        if title:
+            headings.append((level, title))
+
+    if not headings:
+        return []
+
+    if slot_level is None:
+        counts: dict[int, int] = {}
+        for level, _title in headings:
+            counts[level] = counts.get(level, 0) + 1
+        slot_level = max(counts.items(), key=lambda item: (item[1], item[0]))[0]
+
+    slots: list[dict[str, Any]] = []
+    for index, (level, title) in enumerate(headings, start=1):
+        if level != slot_level:
+            continue
+        slots.append(
+            {
+                "slot": f"SLOT-{index:02d}",
+                "level": level,
+                "title": title,
+                "normalized_title": normalize_text(title),
+            }
+        )
+    return slots
+
+
+def read_markdown(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ""
+
+
+def looks_like_legacy_solution_path(path: Path) -> bool:
+    return "/.architecture/solutions" in path.as_posix()
+
+
+def resolve_path(value: Any, base: Path) -> Optional[Path]:
+    if not value or not str(value).strip():
+        return None
+    path = Path(str(value))
+    if path.is_absolute():
+        return path
+    return (base / path).resolve()
+
+
+def remediation_for_issue(issue: dict[str, Any]) -> str:
     code = issue["code"]
     missing_artifacts = issue.get("missing_artifacts", [])
     field = issue.get("field")
@@ -60,41 +127,58 @@ def remediation_for_issue(issue: dict) -> str:
     if code == "missing_artifact":
         artifact = missing_artifacts[0] if missing_artifacts else "未知产物"
         if artifact == "WD-CTX":
-            return "先回到步骤 7，生成并写入 WD-CTX，再更新 produced_artifacts。"
+            return "先回到步骤 7，补齐 WD-CTX 区块并同步 produced_artifacts。"
         if artifact == "WD-TASK":
-            return "先回到步骤 8，生成并写入 WD-TASK，再更新 produced_artifacts。"
+            return "先回到步骤 8，补齐 WD-TASK 区块并同步 produced_artifacts。"
         if artifact == "WD-EXP-*":
-            return "先确认步骤 5 已落 selected_members，再执行步骤 9 生成 WD-EXP-*。"
+            return "先确认步骤 5 已落 selected_members，再回到步骤 9 生成 WD-EXP-* 区块。"
         if artifact in {"WD-SYN", "WD-SYN-LIGHT"}:
-            return "先执行步骤 10，写入 WD-SYN 或 WD-SYN-LIGHT，再更新 produced_artifacts。"
+            return "先回到步骤 10，补齐收敛区块并同步 produced_artifacts。"
+    if code == "missing_working_draft_block":
+        artifact = missing_artifacts[0] if missing_artifacts else "未知产物"
+        return f"working draft 已存在，但缺少 {artifact} 区块。请回到对应步骤把该区块写入 working draft。"
+    if code == "schema_mismatch":
+        return "将状态文件中的对应字段改成结构化对象，至少保留 summary 和该步门禁字段后再重试。"
     if code == "missing_selected_members":
-        return "先回到步骤 5 落 selected_members；若为 full 流程，再执行步骤 9 生成 WD-EXP-*。"
+        return "先回到步骤 5 生成非空 selected_members；若为 full 流程，再执行步骤 9 生成 WD-EXP-*。"
     if code == "gate_flag_false":
-        return f"检查前一步是否已完成，并正确更新状态文件中的 {field} 字段。"
+        return f"检查前一步是否已完成，并正确更新状态文件中的 {field}。"
     if code == "invalid_step_for_tier":
-        return "不要重试当前步骤；记录跳过原因，并按当前 flow_tier 进入允许的下一步。"
+        return "不要重试当前步骤；记录显式跳过原因，然后进入当前 flow_tier 允许的下一步。"
     if code == "invalid_flow_tier":
-        return "检查步骤 4 的 flow_tier 判断，必要时回退到步骤 4 重新分类。"
+        return "回到步骤 4 重新判断 flow_tier，并同步 required_artifacts 与允许跳过步骤集合。"
     if code == "blocked_state":
-        return "先根据 block_reason 解除阻塞，修正缺失产物或错误状态后再重试。"
-    if code == "absorption_incomplete":
-        return "先完成吸收检查并修正未闭合项，再重试步骤 12。"
+        return "先根据 block_reason 解除阻塞，再修正缺失状态或产物。"
     if code == "completed_steps_invalid":
-        return "修正 completed_steps 与 current_step 的一致性后再重试。"
+        return "修正 completed_steps 与 current_step 的连续性和一致性，再重试验证。"
+    if code == "premature_cleanup_flags":
+        return "步骤 12 前不得提前置 absorption_check_passed 或 cleanup_allowed；请先回退这些标志。"
     if code == "missing_slug":
-        return "先回到步骤 1，生成 ASCII kebab-case slug 并写入状态文件。"
+        return "回到步骤 1，生成 ASCII kebab-case slug 并写入状态文件。"
     if code == "missing_topic_summary":
-        return "先回到步骤 1，明确方案主题并写入 topic_summary。"
+        return "回到步骤 1，明确方案主题并写入 topic_summary。"
     if code == "prerequisites_not_checked":
-        return "先回到步骤 2，检查 .architecture/members.yml、principles.md、templates/technical-solution-template.md 是否存在，并在 checkpoints.step-2 中标记 prerequisites_checked: true。"
+        return "回到步骤 2，检查前置文件后把 checkpoints.step-2.prerequisites_checked 置为 true。"
     if code == "template_not_loaded":
-        return "先回到步骤 3，读取模板文件并在 checkpoints.step-3 中标记 template_loaded: true。"
+        return "回到步骤 3，读取当前模板并把 checkpoints.step-3.template_loaded 置为 true。"
+    if code == "missing_solution_root":
+        return "回到步骤 3，确定方案根目录并写入 solution_root。新产物默认写入 .architecture/technical-solutions/。"
     if code == "missing_working_draft_path":
-        return "先回到步骤 3，创建 working draft 文件并记录路径到 working_draft_path。"
+        return "回到步骤 3，创建 working draft 文件并写入 working_draft_path。"
+    if code == "missing_template_snapshot":
+        return "回到步骤 3，重新提取当前模板槽位快照并写入 template_snapshot。"
     if code == "missing_solution_type":
-        return "先回到步骤 4，确定方案类型并写入 checkpoints.step-4.solution_type。"
+        return "回到步骤 4，明确方案类型并写入 checkpoints.step-4.solution_type。"
     if code == "repowiki_not_checked":
-        return "先回到步骤 6，执行 repowiki 检测并在 checkpoints.step-6 中标记 repowiki_checked: true。"
+        return "回到步骤 6，执行 repowiki 检测并把 checkpoints.step-6.repowiki_checked 置为 true。"
+    if code == "legacy_path_detected":
+        return "兼容读取历史 .architecture/solutions，但当前流程的新产物必须写入 .architecture/technical-solutions。请回到对应步骤修正路径字段。"
+    if code == "template_changed_since_snapshot":
+        return "当前模板在步骤 3 之后发生变化，请回退到步骤 3 重新提取模板快照和 working draft 骨架。"
+    if code == "final_document_missing":
+        return "回到步骤 11，生成最终文档并写入 final_document_path。"
+    if code == "final_document_headings_mismatch":
+        return "回到步骤 11，按当前模板快照重新成稿，确保最终文档槽位顺序与模板一致。"
     return "根据错误条目补齐缺失产物或修正状态文件后重试。"
 
 
@@ -104,12 +188,13 @@ def make_issue(
     message: str,
     step: int,
     flow_tier: str,
-    field: str | None = None,
-    missing_artifacts: list[str] | None = None,
-    recommended_rollback_step: int | None = None,
-    recommended_repair_step: int | None = None,
+    field: Optional[str] = None,
+    missing_artifacts: Optional[list[str]] = None,
+    recommended_rollback_step: Optional[int] = None,
+    recommended_repair_step: Optional[int] = None,
     skip_instead_of_retry: bool = False,
-) -> dict:
+    details: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     issue = {
         "code": code,
         "message": message,
@@ -121,27 +206,30 @@ def make_issue(
         "recommended_repair_step": recommended_repair_step,
         "skip_instead_of_retry": skip_instead_of_retry,
     }
+    if details:
+        issue.update(details)
     issue["repair_guidance"] = remediation_for_issue(issue)
     return issue
 
 
-def add_issue(errors: list[dict], issue: dict) -> None:
+def add_issue(errors: list[dict[str, Any]], issue: dict[str, Any]) -> None:
     errors.append(issue)
 
 
 def require(
     condition: bool,
-    errors: list[dict],
+    errors: list[dict[str, Any]],
     *,
     code: str,
     message: str,
     step: int,
     flow_tier: str,
-    field: str | None = None,
-    missing_artifacts: list[str] | None = None,
-    recommended_rollback_step: int | None = None,
-    recommended_repair_step: int | None = None,
+    field: Optional[str] = None,
+    missing_artifacts: Optional[list[str]] = None,
+    recommended_rollback_step: Optional[int] = None,
+    recommended_repair_step: Optional[int] = None,
     skip_instead_of_retry: bool = False,
+    details: Optional[dict[str, Any]] = None,
 ) -> None:
     if condition:
         return
@@ -157,34 +245,17 @@ def require(
             recommended_rollback_step=recommended_rollback_step,
             recommended_repair_step=recommended_repair_step,
             skip_instead_of_retry=skip_instead_of_retry,
+            details=details,
         ),
     )
 
 
-def format_issue(issue: dict) -> str:
+def format_issue(issue: dict[str, Any]) -> str:
     return f"  ✗ {issue['message']}\n    → 建议：{issue['repair_guidance']}"
 
 
 def expected_artifacts_for_step(step: int, flow_tier: str) -> list[str]:
     mapping = {
-        (1, "light"): [],
-        (1, "moderate"): [],
-        (1, "full"): [],
-        (2, "light"): [],
-        (2, "moderate"): [],
-        (2, "full"): [],
-        (3, "light"): [],
-        (3, "moderate"): [],
-        (3, "full"): [],
-        (4, "light"): [],
-        (4, "moderate"): [],
-        (4, "full"): [],
-        (5, "light"): [],
-        (5, "moderate"): [],
-        (5, "full"): [],
-        (6, "light"): [],
-        (6, "moderate"): [],
-        (6, "full"): [],
         (7, "light"): ["WD-CTX"],
         (7, "moderate"): ["WD-CTX"],
         (7, "full"): ["WD-CTX"],
@@ -193,7 +264,7 @@ def expected_artifacts_for_step(step: int, flow_tier: str) -> list[str]:
         (9, "full"): ["WD-CTX", "WD-TASK"],
         (10, "light"): ["WD-CTX"],
         (10, "moderate"): ["WD-CTX", "WD-TASK"],
-        (10, "full"): ["WD-CTX", "WD-TASK", "WD-EXP-*"] ,
+        (10, "full"): ["WD-CTX", "WD-TASK", "WD-EXP-*"],
         (11, "light"): ["WD-CTX", "WD-SYN-LIGHT"],
         (11, "moderate"): ["WD-CTX", "WD-TASK", "WD-SYN"],
         (11, "full"): ["WD-CTX", "WD-TASK", "WD-SYN"],
@@ -202,38 +273,444 @@ def expected_artifacts_for_step(step: int, flow_tier: str) -> list[str]:
 
 
 class GateValidator:
-    def __init__(self, state: dict):
+    def __init__(self, state: dict[str, Any], state_path: Optional[Path] = None):
         self.state = state
+        self.state_path = state_path or Path("state.yaml")
+        self.state_dir = self.state_path.parent.resolve()
+        self.arch_root = self.state_dir.parents[1] if len(self.state_dir.parents) >= 2 else self.state_dir
+        self.repo_root = self.arch_root.parent if self.arch_root.name == ".architecture" else self.state_dir.parent
 
-    def common(self, step_num: int, flow_tier: str, errors: list[dict]) -> None:
-        s = self.state
+    def checkpoint(self, step_num: int, errors: list[dict[str, Any]], flow_tier: str) -> dict[str, Any]:
+        checkpoints = self.state.get("checkpoints", {})
+        if checkpoints is None:
+            checkpoints = {}
+        if not isinstance(checkpoints, dict):
+            add_issue(
+                errors,
+                make_issue(
+                    code="schema_mismatch",
+                    message="状态文件中的 checkpoints 必须为对象",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="checkpoints",
+                    recommended_rollback_step=step_num,
+                    recommended_repair_step=step_num,
+                    details={"expected_type": "dict", "actual_type": type(checkpoints).__name__},
+                ),
+            )
+            return {}
+        key = f"step-{step_num}"
+        checkpoint = checkpoints.get(key, {})
+        if checkpoint is None:
+            return {}
+        if not isinstance(checkpoint, dict):
+            add_issue(
+                errors,
+                make_issue(
+                    code="schema_mismatch",
+                    message=f"{key} 必须为对象，当前是 {type(checkpoint).__name__}",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field=f"checkpoints.{key}",
+                    recommended_rollback_step=step_num,
+                    recommended_repair_step=step_num,
+                    details={"expected_type": "dict", "actual_type": type(checkpoint).__name__},
+                ),
+            )
+            return {}
+        return checkpoint
+
+    def solution_root(self) -> Optional[Path]:
+        path = resolve_path(self.state.get("solution_root"), self.repo_root)
+        if path:
+            return path
+        default_root = self.arch_root / "technical-solutions"
+        legacy_root = self.arch_root / "solutions"
+        if default_root.exists():
+            return default_root
+        if legacy_root.exists():
+            return legacy_root
+        return default_root
+
+    def working_draft_path(self, require_explicit: bool = True) -> Optional[Path]:
+        explicit = resolve_path(self.state.get("working_draft_path"), self.repo_root)
+        if explicit:
+            return explicit
+        if require_explicit:
+            return None
+        slug = str(self.state.get("slug") or "").strip()
+        if not slug:
+            return None
+        solution_root = resolve_path(self.state.get("solution_root"), self.repo_root) or self.solution_root()
+        if not solution_root:
+            return None
+        return solution_root / "working-drafts" / f"{slug}.working.md"
+
+    def final_document_path(self, require_explicit: bool = True) -> Optional[Path]:
+        explicit = resolve_path(self.state.get("final_document_path"), self.repo_root)
+        if explicit:
+            return explicit
+        if require_explicit:
+            return None
+        slug = str(self.state.get("slug") or "").strip()
+        if not slug:
+            return None
+        solution_root = resolve_path(self.state.get("solution_root"), self.repo_root) or self.solution_root()
+        if not solution_root:
+            return None
+        exact = solution_root / f"{slug}.md"
+        if exact.exists():
+            return exact
+        matches = sorted(solution_root.glob(f"{slug}*.md"))
+        return matches[0] if matches else exact
+
+    def template_path(self) -> Optional[Path]:
+        snapshot = self.state.get("template_snapshot") or {}
+        if isinstance(snapshot, dict):
+            path = resolve_path(snapshot.get("path"), self.repo_root)
+            if path:
+                return path
+        default_path = self.arch_root / "templates" / "technical-solution-template.md"
+        return default_path if default_path.exists() else default_path
+
+    def template_snapshot(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> dict[str, Any]:
+        snapshot = self.state.get("template_snapshot") or {}
+        if snapshot == {}:
+            return {}
+        if not isinstance(snapshot, dict):
+            add_issue(
+                errors,
+                make_issue(
+                    code="schema_mismatch",
+                    message=f"步骤 {step_num}: template_snapshot 必须为对象",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="template_snapshot",
+                    recommended_rollback_step=3,
+                    recommended_repair_step=3,
+                    details={"expected_type": "dict", "actual_type": type(snapshot).__name__},
+                ),
+            )
+            return {}
+        return snapshot
+
+    def snapshot_headings(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> list[dict[str, Any]]:
+        snapshot = self.template_snapshot(errors, step_num, flow_tier)
+        headings = snapshot.get("headings") if isinstance(snapshot, dict) else None
+        if isinstance(headings, list) and headings:
+            normalized: list[dict[str, Any]] = []
+            for index, item in enumerate(headings, start=1):
+                if isinstance(item, dict):
+                    title = normalize_text(item.get("normalized_title") or item.get("title") or "")
+                    level = item.get("level")
+                else:
+                    title = normalize_text(str(item))
+                    level = snapshot.get("slot_level")
+                if title:
+                    normalized.append(
+                        {
+                            "slot": item.get("slot", f"SLOT-{index:02d}") if isinstance(item, dict) else f"SLOT-{index:02d}",
+                            "level": level,
+                            "title": title,
+                            "normalized_title": title,
+                        }
+                    )
+            if normalized:
+                return normalized
+        template_slots = self.state.get("template_slots")
+        if isinstance(template_slots, list) and template_slots:
+            return [
+                {
+                    "slot": f"SLOT-{index:02d}",
+                    "level": None,
+                    "title": normalize_text(str(title)),
+                    "normalized_title": normalize_text(str(title)),
+                }
+                for index, title in enumerate(template_slots, start=1)
+                if normalize_text(str(title))
+            ]
+        return []
+
+    def current_template_headings(self, slot_level: Optional[int]) -> list[dict[str, Any]]:
+        path = self.template_path()
+        if not path or not path.exists():
+            return []
+        return extract_slot_headings(read_markdown(path), slot_level=slot_level)
+
+    def check_template_snapshot(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> list[dict[str, Any]]:
+        snapshot = self.snapshot_headings(errors, step_num, flow_tier)
         require(
-            s.get("blocked") is False,
+            bool(snapshot),
+            errors,
+            code="missing_template_snapshot",
+            message=f"步骤 {step_num}: template_snapshot 缺失或未记录槽位快照",
+            step=step_num,
+            flow_tier=flow_tier,
+            field="template_snapshot",
+            recommended_rollback_step=3,
+            recommended_repair_step=3,
+        )
+        return snapshot
+
+    def check_template_still_matches_snapshot(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        snapshot = self.check_template_snapshot(errors, step_num, flow_tier)
+        if not snapshot:
+            return
+        slot_level = snapshot[0].get("level") if snapshot else None
+        current = self.current_template_headings(slot_level if isinstance(slot_level, int) else None)
+        if not current:
+            return
+        snapshot_titles = [item["normalized_title"] for item in snapshot]
+        current_titles = [item["normalized_title"] for item in current]
+        if snapshot_titles != current_titles:
+            add_issue(
+                errors,
+                make_issue(
+                    code="template_changed_since_snapshot",
+                    message=f"步骤 {step_num}: 当前模板与步骤 3 记录的 template_snapshot 不一致",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="template_snapshot",
+                    recommended_rollback_step=3,
+                    recommended_repair_step=3,
+                    details={"snapshot_headings": snapshot_titles, "current_headings": current_titles},
+                ),
+            )
+
+    def check_solution_paths(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        solution_root = self.solution_root()
+        require(
+            solution_root is not None,
+            errors,
+            code="missing_solution_root",
+            message=f"步骤 {step_num}: solution_root 缺失",
+            step=step_num,
+            flow_tier=flow_tier,
+            field="solution_root",
+            recommended_rollback_step=3,
+            recommended_repair_step=3,
+        )
+        working_draft = self.working_draft_path(require_explicit=True)
+        require(
+            working_draft is not None,
+            errors,
+            code="missing_working_draft_path",
+            message=f"步骤 {step_num}: working_draft_path 缺失",
+            step=step_num,
+            flow_tier=flow_tier,
+            field="working_draft_path",
+            recommended_rollback_step=3,
+            recommended_repair_step=3,
+        )
+        for field_name, path_obj, repair_step in [
+            ("solution_root", solution_root, 3),
+            ("working_draft_path", working_draft, 3),
+            ("final_document_path", self.final_document_path(require_explicit=True), 11),
+        ]:
+            if path_obj and looks_like_legacy_solution_path(path_obj):
+                add_issue(
+                    errors,
+                    make_issue(
+                        code="legacy_path_detected",
+                        message=f"步骤 {step_num}: {field_name} 仍指向历史目录 .architecture/solutions",
+                        step=step_num,
+                        flow_tier=flow_tier,
+                        field=field_name,
+                        recommended_rollback_step=repair_step,
+                        recommended_repair_step=repair_step,
+                        details={"path": str(path_obj)},
+                    ),
+                )
+
+    def check_working_draft(self, artifacts: list[str], errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        working_draft = self.working_draft_path(require_explicit=True)
+        if not working_draft:
+            return
+        if not working_draft.exists():
+            add_issue(
+                errors,
+                make_issue(
+                    code="missing_working_draft_path",
+                    message=f"步骤 {step_num}: working draft 文件不存在: {working_draft}",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="working_draft_path",
+                    recommended_rollback_step=3,
+                    recommended_repair_step=3,
+                    details={"path": str(working_draft)},
+                ),
+            )
+            return
+        content = read_markdown(working_draft)
+        for artifact in artifacts:
+            if artifact == "WD-EXP-*":
+                present = re.search(r"WD-EXP-[A-Za-z0-9_-]+", content) is not None
+            else:
+                present = re.search(rf"\b{re.escape(artifact)}\b", content) is not None
+            if not present:
+                add_issue(
+                    errors,
+                    make_issue(
+                        code="missing_working_draft_block",
+                        message=f"步骤 {step_num}: working draft 缺少 {artifact} 区块",
+                        step=step_num,
+                        flow_tier=flow_tier,
+                        field="produced_artifacts",
+                        missing_artifacts=[artifact],
+                        recommended_rollback_step=ARTIFACT_REPAIR_STEP.get(artifact, step_num),
+                        recommended_repair_step=ARTIFACT_REPAIR_STEP.get(artifact, step_num),
+                        details={"working_draft_path": str(working_draft)},
+                    ),
+                )
+
+    def check_final_document(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        final_document = self.final_document_path(require_explicit=True)
+        require(
+            final_document is not None,
+            errors,
+            code="final_document_missing",
+            message=f"步骤 {step_num}: final_document_path 缺失",
+            step=step_num,
+            flow_tier=flow_tier,
+            field="final_document_path",
+            recommended_rollback_step=11,
+            recommended_repair_step=11,
+        )
+        if not final_document:
+            return
+        if not final_document.exists():
+            add_issue(
+                errors,
+                make_issue(
+                    code="final_document_missing",
+                    message=f"步骤 {step_num}: 最终文档不存在: {final_document}",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="final_document_path",
+                    recommended_rollback_step=11,
+                    recommended_repair_step=11,
+                    details={"path": str(final_document)},
+                ),
+            )
+            return
+
+        snapshot = self.check_template_snapshot(errors, step_num, flow_tier)
+        if not snapshot:
+            return
+        slot_level = snapshot[0].get("level") if snapshot else None
+        final_headings = extract_slot_headings(read_markdown(final_document), slot_level if isinstance(slot_level, int) else None)
+        expected_titles = [item["normalized_title"] for item in snapshot]
+        final_titles = [item["normalized_title"] for item in final_headings]
+        if expected_titles != final_titles:
+            add_issue(
+                errors,
+                make_issue(
+                    code="final_document_headings_mismatch",
+                    message=f"步骤 {step_num}: 最终文档槽位顺序与 template_snapshot 不一致",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="final_document_path",
+                    recommended_rollback_step=11,
+                    recommended_repair_step=11,
+                    details={"expected_headings": expected_titles, "actual_headings": final_titles},
+                ),
+            )
+
+    def common(self, step_num: int, flow_tier: str, errors: list[dict[str, Any]]) -> None:
+        state = self.state
+        require(
+            state.get("blocked") is False,
             errors,
             code="blocked_state",
             message=f"step-{step_num}: 状态文件标记为阻塞",
             step=step_num,
             flow_tier=flow_tier,
             field="blocked",
+            recommended_rollback_step=step_num,
+            recommended_repair_step=step_num,
         )
-        completed = sorted(s.get("completed_steps", []))
-        for i, cs in enumerate(completed):
-            if cs > step_num:
-                require(
-                    False,
-                    errors,
-                    code="completed_steps_invalid",
-                    message=f"step-{step_num}: completed_steps[{i}]=step-{cs} 超过当前步骤",
+
+        completed = state.get("completed_steps", [])
+        if not isinstance(completed, list):
+            add_issue(
+                errors,
+                make_issue(
+                    code="schema_mismatch",
+                    message=f"step-{step_num}: completed_steps 必须为数组",
                     step=step_num,
                     flow_tier=flow_tier,
                     field="completed_steps",
-                )
+                    recommended_rollback_step=step_num,
+                    recommended_repair_step=step_num,
+                    details={"expected_type": "list", "actual_type": type(completed).__name__},
+                ),
+            )
+        else:
+            current_step = state.get("current_step") or 0
+            seen: set[int] = set()
+            for index, raw in enumerate(completed):
+                if not isinstance(raw, int):
+                    add_issue(
+                        errors,
+                        make_issue(
+                            code="schema_mismatch",
+                            message=f"step-{step_num}: completed_steps[{index}] 必须为整数",
+                            step=step_num,
+                            flow_tier=flow_tier,
+                            field="completed_steps",
+                            recommended_rollback_step=step_num,
+                            recommended_repair_step=step_num,
+                            details={"expected_type": "int", "actual_type": type(raw).__name__},
+                        ),
+                    )
+                    continue
+                if raw in seen:
+                    add_issue(
+                        errors,
+                        make_issue(
+                            code="completed_steps_invalid",
+                            message=f"step-{step_num}: completed_steps 中存在重复步骤 step-{raw}",
+                            step=step_num,
+                            flow_tier=flow_tier,
+                            field="completed_steps",
+                            recommended_rollback_step=step_num,
+                            recommended_repair_step=step_num,
+                        ),
+                    )
+                seen.add(raw)
+                if raw >= current_step + 1:
+                    add_issue(
+                        errors,
+                        make_issue(
+                            code="completed_steps_invalid",
+                            message=f"step-{step_num}: completed_steps[{index}]=step-{raw} 超过 current_step={current_step}",
+                            step=step_num,
+                            flow_tier=flow_tier,
+                            field="completed_steps",
+                            recommended_rollback_step=step_num,
+                            recommended_repair_step=step_num,
+                        ),
+                    )
 
-    def step_1(self, flow_tier: str, errors: list[dict]) -> None:
+        current_step = int(state.get("current_step") or 0)
+        if current_step < 12 and (state.get("absorption_check_passed") or state.get("cleanup_allowed")):
+            add_issue(
+                errors,
+                make_issue(
+                    code="premature_cleanup_flags",
+                    message=f"step-{step_num}: 步骤 12 前不应提前设置 absorption_check_passed/cleanup_allowed",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="cleanup_allowed",
+                    recommended_rollback_step=max(current_step, 11),
+                    recommended_repair_step=max(current_step, 11),
+                ),
+            )
+
+    def step_1(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(1, flow_tier, errors)
-        s = self.state
         require(
-            s.get("slug") and len(str(s.get("slug")).strip()) > 0,
+            bool(str(self.state.get("slug") or "").strip()),
             errors,
             code="missing_slug",
             message="步骤 1: slug 未生成或为空",
@@ -244,10 +721,10 @@ class GateValidator:
             recommended_repair_step=1,
         )
         require(
-            s.get("topic_summary") and len(str(s.get("topic_summary")).strip()) > 0,
+            bool(str(self.state.get("topic_summary") or "").strip()),
             errors,
             code="missing_topic_summary",
-            message="步骤 1: 主题摘要缺失或为空",
+            message="步骤 1: topic_summary 缺失或为空",
             step=1,
             flow_tier=flow_tier,
             field="topic_summary",
@@ -255,11 +732,11 @@ class GateValidator:
             recommended_repair_step=1,
         )
 
-    def step_2(self, flow_tier: str, errors: list[dict]) -> None:
+    def step_2(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(2, flow_tier, errors)
-        s = self.state
+        checkpoint = self.checkpoint(2, errors, flow_tier)
         require(
-            s.get("checkpoints", {}).get("step-2", {}).get("prerequisites_checked") is True,
+            checkpoint.get("prerequisites_checked") is True,
             errors,
             code="prerequisites_not_checked",
             message="步骤 2: 前置文件检查未完成",
@@ -270,11 +747,11 @@ class GateValidator:
             recommended_repair_step=2,
         )
 
-    def step_3(self, flow_tier: str, errors: list[dict]) -> None:
+    def step_3(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(3, flow_tier, errors)
-        s = self.state
+        checkpoint = self.checkpoint(3, errors, flow_tier)
         require(
-            s.get("checkpoints", {}).get("step-3", {}).get("template_loaded") is True,
+            checkpoint.get("template_loaded") is True,
             errors,
             code="template_not_loaded",
             message="步骤 3: 模板未加载",
@@ -284,23 +761,14 @@ class GateValidator:
             recommended_rollback_step=3,
             recommended_repair_step=3,
         )
-        require(
-            s.get("working_draft_path") and len(str(s.get("working_draft_path")).strip()) > 0,
-            errors,
-            code="missing_working_draft_path",
-            message="步骤 3: working draft 路径未创建",
-            step=3,
-            flow_tier=flow_tier,
-            field="working_draft_path",
-            recommended_rollback_step=3,
-            recommended_repair_step=3,
-        )
+        self.check_solution_paths(errors, 3, flow_tier)
+        self.check_template_snapshot(errors, 3, flow_tier)
 
-    def step_4(self, flow_tier: str, errors: list[dict]) -> None:
+    def step_4(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(4, flow_tier, errors)
-        s = self.state
+        checkpoint = self.checkpoint(4, errors, flow_tier)
         require(
-            s.get("flow_tier") in ("light", "moderate", "full"),
+            self.state.get("flow_tier") in {"light", "moderate", "full"},
             errors,
             code="invalid_flow_tier",
             message="步骤 4: flow_tier 必须为 light/moderate/full",
@@ -311,7 +779,7 @@ class GateValidator:
             recommended_repair_step=4,
         )
         require(
-            s.get("checkpoints", {}).get("step-4", {}).get("solution_type") and len(str(s.get("checkpoints", {}).get("step-4", {}).get("solution_type")).strip()) > 0,
+            bool(str(checkpoint.get("solution_type") or "").strip()),
             errors,
             code="missing_solution_type",
             message="步骤 4: 方案类型未确定",
@@ -321,12 +789,12 @@ class GateValidator:
             recommended_rollback_step=4,
             recommended_repair_step=4,
         )
+        self.check_template_still_matches_snapshot(errors, 4, flow_tier)
 
-    def step_5(self, flow_tier: str, errors: list[dict]) -> None:
+    def step_5(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(5, flow_tier, errors)
-        s = self.state
         require(
-            bool(s.get("selected_members")) and len(s.get("selected_members", [])) > 0,
+            isinstance(self.state.get("selected_members"), list) and bool(self.state.get("selected_members")),
             errors,
             code="missing_selected_members",
             message="步骤 5: selected_members 为空",
@@ -336,12 +804,13 @@ class GateValidator:
             recommended_rollback_step=5,
             recommended_repair_step=5,
         )
+        self.check_template_still_matches_snapshot(errors, 5, flow_tier)
 
-    def step_6(self, flow_tier: str, errors: list[dict]) -> None:
+    def step_6(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(6, flow_tier, errors)
-        s = self.state
+        checkpoint = self.checkpoint(6, errors, flow_tier)
         require(
-            s.get("checkpoints", {}).get("step-6", {}).get("repowiki_checked") is True,
+            checkpoint.get("repowiki_checked") is True,
             errors,
             code="repowiki_not_checked",
             message="步骤 6: repowiki 检测未完成",
@@ -351,12 +820,14 @@ class GateValidator:
             recommended_rollback_step=6,
             recommended_repair_step=6,
         )
+        self.check_template_still_matches_snapshot(errors, 6, flow_tier)
 
-    def step_7(self, flow_tier: str, errors: list[dict]) -> None:
+    def step_7(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(7, flow_tier, errors)
-        s = self.state
+        self.check_solution_paths(errors, 7, flow_tier)
+        self.check_template_still_matches_snapshot(errors, 7, flow_tier)
         require(
-            "WD-CTX" in s.get("produced_artifacts", []),
+            "WD-CTX" in self.state.get("produced_artifacts", []),
             errors,
             code="missing_artifact",
             message="步骤 7: produced_artifacts 缺少 WD-CTX",
@@ -369,7 +840,7 @@ class GateValidator:
         )
         gate_field = "can_enter_step_10" if flow_tier == "light" else "can_enter_step_8"
         require(
-            s.get(gate_field),
+            self.state.get(gate_field) is True,
             errors,
             code="gate_flag_false",
             message=f"步骤 7: {gate_field} 为 false",
@@ -379,24 +850,26 @@ class GateValidator:
             recommended_rollback_step=GATE_REPAIR_STEP[gate_field],
             recommended_repair_step=GATE_REPAIR_STEP[gate_field],
         )
+        self.check_working_draft(["WD-CTX"], errors, 7, flow_tier)
 
-    def step_8(self, flow_tier: str, errors: list[dict]) -> None:
+    def step_8(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(8, flow_tier, errors)
-        s = self.state
         if flow_tier == "light":
             add_issue(
                 errors,
                 make_issue(
                     code="invalid_step_for_tier",
-                    message="步骤 8: light 流程不应进入此步骤，显式记录跳过",
+                    message="步骤 8: light 流程不应进入此步骤，必须显式记录跳过",
                     step=8,
                     flow_tier=flow_tier,
                     skip_instead_of_retry=True,
                 ),
             )
             return
+        self.check_solution_paths(errors, 8, flow_tier)
+        self.check_template_still_matches_snapshot(errors, 8, flow_tier)
         require(
-            "WD-CTX" in s.get("produced_artifacts", []),
+            "WD-CTX" in self.state.get("produced_artifacts", []),
             errors,
             code="missing_artifact",
             message="步骤 8: produced_artifacts 缺少 WD-CTX",
@@ -408,7 +881,7 @@ class GateValidator:
             recommended_repair_step=7,
         )
         require(
-            s.get("can_enter_step_8"),
+            self.state.get("can_enter_step_8") is True,
             errors,
             code="gate_flag_false",
             message="步骤 8: can_enter_step_8 为 false",
@@ -418,24 +891,26 @@ class GateValidator:
             recommended_rollback_step=7,
             recommended_repair_step=7,
         )
+        self.check_working_draft(["WD-CTX"], errors, 8, flow_tier)
 
-    def step_9(self, flow_tier: str, errors: list[dict]) -> None:
+    def step_9(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(9, flow_tier, errors)
-        s = self.state
-        if flow_tier in ("light", "moderate"):
+        if flow_tier in {"light", "moderate"}:
             add_issue(
                 errors,
                 make_issue(
                     code="invalid_step_for_tier",
-                    message=f"步骤 9: {flow_tier} 流程不应进入此步骤，显式记录跳过",
+                    message=f"步骤 9: {flow_tier} 流程不应进入此步骤，必须显式记录跳过",
                     step=9,
                     flow_tier=flow_tier,
                     skip_instead_of_retry=True,
                 ),
             )
             return
+        self.check_solution_paths(errors, 9, flow_tier)
+        self.check_template_still_matches_snapshot(errors, 9, flow_tier)
         require(
-            s.get("flow_tier") == "full",
+            self.state.get("flow_tier") == "full",
             errors,
             code="invalid_flow_tier",
             message="步骤 9: flow_tier 必须为 full",
@@ -446,10 +921,10 @@ class GateValidator:
             recommended_repair_step=4,
         )
         require(
-            "WD-CTX" in s.get("produced_artifacts", []),
+            "WD-CTX" in self.state.get("produced_artifacts", []),
             errors,
             code="missing_artifact",
-            message="步骤 9: 缺少 WD-CTX",
+            message="步骤 9: produced_artifacts 缺少 WD-CTX",
             step=9,
             flow_tier=flow_tier,
             field="produced_artifacts",
@@ -458,10 +933,10 @@ class GateValidator:
             recommended_repair_step=7,
         )
         require(
-            "WD-TASK" in s.get("produced_artifacts", []),
+            "WD-TASK" in self.state.get("produced_artifacts", []),
             errors,
             code="missing_artifact",
-            message="步骤 9: 缺少 WD-TASK",
+            message="步骤 9: produced_artifacts 缺少 WD-TASK",
             step=9,
             flow_tier=flow_tier,
             field="produced_artifacts",
@@ -470,7 +945,7 @@ class GateValidator:
             recommended_repair_step=8,
         )
         require(
-            s.get("can_enter_step_9"),
+            self.state.get("can_enter_step_9") is True,
             errors,
             code="gate_flag_false",
             message="步骤 9: can_enter_step_9 为 false",
@@ -480,12 +955,14 @@ class GateValidator:
             recommended_rollback_step=8,
             recommended_repair_step=8,
         )
+        self.check_working_draft(["WD-CTX", "WD-TASK"], errors, 9, flow_tier)
 
-    def step_10(self, flow_tier: str, errors: list[dict]) -> None:
+    def step_10(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(10, flow_tier, errors)
-        s = self.state
+        self.check_solution_paths(errors, 10, flow_tier)
+        self.check_template_still_matches_snapshot(errors, 10, flow_tier)
         require(
-            s.get("can_enter_step_10"),
+            self.state.get("can_enter_step_10") is True,
             errors,
             code="gate_flag_false",
             message="步骤 10: can_enter_step_10 为 false",
@@ -496,10 +973,10 @@ class GateValidator:
             recommended_repair_step=GATE_REPAIR_STEP["can_enter_step_10"],
         )
         require(
-            "WD-CTX" in s.get("produced_artifacts", []),
+            "WD-CTX" in self.state.get("produced_artifacts", []),
             errors,
             code="missing_artifact",
-            message="步骤 10: 缺少 WD-CTX",
+            message="步骤 10: produced_artifacts 缺少 WD-CTX",
             step=10,
             flow_tier=flow_tier,
             field="produced_artifacts",
@@ -508,12 +985,13 @@ class GateValidator:
             recommended_repair_step=7,
         )
         if flow_tier == "light":
+            self.check_working_draft(["WD-CTX"], errors, 10, flow_tier)
             return
         require(
-            "WD-TASK" in s.get("produced_artifacts", []),
+            "WD-TASK" in self.state.get("produced_artifacts", []),
             errors,
             code="missing_artifact",
-            message=f"步骤 10 ({flow_tier}): 缺少 WD-TASK",
+            message=f"步骤 10 ({flow_tier}): produced_artifacts 缺少 WD-TASK",
             step=10,
             flow_tier=flow_tier,
             field="produced_artifacts",
@@ -521,14 +999,14 @@ class GateValidator:
             recommended_rollback_step=8,
             recommended_repair_step=8,
         )
+        artifacts = ["WD-CTX", "WD-TASK"]
         if flow_tier == "full":
-            exp_artifacts = [a for a in s.get("produced_artifacts", []) if a.startswith("WD-EXP-")]
-            members = s.get("selected_members", [])
+            exp_artifacts = [artifact for artifact in self.state.get("produced_artifacts", []) if str(artifact).startswith("WD-EXP-")]
             require(
-                len(exp_artifacts) > 0 or len(members) == 0,
+                bool(exp_artifacts),
                 errors,
                 code="missing_artifact",
-                message="步骤 10 (full): 选定了成员但缺少 WD-EXP 产物",
+                message="步骤 10 (full): 缺少 WD-EXP-* 产物",
                 step=10,
                 flow_tier=flow_tier,
                 field="produced_artifacts",
@@ -536,23 +1014,15 @@ class GateValidator:
                 recommended_rollback_step=9,
                 recommended_repair_step=9,
             )
-            require(
-                bool(s.get("selected_members")),
-                errors,
-                code="missing_selected_members",
-                message="步骤 10 (full): selected_members 为空",
-                step=10,
-                flow_tier=flow_tier,
-                field="selected_members",
-                recommended_rollback_step=5,
-                recommended_repair_step=5,
-            )
+            artifacts.append("WD-EXP-*")
+        self.check_working_draft(artifacts, errors, 10, flow_tier)
 
-    def step_11(self, flow_tier: str, errors: list[dict]) -> None:
+    def step_11(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(11, flow_tier, errors)
-        s = self.state
+        self.check_solution_paths(errors, 11, flow_tier)
+        self.check_template_still_matches_snapshot(errors, 11, flow_tier)
         require(
-            s.get("can_enter_step_11"),
+            self.state.get("can_enter_step_11") is True,
             errors,
             code="gate_flag_false",
             message="步骤 11: can_enter_step_11 为 false",
@@ -562,9 +1032,10 @@ class GateValidator:
             recommended_rollback_step=10,
             recommended_repair_step=10,
         )
-        for artifact in expected_artifacts_for_step(11, flow_tier):
+        artifacts = expected_artifacts_for_step(11, flow_tier)
+        for artifact in artifacts:
             require(
-                artifact in s.get("produced_artifacts", []),
+                artifact in self.state.get("produced_artifacts", []),
                 errors,
                 code="missing_artifact",
                 message=f"步骤 11 ({flow_tier}): produced_artifacts 缺少 {artifact}",
@@ -575,24 +1046,14 @@ class GateValidator:
                 recommended_rollback_step=ARTIFACT_REPAIR_STEP[artifact],
                 recommended_repair_step=ARTIFACT_REPAIR_STEP[artifact],
             )
-        if flow_tier == "full":
-            require(
-                bool(s.get("selected_members")),
-                errors,
-                code="missing_selected_members",
-                message="步骤 11 (full): selected_members 为空",
-                step=11,
-                flow_tier=flow_tier,
-                field="selected_members",
-                recommended_rollback_step=5,
-                recommended_repair_step=5,
-            )
+        self.check_working_draft(artifacts, errors, 11, flow_tier)
 
-    def step_12(self, flow_tier: str, errors: list[dict]) -> None:
+    def step_12(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(12, flow_tier, errors)
-        s = self.state
+        self.check_solution_paths(errors, 12, flow_tier)
+        self.check_template_still_matches_snapshot(errors, 12, flow_tier)
         require(
-            s.get("can_enter_step_12"),
+            self.state.get("can_enter_step_12") is True,
             errors,
             code="gate_flag_false",
             message="步骤 12: can_enter_step_12 为 false",
@@ -602,164 +1063,94 @@ class GateValidator:
             recommended_rollback_step=11,
             recommended_repair_step=11,
         )
-        require(
-            s.get("absorption_check_passed"),
-            errors,
-            code="absorption_incomplete",
-            message="步骤 12: absorption_check_passed 为 false",
-            step=12,
-            flow_tier=flow_tier,
-            field="absorption_check_passed",
-            recommended_rollback_step=12,
-            recommended_repair_step=12,
-        )
+        self.check_final_document(errors, 12, flow_tier)
 
 
-def build_summary(issues: list[dict]) -> dict:
-    rollback_steps = [i["recommended_rollback_step"] for i in issues if i.get("recommended_rollback_step")]
-    repair_steps = [i["recommended_repair_step"] for i in issues if i.get("recommended_repair_step")]
+def build_summary(issues: list[dict[str, Any]]) -> dict[str, Any]:
+    rollback_steps = [item["recommended_rollback_step"] for item in issues if item.get("recommended_rollback_step") is not None]
+    repair_steps = [item["recommended_repair_step"] for item in issues if item.get("recommended_repair_step") is not None]
     missing_artifacts: list[str] = []
     for issue in issues:
         for artifact in issue.get("missing_artifacts", []):
             if artifact not in missing_artifacts:
                 missing_artifacts.append(artifact)
-    recommended_repair_sequence = sorted(dict.fromkeys(repair_steps))
     return {
         "error_count": len(issues),
         "recommended_rollback_step": min(rollback_steps) if rollback_steps else None,
-        "recommended_repair_sequence": recommended_repair_sequence,
+        "recommended_repair_sequence": sorted(dict.fromkeys(repair_steps)),
         "missing_artifacts": missing_artifacts,
-        "skip_instead_of_retry": any(i.get("skip_instead_of_retry") for i in issues),
+        "skip_instead_of_retry": any(issue.get("skip_instead_of_retry") for issue in issues),
     }
 
 
-def check_field_equals(field: str, value: object, summary: str) -> dict:
-    return {
-        "type": "field_equals",
-        "field": field,
-        "expected": value,
-        "summary": summary,
-    }
+def check_field_equals(field: str, value: object, summary: str) -> dict[str, Any]:
+    return {"type": "field_equals", "field": field, "expected": value, "summary": summary}
 
 
-
-def check_field_non_empty(field: str, summary: str) -> dict:
-    return {
-        "type": "field_non_empty",
-        "field": field,
-        "summary": summary,
-    }
+def check_field_non_empty(field: str, summary: str) -> dict[str, Any]:
+    return {"type": "field_non_empty", "field": field, "summary": summary}
 
 
-
-def check_artifact_present(artifact: str, summary: str) -> dict:
-    return {
-        "type": "artifact_present",
-        "artifact": artifact,
-        "summary": summary,
-    }
+def check_artifact_present(artifact: str, summary: str) -> dict[str, Any]:
+    return {"type": "artifact_present", "artifact": artifact, "summary": summary}
 
 
-
-def check_artifact_prefix_present(prefix: str, min_count: int, summary: str) -> dict:
-    return {
-        "type": "artifact_prefix_present",
-        "artifact_prefix": prefix,
-        "min_count": min_count,
-        "summary": summary,
-    }
-
-
-
-def completion_checks_for_issue(issue: dict) -> list[dict]:
-    checks: list[dict] = []
+def completion_checks_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
     code = issue.get("code")
     field = issue.get("field")
+    checks: list[dict[str, Any]] = []
 
-    if code == "missing_artifact":
+    if code in {"missing_artifact", "missing_working_draft_block"}:
         for artifact in issue.get("missing_artifacts", []):
-            if artifact.endswith("*"):
-                checks.append(
-                    check_artifact_prefix_present(
-                        artifact.removesuffix("*"),
-                        1,
-                        f"至少存在 1 个 {artifact} 产物",
-                    )
-                )
-            else:
-                checks.append(check_artifact_present(artifact, f"{artifact} 已生成"))
-            if artifact == "WD-TASK":
-                checks.append(check_field_equals("can_enter_step_10", True, "can_enter_step_10 已为 true"))
-            elif artifact in {"WD-SYN", "WD-SYN-LIGHT"}:
-                checks.append(check_field_equals("can_enter_step_11", True, "can_enter_step_11 已为 true"))
+            checks.append(check_artifact_present(artifact, f"{artifact} 已写入 working draft 并完成状态同步"))
     elif code == "missing_selected_members":
-        checks.append(check_field_non_empty("selected_members", "selected_members 已写入状态文件且非空"))
+        checks.append(check_field_non_empty("selected_members", "selected_members 已写入且非空"))
     elif code == "gate_flag_false" and field:
-        checks.append(check_field_equals(field, True, f"{field} 已为 true"))
-    elif code == "invalid_flow_tier":
-        checks.append(check_field_equals("flow_tier", issue.get("flow_tier"), "flow_tier 已与当前步骤要求一致"))
-    elif code == "blocked_state":
-        checks.append(check_field_equals("blocked", False, "blocked 已为 false"))
-    elif code == "absorption_incomplete":
-        checks.append(check_field_equals("absorption_check_passed", True, "absorption_check_passed 已为 true"))
-        checks.append(check_field_equals("cleanup_allowed", True, "cleanup_allowed 已为 true"))
-    elif code == "completed_steps_invalid":
-        checks.append({
-            "type": "custom",
-            "summary": "completed_steps 与 current_step 已恢复一致",
-        })
-        checks.append({
-            "type": "custom",
-            "summary": "completed_steps 无跳号、无越级完成",
-        })
-    elif code == "missing_slug":
-        checks.append(check_field_non_empty("slug", "slug 已生成且非空"))
+        checks.append(check_field_equals(field, True, f"{field} 已置为 true"))
+    elif code == "schema_mismatch" and field:
+        checks.append({"type": "custom", "summary": f"{field} 已改为结构化对象或正确类型"})
     elif code == "missing_topic_summary":
         checks.append(check_field_non_empty("topic_summary", "topic_summary 已写入且非空"))
-    elif code == "prerequisites_not_checked":
-        checks.append(check_field_equals("checkpoints.step-2.prerequisites_checked", True, "checkpoints.step-2.prerequisites_checked 已为 true"))
-    elif code == "template_not_loaded":
-        checks.append(check_field_equals("checkpoints.step-3.template_loaded", True, "checkpoints.step-3.template_loaded 已为 true"))
+    elif code == "missing_slug":
+        checks.append(check_field_non_empty("slug", "slug 已写入且非空"))
+    elif code == "missing_solution_root":
+        checks.append(check_field_non_empty("solution_root", "solution_root 已写入"))
     elif code == "missing_working_draft_path":
-        checks.append(check_field_non_empty("working_draft_path", "working_draft_path 已创建且非空"))
+        checks.append(check_field_non_empty("working_draft_path", "working_draft_path 已写入且文件已创建"))
+    elif code == "missing_template_snapshot":
+        checks.append(check_field_non_empty("template_snapshot", "template_snapshot 已写入并包含槽位快照"))
     elif code == "missing_solution_type":
-        checks.append(check_field_non_empty("checkpoints.step-4.solution_type", "checkpoints.step-4.solution_type 已写入且非空"))
+        checks.append(check_field_non_empty("checkpoints.step-4.solution_type", "solution_type 已写入"))
     elif code == "repowiki_not_checked":
-        checks.append(check_field_equals("checkpoints.step-6.repowiki_checked", True, "checkpoints.step-6.repowiki_checked 已为 true"))
+        checks.append(check_field_equals("checkpoints.step-6.repowiki_checked", True, "repowiki_checked 已置为 true"))
+    elif code == "final_document_missing":
+        checks.append(check_field_non_empty("final_document_path", "final_document_path 已写入且最终文档已生成"))
+    elif code == "final_document_headings_mismatch":
+        checks.append({"type": "custom", "summary": "最终文档槽位顺序已与 template_snapshot 对齐"})
+    elif code == "template_changed_since_snapshot":
+        checks.append({"type": "custom", "summary": "template_snapshot 已按最新模板重新提取"})
+    elif code == "legacy_path_detected" and field:
+        checks.append({"type": "custom", "summary": f"{field} 已改为 .architecture/technical-solutions 路径"})
+    elif code == "premature_cleanup_flags":
+        checks.append(check_field_equals("absorption_check_passed", False, "absorption_check_passed 已回退为 false"))
+        checks.append(check_field_equals("cleanup_allowed", False, "cleanup_allowed 已回退为 false"))
+    elif code == "completed_steps_invalid":
+        checks.append({"type": "custom", "summary": "completed_steps 已恢复连续且与 current_step 一致"})
 
-    if not checks and field:
-        checks.append({
-            "type": "custom",
-            "summary": f"{field} 已修正为通过当前步骤门禁所需状态",
-        })
     if not checks:
-        checks.append({
-            "type": "custom",
-            "summary": "相关状态与产物已修正，且再次验证不再报该问题",
-        })
+        checks.append({"type": "custom", "summary": "相关状态与产物已修正，再次验证不再报该问题"})
     return checks
 
 
-
-def merge_completion_check(item: dict, check: dict) -> None:
-    if check not in item["completion_checks"]:
-        item["completion_checks"].append(check)
-
+def merge_unique(items: list[dict[str, Any]], item: dict[str, Any]) -> None:
+    if item not in items:
+        items.append(item)
 
 
-def build_retry_command(step: int, issue: dict) -> dict:
+def build_retry_command(step: int, issue: dict[str, Any]) -> dict[str, Any]:
     flow_tier = issue.get("flow_tier", "full")
     command = "python scripts/validate-state.py"
-    args = [
-        "--state",
-        "<状态文件路径>",
-        "--step",
-        str(step),
-        "--flow-tier",
-        flow_tier,
-        "--format",
-        "json",
-    ]
+    args = ["--state", "<状态文件路径>", "--step", str(step), "--flow-tier", flow_tier, "--format", "json"]
     return {
         "command": command,
         "args": args,
@@ -770,183 +1161,109 @@ def build_retry_command(step: int, issue: dict) -> dict:
     }
 
 
-
-def action_types_for_issue(issue: dict) -> list[str]:
-    action_types: list[str] = []
-    if issue.get("missing_artifacts"):
-        action_types.append("generate_artifact")
+def action_types_for_issue(issue: dict[str, Any]) -> list[str]:
+    code = issue.get("code")
+    if code == "invalid_step_for_tier":
+        return ["skip_step"]
+    if code in {"missing_artifact", "missing_working_draft_block", "final_document_missing", "final_document_headings_mismatch"}:
+        return ["generate_artifact", "update_state", "rerun_validation"]
+    if code in {"schema_mismatch", "missing_working_draft_path", "missing_solution_root", "missing_template_snapshot", "template_changed_since_snapshot", "legacy_path_detected", "premature_cleanup_flags"}:
+        return ["update_state", "rerun_validation"]
     if issue.get("field"):
-        action_types.append("update_state")
-    if issue.get("code") == "invalid_step_for_tier":
-        action_types.append("skip_step")
-    if issue.get("recommended_repair_step"):
-        action_types.append("rerun_validation")
-    return action_types or ["investigate"]
+        return ["update_state", "rerun_validation"]
+    return ["investigate"]
 
 
-
-def state_patch_hints_for_issue(issue: dict) -> list[dict]:
-    hints: list[dict] = []
+def state_patch_hints_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
     code = issue.get("code")
     field = issue.get("field")
+    hints: list[dict[str, Any]] = []
 
     if code == "gate_flag_false" and field:
-        hints.append({
-            "field": field,
-            "operation": "set",
-            "value": True,
-            "summary": f"将 {field} 置为 true",
-        })
+        hints.append({"field": field, "operation": "set", "value": True, "summary": f"将 {field} 置为 true"})
     elif code == "missing_selected_members":
-        hints.append({
-            "field": "selected_members",
-            "operation": "set_non_empty",
-            "value": "<来自步骤 5 的参与成员列表>",
-            "summary": "写入非空 selected_members",
-        })
+        hints.append({"field": "selected_members", "operation": "set_non_empty", "value": "<步骤 5 选定成员列表>", "summary": "写入非空 selected_members"})
     elif code == "invalid_flow_tier":
-        hints.append({
-            "field": "flow_tier",
-            "operation": "set",
-            "value": issue.get("flow_tier"),
-            "summary": "修正 flow_tier 与当前步骤要求一致",
-        })
-    elif code == "blocked_state":
-        hints.append({
-            "field": "blocked",
-            "operation": "set",
-            "value": False,
-            "summary": "解除阻塞标记",
-        })
-    elif code == "absorption_incomplete":
-        hints.append({
-            "field": "absorption_check_passed",
-            "operation": "set",
-            "value": True,
-            "summary": "吸收检查通过后置为 true",
-        })
-        hints.append({
-            "field": "cleanup_allowed",
-            "operation": "set",
-            "value": True,
-            "summary": "允许清理时置为 true",
-        })
-    elif code == "missing_artifact" and field == "produced_artifacts":
-        for artifact in issue.get("missing_artifacts", []):
-            hints.append({
-                "field": "produced_artifacts",
-                "operation": "append_unique",
-                "value": artifact,
-                "summary": f"将 {artifact} 追加到 produced_artifacts",
-            })
+        hints.append({"field": "flow_tier", "operation": "set", "value": "<light|moderate|full>", "summary": "修正 flow_tier"})
     elif code == "missing_slug":
-        hints.append({
-            "field": "slug",
-            "operation": "set",
-            "value": "<ASCII kebab-case slug>",
-            "summary": "生成并写入 slug",
-        })
+        hints.append({"field": "slug", "operation": "set", "value": "<ASCII kebab-case slug>", "summary": "写入 slug"})
     elif code == "missing_topic_summary":
-        hints.append({
-            "field": "topic_summary",
-            "operation": "set",
-            "value": "<方案主题一句话摘要>",
-            "summary": "写入 topic_summary",
-        })
+        hints.append({"field": "topic_summary", "operation": "set", "value": "<方案主题一句话摘要>", "summary": "写入 topic_summary"})
     elif code == "prerequisites_not_checked":
-        hints.append({
-            "field": "checkpoints.step-2.prerequisites_checked",
-            "operation": "set",
-            "value": True,
-            "summary": "标记前置文件检查完成",
-        })
+        hints.append({"field": "checkpoints.step-2.prerequisites_checked", "operation": "set", "value": True, "summary": "标记步骤 2 前置检查完成"})
     elif code == "template_not_loaded":
-        hints.append({
-            "field": "checkpoints.step-3.template_loaded",
-            "operation": "set",
-            "value": True,
-            "summary": "标记模板加载完成",
-        })
+        hints.append({"field": "checkpoints.step-3.template_loaded", "operation": "set", "value": True, "summary": "标记模板已加载"})
+    elif code == "missing_solution_root":
+        hints.append({"field": "solution_root", "operation": "set", "value": ".architecture/technical-solutions", "summary": "写入统一方案目录"})
     elif code == "missing_working_draft_path":
-        hints.append({
-            "field": "working_draft_path",
-            "operation": "set",
-            "value": "<working draft 文件路径>",
-            "summary": "写入 working draft 路径",
-        })
+        hints.append({"field": "working_draft_path", "operation": "set", "value": ".architecture/technical-solutions/working-drafts/<slug>.working.md", "summary": "写入 working_draft_path"})
+    elif code == "missing_template_snapshot":
+        hints.append({"field": "template_snapshot", "operation": "set_non_empty", "value": "<当前模板快照>", "summary": "写入 template_snapshot"})
     elif code == "missing_solution_type":
-        hints.append({
-            "field": "checkpoints.step-4.solution_type",
-            "operation": "set",
-            "value": "<方案类型>",
-            "summary": "写入方案类型",
-        })
+        hints.append({"field": "checkpoints.step-4.solution_type", "operation": "set_non_empty", "value": "<方案类型>", "summary": "写入方案类型"})
     elif code == "repowiki_not_checked":
-        hints.append({
-            "field": "checkpoints.step-6.repowiki_checked",
-            "operation": "set",
-            "value": True,
-            "summary": "标记 repowiki 检测完成",
-        })
+        hints.append({"field": "checkpoints.step-6.repowiki_checked", "operation": "set", "value": True, "summary": "标记 repowiki 检测完成"})
+    elif code == "legacy_path_detected" and field:
+        value = ".architecture/technical-solutions"
+        if field == "working_draft_path":
+            value = ".architecture/technical-solutions/working-drafts/<slug>.working.md"
+        elif field == "final_document_path":
+            value = ".architecture/technical-solutions/<slug>.md"
+        hints.append({"field": field, "operation": "set", "value": value, "summary": f"将 {field} 改为新目录路径"})
+    elif code == "template_changed_since_snapshot":
+        hints.append({"field": "template_snapshot", "operation": "update", "value": None, "summary": "按当前模板重新生成 template_snapshot"})
+    elif code == "premature_cleanup_flags":
+        hints.append({"field": "absorption_check_passed", "operation": "set", "value": False, "summary": "回退 absorption_check_passed"})
+        hints.append({"field": "cleanup_allowed", "operation": "set", "value": False, "summary": "回退 cleanup_allowed"})
+    elif code in {"missing_artifact", "missing_working_draft_block"} and field == "produced_artifacts":
+        for artifact in issue.get("missing_artifacts", []):
+            hints.append({"field": "produced_artifacts", "operation": "append_unique", "value": artifact, "summary": f"同步 {artifact} 到 produced_artifacts"})
+    elif code == "final_document_missing":
+        hints.append({"field": "final_document_path", "operation": "set", "value": ".architecture/technical-solutions/<slug>.md", "summary": "写入 final_document_path"})
     elif field:
-        hints.append({
-            "field": field,
-            "operation": "update",
-            "value": None,
-            "summary": f"按当前问题修正 {field}",
-        })
+        hints.append({"field": field, "operation": "update", "value": None, "summary": f"按当前问题修正 {field}"})
+
     return hints
 
 
-
-def merge_state_patch_hint(item: dict, hint: dict) -> None:
-    if hint not in item["state_patch_hint"]:
-        item["state_patch_hint"].append(hint)
-
-
-
-def artifact_write_hints_for_issue(issue: dict) -> list[dict]:
-    hints: list[dict] = []
-    if issue.get("code") != "missing_artifact":
-        return hints
-
-    for artifact in issue.get("missing_artifacts", []):
-        target = "working_draft"
-        write_mode = "append_section"
-        block = artifact
-        if artifact in {"WD-SYN", "WD-SYN-LIGHT"}:
-            block = artifact
-        elif artifact == "WD-CTX":
-            block = "WD-CTX"
-        elif artifact == "WD-TASK":
-            block = "WD-TASK"
-        elif artifact == "WD-EXP-*":
-            block = "WD-EXP-*"
-        hints.append({
-            "artifact": artifact,
-            "target": target,
-            "block": block,
-            "write_mode": write_mode,
-            "status_sync_field": "produced_artifacts",
-            "status_sync_operation": "append_unique",
-            "summary": f"将 {artifact} 写入 working draft，并同步到 produced_artifacts",
-        })
+def artifact_write_hints_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
+    code = issue.get("code")
+    hints: list[dict[str, Any]] = []
+    if code in {"missing_artifact", "missing_working_draft_block"}:
+        for artifact in issue.get("missing_artifacts", []):
+            hints.append(
+                {
+                    "artifact": artifact,
+                    "target": "working_draft",
+                    "block": artifact,
+                    "write_mode": "append_or_replace_block",
+                    "status_sync_field": "produced_artifacts",
+                    "status_sync_operation": "append_unique",
+                    "summary": f"将 {artifact} 区块写入 working draft，并同步 produced_artifacts",
+                }
+            )
+    if code == "final_document_missing":
+        hints.append(
+            {
+                "artifact": "final_document",
+                "target": "final_document",
+                "block": "final_markdown",
+                "write_mode": "replace_file",
+                "status_sync_field": "final_document_path",
+                "status_sync_operation": "set",
+                "summary": "生成最终技术方案文档并写入 final_document_path",
+            }
+        )
     return hints
 
 
-
-def merge_artifact_write_hint(item: dict, hint: dict) -> None:
-    if hint not in item["artifact_write_hint"]:
-        item["artifact_write_hint"].append(hint)
-
-
-
-def working_draft_context_hints_for_issue(issue: dict) -> list[dict]:
-    hints: list[dict] = []
-    if issue.get("code") != "missing_artifact":
-        return hints
-
+def working_draft_context_hints_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
+    code = issue.get("code")
     flow_tier = issue.get("flow_tier", "full")
+    hints: list[dict[str, Any]] = []
+    if code not in {"missing_artifact", "missing_working_draft_block", "final_document_missing", "final_document_headings_mismatch"}:
+        return hints
+
     for artifact in issue.get("missing_artifacts", []):
         required_blocks: list[str] = []
         external_inputs: list[str] = []
@@ -955,18 +1272,18 @@ def working_draft_context_hints_for_issue(issue: dict) -> list[dict]:
 
         if artifact == "WD-CTX":
             external_inputs = ["repo_inputs", "members_yml", "principles_md", "current_template"]
-            forbidden_blocks = ["WD-TASK", "WD-EXP-*", "WD-SYN", "WD-SYN-LIGHT"]
-            summary = "生成 WD-CTX 时只消费外部输入与当前模板，不得预支下游 WD-* 区块"
+            forbidden_blocks = ["WD-TASK", "WD-EXP-*", "WD-SYN", "WD-SYN-LIGHT", "final_document"]
+            summary = "生成 WD-CTX 时只消费外部输入与当前模板，不得预支下游 WD-* 或最终文档。"
         elif artifact == "WD-TASK":
             required_blocks = ["WD-CTX"]
             external_inputs = ["current_template"]
-            forbidden_blocks = ["WD-EXP-*", "WD-SYN", "WD-SYN-LIGHT"]
-            summary = "生成 WD-TASK 时仅消费当前模板与已落盘 WD-CTX，不得预支下游收敛结论"
+            forbidden_blocks = ["WD-EXP-*", "WD-SYN", "WD-SYN-LIGHT", "final_document"]
+            summary = "生成 WD-TASK 时仅消费当前模板与已落盘 WD-CTX，不得预支下游结论。"
         elif artifact == "WD-EXP-*":
             required_blocks = ["WD-CTX", "WD-TASK"]
             external_inputs = ["selected_members"]
-            forbidden_blocks = ["WD-SYN", "WD-SYN-LIGHT"]
-            summary = "生成 WD-EXP-* 时仅消费已落盘 WD-CTX、WD-TASK 与已选成员，不得预支收敛结果"
+            forbidden_blocks = ["WD-SYN", "WD-SYN-LIGHT", "final_document"]
+            summary = "生成 WD-EXP-* 时仅消费 WD-CTX、WD-TASK 与已选成员。"
         elif artifact in {"WD-SYN", "WD-SYN-LIGHT"}:
             required_blocks = ["WD-CTX"]
             if flow_tier in {"moderate", "full"}:
@@ -975,36 +1292,42 @@ def working_draft_context_hints_for_issue(issue: dict) -> list[dict]:
                 required_blocks.append("WD-EXP-*")
             external_inputs = ["current_template"]
             forbidden_blocks = ["final_document"]
-            summary = "生成收敛区块时仅消费已落盘上游 WD-* 与当前模板，不得以最终文档替代中间产物"
-        else:
-            summary = f"生成 {artifact} 时仅消费已落盘稳定区块，不得预支下游结论"
+            summary = "生成收敛区块时只消费上游稳定 WD-* 与当前模板，不得以最终文档替代。"
 
-        hints.append({
-            "artifact": artifact,
-            "required_blocks": required_blocks,
-            "external_inputs": external_inputs,
-            "forbidden_blocks": forbidden_blocks,
-            "summary": summary,
-        })
+        if summary:
+            hints.append(
+                {
+                    "artifact": artifact,
+                    "required_blocks": required_blocks,
+                    "external_inputs": external_inputs,
+                    "forbidden_blocks": forbidden_blocks,
+                    "summary": summary,
+                }
+            )
+
+    if code in {"final_document_missing", "final_document_headings_mismatch"}:
+        hints.append(
+            {
+                "artifact": "final_document",
+                "required_blocks": ["WD-SYN", "WD-SYN-LIGHT"],
+                "external_inputs": ["template_snapshot", "current_template"],
+                "forbidden_blocks": ["template_extension"],
+                "summary": "生成最终文档时只能消费已收敛区块，并严格映射回当前模板快照。",
+            }
+        )
     return hints
 
 
-
-def merge_working_draft_context_hint(item: dict, hint: dict) -> None:
-    if hint not in item["working_draft_context_hint"]:
-        item["working_draft_context_hint"].append(hint)
-
-
-
-def build_repair_plan(issues: list[dict]) -> list[dict]:
-    plan_by_step: dict[int, dict] = {}
+def build_repair_plan(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    plan_by_step: dict[int, dict[str, Any]] = {}
     for issue in issues:
-        step = issue.get("recommended_repair_step")
-        if not step or issue.get("skip_instead_of_retry"):
+        repair_step = issue.get("recommended_repair_step")
+        if not repair_step or issue.get("skip_instead_of_retry"):
             continue
-        if step not in plan_by_step:
-            plan_by_step[step] = {
-                "step": step,
+        item = plan_by_step.setdefault(
+            repair_step,
+            {
+                "step": repair_step,
                 "action_types": [],
                 "depends_on_steps": [],
                 "generate_artifacts": [],
@@ -1015,40 +1338,45 @@ def build_repair_plan(issues: list[dict]) -> list[dict]:
                 "issues": [],
                 "guidance": [],
                 "completion_checks": [],
-                "retry_command": build_retry_command(issue.get("step", step), issue),
+                "retry_command": build_retry_command(issue.get("step", repair_step), issue),
                 "retry_validation": True,
-            }
-        item = plan_by_step[step]
-        for artifact in issue.get("missing_artifacts", []):
-            if artifact and artifact not in item["generate_artifacts"]:
-                item["generate_artifacts"].append(artifact)
-        field = issue.get("field")
-        if field and field not in item["fix_fields"]:
-            item["fix_fields"].append(field)
-        code = issue.get("code")
-        if code and code not in item["issues"]:
-            item["issues"].append(code)
-        guidance = issue.get("repair_guidance")
-        if guidance and guidance not in item["guidance"]:
-            item["guidance"].append(guidance)
+            },
+        )
         for action_type in action_types_for_issue(issue):
             if action_type not in item["action_types"]:
                 item["action_types"].append(action_type)
+        for artifact in issue.get("missing_artifacts", []):
+            if artifact not in item["generate_artifacts"]:
+                item["generate_artifacts"].append(artifact)
+        if issue.get("code") == "final_document_missing" and "final_document" not in item["generate_artifacts"]:
+            item["generate_artifacts"].append("final_document")
+        field = issue.get("field")
+        if field and field not in item["fix_fields"]:
+            item["fix_fields"].append(field)
+        if issue["code"] not in item["issues"]:
+            item["issues"].append(issue["code"])
+        guidance = issue.get("repair_guidance")
+        if guidance and guidance not in item["guidance"]:
+            item["guidance"].append(guidance)
         for hint in state_patch_hints_for_issue(issue):
-            merge_state_patch_hint(item, hint)
+            if hint not in item["state_patch_hint"]:
+                item["state_patch_hint"].append(hint)
         for hint in artifact_write_hints_for_issue(issue):
-            merge_artifact_write_hint(item, hint)
+            if hint not in item["artifact_write_hint"]:
+                item["artifact_write_hint"].append(hint)
         for hint in working_draft_context_hints_for_issue(issue):
-            merge_working_draft_context_hint(item, hint)
+            if hint not in item["working_draft_context_hint"]:
+                item["working_draft_context_hint"].append(hint)
         for check in completion_checks_for_issue(issue):
-            merge_completion_check(item, check)
+            merge_unique(item["completion_checks"], check)
+
     ordered_steps = sorted(plan_by_step)
     for index, step in enumerate(ordered_steps):
         plan_by_step[step]["depends_on_steps"] = ordered_steps[:index]
     return [plan_by_step[step] for step in ordered_steps]
 
 
-def build_state_snapshot(state: dict) -> dict:
+def build_state_snapshot(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "current_step": state.get("current_step"),
         "completed_steps": state.get("completed_steps", []),
@@ -1057,12 +1385,16 @@ def build_state_snapshot(state: dict) -> dict:
         "selected_members": state.get("selected_members", []),
         "blocked": state.get("blocked"),
         "block_reason": state.get("block_reason"),
+        "solution_root": state.get("solution_root"),
+        "working_draft_path": state.get("working_draft_path"),
+        "final_document_path": state.get("final_document_path"),
         "can_enter_step_8": state.get("can_enter_step_8"),
         "can_enter_step_9": state.get("can_enter_step_9"),
         "can_enter_step_10": state.get("can_enter_step_10"),
         "can_enter_step_11": state.get("can_enter_step_11"),
         "can_enter_step_12": state.get("can_enter_step_12"),
         "absorption_check_passed": state.get("absorption_check_passed"),
+        "cleanup_allowed": state.get("cleanup_allowed"),
     }
 
 
@@ -1074,10 +1406,15 @@ def main() -> None:
     parser.add_argument("--format", choices=["text", "json"], default="text", help="输出格式")
     args = parser.parse_args()
 
-    state = load_state(Path(args.state))
-    issues: list[dict] = []
+    if not 1 <= args.step <= 12:
+        print(f"不支持验证步骤 {args.step}。仅支持 1-12 的门控检查。", file=sys.stderr)
+        sys.exit(1)
 
-    validator = GateValidator(state)
+    state_path = Path(args.state).resolve()
+    state = load_state(state_path)
+    validator = GateValidator(state, state_path)
+    issues: list[dict[str, Any]] = []
+
     dispatch = {
         1: validator.step_1,
         2: validator.step_2,
@@ -1092,23 +1429,19 @@ def main() -> None:
         11: validator.step_11,
         12: validator.step_12,
     }
-
-    if args.step not in dispatch:
-        print(f"不支持验证步骤 {args.step}。仅支持 1-12 的门控检查。", file=sys.stderr)
-        sys.exit(1)
-
     dispatch[args.step](args.flow_tier, issues)
 
+    result = {
+        "step": args.step,
+        "flow_tier": args.flow_tier,
+        "passed": len(issues) == 0,
+        "summary": build_summary(issues),
+        "repair_plan": build_repair_plan(issues),
+        "state_snapshot": build_state_snapshot(state),
+        "issues": issues,
+    }
+
     if args.format == "json":
-        result = {
-            "step": args.step,
-            "flow_tier": args.flow_tier,
-            "passed": len(issues) == 0,
-            "summary": build_summary(issues),
-            "repair_plan": build_repair_plan(issues),
-            "state_snapshot": build_state_snapshot(state),
-            "issues": issues,
-        }
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         if issues:

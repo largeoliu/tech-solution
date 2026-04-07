@@ -2,390 +2,257 @@
 # requires-python = ">=3.11"
 # dependencies = ["pyyaml>=6.0", "pytest>=8.0"]
 # ///
-"""validate-state.py 的 pytest 单元测试"""
+"""validate-state.py 单元测试"""
+
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
 
 import pytest
-import sys
-from pathlib import Path
-import importlib.util
 
-# Load validate_state module
 scripts_path = Path(__file__).parent.parent.parent / "skills" / "create-technical-solution" / "scripts"
 spec = importlib.util.spec_from_file_location("validate_state", scripts_path / "validate-state.py")
 vs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(vs)
 
 
-class TestLightFlow:
-    def test_step_10_light_pass(self):
-        state = {
-            "slug": "test",
-            "version": 1,
-            "flow_tier": "light",
-            "current_step": 10,
-            "completed_steps": [1,2,3,4,5,6,7],
-            "required_artifacts": ["WD-CTX", "WD-SYN-LIGHT"],
-            "produced_artifacts": ["WD-CTX", "WD-SYN-LIGHT"],
-            "selected_members": ["architect"],
-            "blocked": False,
-            "block_reason": "",
-            "can_enter_step_8": True,
-            "can_enter_step_9": False,
-            "can_enter_step_10": True,
-            "can_enter_step_11": True,
-            "can_enter_step_12": True,
-            "absorption_check_passed": True,
-        }
-        validator = vs.GateValidator(state)
-        errors = []
-        validator.step_10("light", errors)
-        assert len(errors) == 0
+DEFAULT_TEMPLATE = """# 技术方案文档
 
-    def test_step_8_light_skip(self):
-        state = {
-            "slug": "test",
-            "version": 1,
-            "flow_tier": "light",
-            "current_step": 8,
-            "completed_steps": [1,2,3,4,5,6,7],
-            "required_artifacts": ["WD-CTX", "WD-SYN-LIGHT"],
-            "produced_artifacts": ["WD-CTX"],
-            "selected_members": ["architect"],
-            "blocked": False,
-            "block_reason": "",
-            "can_enter_step_8": True,
-            "can_enter_step_9": False,
-            "can_enter_step_10": True,
-            "can_enter_step_11": True,
-            "can_enter_step_12": True,
-            "absorption_check_passed": False,
-        }
-        validator = vs.GateValidator(state)
-        errors = []
-        validator.step_8("light", errors)
-        assert len(errors) == 1
-        assert errors[0]["code"] == "invalid_step_for_tier"
+## 一、背景
+
+### 1.1 需求概述
+
+### 1.2 核心目标
+
+## 二、设计
+
+### 2.1 方案设计
+
+### 2.2 风险与验证
+"""
 
 
-class TestModerateFlow:
-    def test_step_9_moderate_skip(self):
-        state = {
-            "slug": "test",
-            "version": 1,
-            "flow_tier": "moderate",
-            "current_step": 9,
-            "completed_steps": [1,2,3,4,5,6,7,8],
-            "required_artifacts": ["WD-CTX", "WD-TASK", "WD-SYN"],
-            "produced_artifacts": ["WD-CTX", "WD-TASK"],
-            "selected_members": ["architect"],
-            "blocked": False,
-            "block_reason": "",
-            "can_enter_step_8": True,
-            "can_enter_step_9": False,
-            "can_enter_step_10": True,
-            "can_enter_step_11": True,
-            "can_enter_step_12": True,
-            "absorption_check_passed": False,
-        }
-        validator = vs.GateValidator(state)
-        errors = []
-        validator.step_9("moderate", errors)
-        assert len(errors) == 1
-        assert errors[0]["code"] == "invalid_step_for_tier"
+@pytest.fixture()
+def workspace(tmp_path: Path) -> dict[str, Path]:
+    repo = tmp_path / "sample-project"
+    arch = repo / ".architecture"
+    state_dir = arch / ".state" / "create-technical-solution"
+    template_dir = arch / "templates"
+    solution_root = arch / "technical-solutions"
+    working_drafts = solution_root / "working-drafts"
 
-    def test_step_10_moderate_missing_wd_task(self):
-        state = {
-            "slug": "test",
-            "version": 1,
-            "flow_tier": "moderate",
-            "current_step": 10,
-            "completed_steps": [1,2,3,4,5,6,7,8],
-            "required_artifacts": ["WD-CTX", "WD-TASK", "WD-SYN"],
-            "produced_artifacts": ["WD-CTX"],
-            "selected_members": ["architect"],
-            "blocked": False,
-            "block_reason": "",
-            "can_enter_step_8": True,
-            "can_enter_step_9": False,
-            "can_enter_step_10": True,
-            "can_enter_step_11": True,
-            "can_enter_step_12": True,
-            "absorption_check_passed": False,
-        }
-        validator = vs.GateValidator(state)
-        errors = []
+    state_dir.mkdir(parents=True)
+    template_dir.mkdir(parents=True)
+    working_drafts.mkdir(parents=True)
+
+    template_path = template_dir / "technical-solution-template.md"
+    template_path.write_text(DEFAULT_TEMPLATE, encoding="utf-8")
+
+    return {
+        "repo": repo,
+        "arch": arch,
+        "state_dir": state_dir,
+        "template_path": template_path,
+        "solution_root": solution_root,
+        "working_draft_path": working_drafts / "sample-solution.working.md",
+        "final_document_path": solution_root / "sample-solution.md",
+        "state_path": state_dir / "sample-solution.yaml",
+    }
+
+
+def make_template_snapshot(template_path: Path) -> dict:
+    headings = vs.extract_slot_headings(template_path.read_text(encoding="utf-8"))
+    return {
+        "path": str(template_path),
+        "slot_level": headings[0]["level"] if headings else None,
+        "headings": headings,
+        "captured_at": "2026-04-07T12:00:00Z",
+    }
+
+
+def make_state(workspace: dict[str, Path], **overrides) -> dict:
+    state = {
+        "skill": "create-technical-solution",
+        "slug": "sample-solution",
+        "topic_summary": "为样例项目生成技术方案",
+        "current_step": 10,
+        "step_status": "in_progress",
+        "started_at": "2026-04-07T12:00:00Z",
+        "updated_at": "2026-04-07T12:10:00Z",
+        "solution_root": str(workspace["solution_root"]),
+        "working_draft_path": str(workspace["working_draft_path"]),
+        "final_document_path": str(workspace["final_document_path"]),
+        "template_snapshot": make_template_snapshot(workspace["template_path"]),
+        "completed_steps": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "blocked": False,
+        "block_reason": None,
+        "checkpoints": {
+            "step-2": {"summary": "前置文件检查完成", "prerequisites_checked": True},
+            "step-3": {"summary": "模板快照已提取", "template_loaded": True},
+            "step-4": {"summary": "方案类型完成", "solution_type": "现有资产改造"},
+            "step-6": {"summary": "repowiki 检测完成", "repowiki_checked": True, "repowiki_exists": False},
+        },
+        "active_references": [],
+        "flow_tier": "moderate",
+        "required_artifacts": ["WD-CTX", "WD-TASK", "WD-SYN"],
+        "produced_artifacts": ["WD-CTX", "WD-TASK"],
+        "selected_members": ["systems_architect", "domain_expert"],
+        "template_slots": [item["title"] for item in make_template_snapshot(workspace["template_path"])["headings"]],
+        "blocked_slots": [],
+        "can_enter_step_8": True,
+        "can_enter_step_9": False,
+        "can_enter_step_10": True,
+        "can_enter_step_11": True,
+        "can_enter_step_12": False,
+        "absorption_check_passed": False,
+        "cleanup_allowed": False,
+    }
+    state.update(overrides)
+    return state
+
+
+def make_validator(state: dict, workspace: dict[str, Path]) -> vs.GateValidator:
+    workspace["state_path"].write_text("state: fixture\n", encoding="utf-8")
+    return vs.GateValidator(state, workspace["state_path"])
+
+
+class TestSchema:
+    def test_step_2_string_checkpoint_reports_schema_mismatch(self, workspace: dict[str, Path]) -> None:
+        state = make_state(workspace, current_step=2, completed_steps=[1], checkpoints={"step-2": "done"})
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_2("moderate", errors)
+        assert any(error["code"] == "schema_mismatch" for error in errors)
+        assert any(error["field"] == "checkpoints.step-2" for error in errors)
+
+    def test_step_11_premature_cleanup_flags_fail(self, workspace: dict[str, Path]) -> None:
+        state = make_state(
+            workspace,
+            current_step=11,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            produced_artifacts=["WD-CTX", "WD-TASK", "WD-SYN"],
+            can_enter_step_11=True,
+            absorption_check_passed=True,
+        )
+        workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n## WD-SYN\n", encoding="utf-8")
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_11("moderate", errors)
+        assert any(error["code"] == "premature_cleanup_flags" for error in errors)
+
+
+class TestWorkingDraft:
+    def test_step_10_moderate_passes_with_working_draft_blocks(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n", encoding="utf-8")
+        state = make_state(workspace)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
         validator.step_10("moderate", errors)
-        assert len(errors) >= 1
-        codes = [e["code"] for e in errors]
-        assert "missing_artifact" in codes
+        assert errors == []
+
+    def test_step_10_moderate_missing_wd_task_block(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text("## WD-CTX\n", encoding="utf-8")
+        state = make_state(workspace)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_10("moderate", errors)
+        assert any(error["code"] == "missing_working_draft_block" for error in errors)
+        assert any(error.get("missing_artifacts") == ["WD-TASK"] for error in errors)
 
 
-class TestFullFlow:
-    def test_step_9_missing_wd_task(self):
-        state = {
-            "slug": "test",
-            "version": 1,
-            "flow_tier": "full",
-            "current_step": 9,
-            "completed_steps": [1,2,3,4,5,6,7,8],
-            "required_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP", "WD-SYN"],
-            "produced_artifacts": ["WD-CTX"],
-            "selected_members": ["architect"],
-            "blocked": False,
-            "block_reason": "",
-            "can_enter_step_8": True,
-            "can_enter_step_9": True,
-            "can_enter_step_10": True,
-            "can_enter_step_11": True,
-            "can_enter_step_12": True,
-            "absorption_check_passed": False,
-        }
-        validator = vs.GateValidator(state)
-        errors = []
-        validator.step_9("full", errors)
-        assert len(errors) >= 1
+class TestTemplateDrivenValidation:
+    def test_step_12_passes_for_custom_template(self, workspace: dict[str, Path]) -> None:
+        custom_template = """# 自定义方案\n\n## A\n\n### A1 目标\n\n### A2 范围\n\n## B\n\n### B1 设计\n\n### B2 验证\n"""
+        workspace["template_path"].write_text(custom_template, encoding="utf-8")
+        workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n## WD-SYN\n", encoding="utf-8")
+        workspace["final_document_path"].write_text(
+            "# 自定义方案\n\n## A\n\n### A1 目标\n\n内容\n\n### A2 范围\n\n内容\n\n## B\n\n### B1 设计\n\n内容\n\n### B2 验证\n\n内容\n",
+            encoding="utf-8",
+        )
+        state = make_state(
+            workspace,
+            current_step=12,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            can_enter_step_12=True,
+            produced_artifacts=["WD-CTX", "WD-TASK", "WD-SYN"],
+            template_snapshot=make_template_snapshot(workspace["template_path"]),
+            template_slots=[item["title"] for item in make_template_snapshot(workspace["template_path"])["headings"]],
+        )
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_12("moderate", errors)
+        assert errors == []
 
-    def test_step_10_missing_exp(self):
-        state = {
-            "slug": "test",
-            "version": 1,
-            "flow_tier": "full",
-            "current_step": 10,
-            "completed_steps": [1,2,3,4,5,6,7,8,9],
-            "required_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP", "WD-SYN"],
-            "produced_artifacts": ["WD-CTX", "WD-TASK"],
-            "selected_members": ["architect", "backend-dev"],
-            "blocked": False,
-            "block_reason": "",
-            "can_enter_step_8": True,
-            "can_enter_step_9": True,
-            "can_enter_step_10": True,
-            "can_enter_step_11": True,
-            "can_enter_step_12": True,
-            "absorption_check_passed": False,
-        }
-        validator = vs.GateValidator(state)
-        errors = []
-        validator.step_10("full", errors)
-        assert len(errors) >= 1
+    def test_step_12_fails_when_final_document_breaks_template_order(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n## WD-SYN\n", encoding="utf-8")
+        workspace["final_document_path"].write_text(
+            "# 技术方案文档\n\n## 一、背景\n\n### 1.2 核心目标\n\n### 1.1 需求概述\n\n## 二、设计\n\n### 2.1 方案设计\n\n### 2.2 风险与验证\n",
+            encoding="utf-8",
+        )
+        state = make_state(
+            workspace,
+            current_step=12,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            can_enter_step_12=True,
+            produced_artifacts=["WD-CTX", "WD-TASK", "WD-SYN"],
+        )
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_12("moderate", errors)
+        assert any(error["code"] == "final_document_headings_mismatch" for error in errors)
 
-    def test_step_11_pass(self):
-        state = {
-            "slug": "test",
-            "version": 1,
-            "flow_tier": "full",
-            "current_step": 11,
-            "completed_steps": [1,2,3,4,5,6,7,8,9,10],
-            "required_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP", "WD-SYN"],
-            "produced_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP-architect", "WD-SYN"],
-            "selected_members": ["architect"],
-            "blocked": False,
-            "block_reason": "",
-            "can_enter_step_8": True,
-            "can_enter_step_9": True,
-            "can_enter_step_10": True,
-            "can_enter_step_11": True,
-            "can_enter_step_12": True,
-            "absorption_check_passed": False,
-        }
-        validator = vs.GateValidator(state)
-        errors = []
-        validator.step_11("full", errors)
-        assert len(errors) == 0
-
-    def test_step_12_pass(self):
-        state = {
-            "slug": "test",
-            "version": 1,
-            "flow_tier": "full",
-            "current_step": 12,
-            "completed_steps": [1,2,3,4,5,6,7,8,9,10,11],
-            "required_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP", "WD-SYN"],
-            "produced_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP-architect", "WD-SYN"],
-            "selected_members": ["architect"],
-            "blocked": False,
-            "block_reason": "",
-            "can_enter_step_8": True,
-            "can_enter_step_9": True,
-            "can_enter_step_10": True,
-            "can_enter_step_11": True,
-            "can_enter_step_12": True,
-            "absorption_check_passed": True,
-        }
-        validator = vs.GateValidator(state)
-        errors = []
-        validator.step_12("full", errors)
-        assert len(errors) == 0
-
-    def test_step_12_absorption_not_passed(self):
-        state = {
-            "slug": "test",
-            "version": 1,
-            "flow_tier": "full",
-            "current_step": 12,
-            "completed_steps": [1,2,3,4,5,6,7,8,9,10,11],
-            "required_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP", "WD-SYN"],
-            "produced_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP-architect", "WD-SYN"],
-            "selected_members": ["architect"],
-            "blocked": False,
-            "block_reason": "",
-            "can_enter_step_8": True,
-            "can_enter_step_9": True,
-            "can_enter_step_10": True,
-            "can_enter_step_11": True,
-            "can_enter_step_12": True,
-            "absorption_check_passed": False,
-        }
-        validator = vs.GateValidator(state)
-        errors = []
-        validator.step_12("full", errors)
-        assert len(errors) >= 1
-        codes = [e["code"] for e in errors]
-        assert "absorption_incomplete" in codes
+    def test_step_4_detects_template_change_since_snapshot(self, workspace: dict[str, Path]) -> None:
+        old_snapshot = make_template_snapshot(workspace["template_path"])
+        workspace["template_path"].write_text(DEFAULT_TEMPLATE + "\n### 2.3 新增章节\n", encoding="utf-8")
+        state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3], template_snapshot=old_snapshot)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_4("moderate", errors)
+        assert any(error["code"] == "template_changed_since_snapshot" for error in errors)
 
 
-class TestBlockedState:
-    def test_blocked_state_blocked(self):
-        state = {
-            "slug": "test",
-            "version": 1,
-            "flow_tier": "full",
-            "current_step": 7,
-            "completed_steps": [1,2,3,4,5,6],
-            "required_artifacts": ["WD-CTX"],
-            "produced_artifacts": [],
-            "selected_members": ["architect"],
-            "blocked": True,
-            "block_reason": "主题模糊",
-            "can_enter_step_8": False,
-            "can_enter_step_9": False,
-            "can_enter_step_10": False,
-            "can_enter_step_11": False,
-            "can_enter_step_12": False,
-            "absorption_check_passed": False,
-        }
-        validator = vs.GateValidator(state)
-        errors = []
-        validator.step_7("full", errors)
-        assert len(errors) >= 1
-        codes = [e["code"] for e in errors]
-        assert "blocked_state" in codes
+class TestPathPolicy:
+    def test_step_3_rejects_legacy_solution_root_for_new_writes(self, workspace: dict[str, Path]) -> None:
+        legacy_root = workspace["arch"] / "solutions"
+        (legacy_root / "working-drafts").mkdir(parents=True)
+        state = make_state(
+            workspace,
+            current_step=3,
+            completed_steps=[1, 2],
+            solution_root=str(legacy_root),
+            working_draft_path=str(legacy_root / "working-drafts" / "sample-solution.working.md"),
+        )
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_3("moderate", errors)
+        assert any(error["code"] == "legacy_path_detected" for error in errors)
 
 
 class TestRepairPlan:
-    def test_repair_plan_structure(self):
+    def test_repair_plan_contains_final_document_and_block_hints(self) -> None:
         issues = [
-            {
-                "code": "missing_artifact",
-                "message": "步骤 10: 缺少 WD-CTX",
-                "step": 10,
-                "flow_tier": "full",
-                "field": "produced_artifacts",
-                "missing_artifacts": ["WD-CTX"],
-                "recommended_rollback_step": 7,
-                "recommended_repair_step": 7,
-                "skip_instead_of_retry": False,
-            }
+            vs.make_issue(
+                code="missing_working_draft_block",
+                message="步骤 10: working draft 缺少 WD-TASK 区块",
+                step=10,
+                flow_tier="moderate",
+                field="produced_artifacts",
+                missing_artifacts=["WD-TASK"],
+                recommended_rollback_step=8,
+                recommended_repair_step=8,
+            ),
+            vs.make_issue(
+                code="final_document_missing",
+                message="步骤 12: 最终文档不存在",
+                step=12,
+                flow_tier="moderate",
+                field="final_document_path",
+                recommended_rollback_step=11,
+                recommended_repair_step=11,
+            ),
         ]
         plan = vs.build_repair_plan(issues)
-        assert len(plan) >= 1
-        assert plan[0]["step"] == 7
-
-    def test_repair_plan_skip_instead_of_retry(self):
-        issues = [
-            {
-                "code": "invalid_step_for_tier",
-                "message": "步骤 8: light 流程不应进入此步骤",
-                "step": 8,
-                "flow_tier": "light",
-                "skip_instead_of_retry": True,
-            }
-        ]
-        plan = vs.build_repair_plan(issues)
-        assert len(plan) == 0
-
-
-class TestJSONOutput:
-    def test_json_output_fields_pass(self):
-        state = {
-            "slug": "test",
-            "version": 1,
-            "flow_tier": "light",
-            "current_step": 10,
-            "completed_steps": [1,2,3,4,5,6,7],
-            "required_artifacts": ["WD-CTX", "WD-SYN-LIGHT"],
-            "produced_artifacts": ["WD-CTX", "WD-SYN-LIGHT"],
-            "selected_members": ["architect"],
-            "blocked": False,
-            "block_reason": "",
-            "can_enter_step_8": True,
-            "can_enter_step_9": False,
-            "can_enter_step_10": True,
-            "can_enter_step_11": True,
-            "can_enter_step_12": True,
-            "absorption_check_passed": True,
-        }
-        issues = []
-        validator = vs.GateValidator(state)
-        validator.step_10("light", issues)
-        result = {
-            "step": 10,
-            "flow_tier": "light",
-            "passed": len(issues) == 0,
-            "summary": vs.build_summary(issues),
-            "issues": issues,
-        }
-        assert result["passed"] is True
-        assert "summary" in result
-        assert "issues" in result
-
-    def test_json_output_fields_fail(self):
-        state = {
-            "slug": "test",
-            "version": 1,
-            "flow_tier": "full",
-            "current_step": 10,
-            "completed_steps": [1,2,3,4,5,6,7,8,9],
-            "required_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP", "WD-SYN"],
-            "produced_artifacts": ["WD-CTX", "WD-TASK"],
-            "selected_members": ["architect"],
-            "blocked": False,
-            "block_reason": "",
-            "can_enter_step_8": True,
-            "can_enter_step_9": True,
-            "can_enter_step_10": True,
-            "can_enter_step_11": True,
-            "can_enter_step_12": True,
-            "absorption_check_passed": True,
-        }
-        issues = []
-        validator = vs.GateValidator(state)
-        validator.step_10("full", issues)
-        result = {
-            "step": 10,
-            "flow_tier": "full",
-            "passed": len(issues) == 0,
-            "summary": vs.build_summary(issues),
-            "issues": issues,
-        }
-        assert result["passed"] is False
-        assert len(result["issues"]) >= 1
-
-
-class TestExpectedArtifacts:
-    def test_artifacts_for_light_step_11(self):
-        artifacts = vs.expected_artifacts_for_step(11, "light")
-        assert "WD-CTX" in artifacts
-        assert "WD-SYN-LIGHT" in artifacts
-
-    def test_artifacts_for_moderate_step_11(self):
-        artifacts = vs.expected_artifacts_for_step(11, "moderate")
-        assert "WD-CTX" in artifacts
-        assert "WD-TASK" in artifacts
-        assert "WD-SYN" in artifacts
-
-    def test_artifacts_for_full_step_11(self):
-        artifacts = vs.expected_artifacts_for_step(11, "full")
-        assert "WD-CTX" in artifacts
-        assert "WD-TASK" in artifacts
-        assert "WD-SYN" in artifacts
+        assert [item["step"] for item in plan] == [8, 11]
+        assert any(hint["artifact"] == "WD-TASK" for hint in plan[0]["artifact_write_hint"])
+        assert any(hint["artifact"] == "final_document" for hint in plan[1]["artifact_write_hint"])
