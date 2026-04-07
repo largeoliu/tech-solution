@@ -20,6 +20,14 @@ cleanup_spec = importlib.util.spec_from_file_location("finalize_cleanup", script
 fc = importlib.util.module_from_spec(cleanup_spec)
 cleanup_spec.loader.exec_module(fc)
 
+tier_spec = importlib.util.spec_from_file_location("set_flow_tier", scripts_path / "set-flow-tier.py")
+sft = importlib.util.module_from_spec(tier_spec)
+tier_spec.loader.exec_module(sft)
+
+skip_spec = importlib.util.spec_from_file_location("mark_step_skipped", scripts_path / "mark-step-skipped.py")
+mss = importlib.util.module_from_spec(skip_spec)
+skip_spec.loader.exec_module(mss)
+
 
 DEFAULT_TEMPLATE = """# 技术方案文档
 
@@ -221,6 +229,63 @@ class TestSchema:
         assert any(error["code"] == "premature_cleanup_flags" for error in errors)
 
 
+class TestStateScripts:
+    def test_set_flow_tier_script_updates_contract_atomically(self, workspace: dict[str, Path]) -> None:
+        state = make_state(
+            workspace,
+            current_step=4,
+            completed_steps=[1, 2, 3],
+            flow_tier="full",
+            required_artifacts=[],
+            skipped_steps=[],
+            checkpoints={
+                "step-2": {"summary": "前置文件检查完成", "prerequisites_checked": True},
+                "step-3": {"summary": "模板快照已提取", "template_loaded": True},
+                "step-4": {"summary": "", "solution_type": "", "flow_tier": ""},
+                "step-6": {"summary": "repowiki 检测完成", "repowiki_checked": True, "repowiki_exists": False},
+            },
+        )
+        workspace["state_path"].write_text(vs.yaml.safe_dump(state, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        payload = sft.set_flow_tier(
+            state_path=workspace["state_path"],
+            flow_tier="moderate",
+            solution_type="现有资产改造",
+            summary="方案类型：现有资产改造；flow_tier=moderate",
+            next_step=5,
+            append_completed=True,
+        )
+        updated = vs.yaml.safe_load(workspace["state_path"].read_text(encoding="utf-8"))
+        assert payload["flow_tier"] == "moderate"
+        assert updated["flow_tier"] == "moderate"
+        assert updated["checkpoints"]["step-4"]["flow_tier"] == "moderate"
+        assert updated["required_artifacts"] == ["WD-CTX", "WD-TASK", "WD-SYN"]
+        assert updated["skipped_steps"] == [9]
+        assert updated["current_step"] == 5
+        assert 4 in updated["completed_steps"]
+
+    def test_mark_step_skipped_removes_step_from_completed_steps(self, workspace: dict[str, Path]) -> None:
+        state = make_state(
+            workspace,
+            current_step=9,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9],
+            skipped_steps=[],
+        )
+        workspace["state_path"].write_text(vs.yaml.safe_dump(state, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        payload = mss.mark_step_skipped(
+            state_path=workspace["state_path"],
+            step=9,
+            summary="因流程级别跳过 step-9",
+            reason="moderate 无需 WD-EXP-*",
+            next_step=10,
+        )
+        updated = vs.yaml.safe_load(workspace["state_path"].read_text(encoding="utf-8"))
+        assert payload["skipped_step"] == 9
+        assert 9 not in updated["completed_steps"]
+        assert 9 in updated["skipped_steps"]
+        assert updated["checkpoints"]["step-9"]["skipped"] is True
+        assert updated["current_step"] == 10
+
+
 class TestWorkingDraft:
     def test_step_10_moderate_passes_with_working_draft_blocks(self, workspace: dict[str, Path]) -> None:
         workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n", encoding="utf-8")
@@ -392,6 +457,31 @@ class TestRealRunRegression:
         validator.step_10("full", errors)
         assert any(error["code"] == "missing_working_draft_block" and error["missing_artifacts"] == ["WD-EXP-SYSTEMS_ARCHITECT"] for error in errors)
         assert any(error["code"] == "missing_working_draft_block" and error["missing_artifacts"] == ["WD-EXP-DOMAIN_EXPERT"] for error in errors)
+
+    def test_step_11_detects_final_document_created_before_step_10_completion(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n## WD-SYN\n", encoding="utf-8")
+        workspace["final_document_path"].write_text(
+            "# 技术方案文档\n\n## 一、背景\n\n### 1.1 需求概述\n\n内容\n\n### 1.2 核心目标\n\n内容\n\n## 二、设计\n\n### 2.1 方案设计\n\n内容\n\n### 2.2 风险与验证\n\n内容\n",
+            encoding="utf-8",
+        )
+        state = make_state(
+            workspace,
+            current_step=11,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 10],
+            produced_artifacts=["WD-CTX", "WD-TASK", "WD-SYN"],
+            checkpoints={
+                "step-2": {"summary": "前置文件检查完成", "prerequisites_checked": True},
+                "step-3": {"summary": "模板快照已提取", "template_loaded": True},
+                "step-4": {"summary": "方案类型完成", "solution_type": "现有资产改造", "flow_tier": "moderate"},
+                "step-6": {"summary": "repowiki 检测完成", "repowiki_checked": True, "repowiki_exists": False},
+                "step-9": {"summary": "因流程级别跳过 step-9", "skipped": True, "reason": "moderate 跳过 step-9"},
+                "step-10": {"summary": "收敛完成", "completed_at": "2100-01-01T00:00:00+00:00"},
+            },
+        )
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_11("moderate", errors)
+        assert any(error["code"] == "step_order_violation" for error in errors)
 
     def test_step_12_requires_non_empty_summary(self, workspace: dict[str, Path]) -> None:
         workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n## WD-SYN\n", encoding="utf-8")

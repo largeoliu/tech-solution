@@ -49,6 +49,10 @@ compatibility:
   - 用于步骤 7-10，唯一负责把 working draft 中真实存在的稳定区块同步到 `produced_artifacts`
 - `python scripts/advance-state-step.py --state <状态文件> --step <N> --summary <摘要> --append-completed --next-step <N+1>`
   - 用于步骤推进和 checkpoint 原子更新，避免整份 YAML 手写重写
+- `python scripts/set-flow-tier.py --state <状态文件> --flow-tier <light|moderate|full> --solution-type "<方案类型>" --summary "<步骤4摘要>" --next-step 5 --append-completed`
+  - 用于步骤 4，原子写入 `flow_tier`、`checkpoints.step-4.flow_tier`、`required_artifacts` 与 `skipped_steps`
+- `python scripts/mark-step-skipped.py --state <状态文件> --step <N> --summary "<跳过摘要>" --reason "<跳过原因>" --next-step <下一步>`
+  - 用于 `light` / `moderate` 的显式跳步；保证不会把跳过步骤写进 `completed_steps`
 - `python scripts/finalize-cleanup.py --state <状态文件> --flow-tier <flow_tier> --summary "<步骤12摘要>" --format json`
   - 用于步骤 12 的唯一合法清理路径：先验证，再置标志、删除 working draft 与状态文件，并直接结束流程
 
@@ -63,6 +67,7 @@ compatibility:
 - **严禁手写模板快照**：`template_snapshot` 和 `template_slots` 只能由 `extract-template-snapshot.py` 生成，不得由模型自行概括成粗粒度大章节
 - **严禁手写 produced_artifacts**：必须以 `sync-artifacts-from-draft.py` 的结果为准，不得口头宣称某个 `WD-*` 已存在
 - **严禁把被跳过步骤记为已完成**：`light/moderate` 流程允许跳过的步骤必须写入 `skipped_steps` 与结构化 checkpoint，不得写入 `completed_steps`
+- **step-4 必须走专用脚本**：`flow_tier`、`required_artifacts`、`skipped_steps` 必须由 `set-flow-tier.py` 同步写入，禁止先推进再手改 YAML
 - **目录策略固定为双读单写**：可以读取历史 `.architecture/solutions/`，但本次流程的新 working draft 与最终文档统一写入 `.architecture/technical-solutions/`
 
 ## 自动推进与过程证据

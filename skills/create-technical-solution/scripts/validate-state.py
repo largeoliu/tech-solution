@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import re
 import sys
@@ -127,6 +128,16 @@ def resolve_path(value: Any, base: Path) -> Optional[Path]:
     return (base / path).resolve()
 
 
+def parse_iso_datetime(value: Any) -> Optional[datetime]:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        normalized = value.replace("Z", "+00:00")
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
 def remediation_for_issue(issue: dict[str, Any]) -> str:
     code = issue["code"]
     missing_artifacts = issue.get("missing_artifacts", [])
@@ -193,6 +204,8 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
         return "回到被跳过的步骤，补齐 skipped_steps 与 checkpoints.step-N 的显式 skip 记录；若误记为 completed_steps，需同步移除。"
     if code == "cleanup_attempt_before_validation":
         return "步骤 12 必须先通过 validator，再置 absorption_check_passed/cleanup_allowed。请先回退这些标志，并使用 finalize-cleanup.py 完成清理。"
+    if code == "step_order_violation":
+        return "回到步骤 10，先完成 WD-SYN 并落盘，再进入步骤 11 成稿；不得先生成最终文档后回填中间产物。"
     if code == "task_slots_incomplete":
         return "回到步骤 8，按 template_snapshot 为每个真实槽位生成任务条目，并把缺失槽位补进 WD-TASK。"
     if code == "missing_step_summary":
@@ -295,7 +308,7 @@ def expected_required_artifacts(flow_tier: str) -> dict[str, Any]:
         return {"required": ["WD-CTX", "WD-SYN-LIGHT"], "forbidden_prefixes": ["WD-EXP-"], "forbidden_exact": ["WD-TASK", "WD-SYN"]}
     if flow_tier == "moderate":
         return {"required": ["WD-CTX", "WD-TASK", "WD-SYN"], "forbidden_prefixes": ["WD-EXP-"], "forbidden_exact": ["WD-SYN-LIGHT"]}
-    return {"required": ["WD-CTX", "WD-TASK", "WD-SYN"], "forbidden_prefixes": [], "forbidden_exact": ["WD-SYN-LIGHT"]}
+    return {"required": ["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"], "forbidden_prefixes": [], "forbidden_exact": ["WD-SYN-LIGHT"]}
 
 
 class GateValidator:
@@ -684,7 +697,13 @@ class GateValidator:
         if step_num >= 4:
             contract = expected_required_artifacts(state_tier)
             required_artifacts = [str(item) for item in self.state.get("required_artifacts", [])]
-            missing = [artifact for artifact in contract["required"] if artifact not in required_artifacts]
+            missing: list[str] = []
+            for artifact in contract["required"]:
+                if artifact == "WD-EXP-*":
+                    if not any(str(item).startswith("WD-EXP-") or str(item) == "WD-EXP-*" for item in required_artifacts):
+                        missing.append(artifact)
+                elif artifact not in required_artifacts:
+                    missing.append(artifact)
             forbidden = [
                 artifact
                 for artifact in required_artifacts
@@ -833,6 +852,34 @@ class GateValidator:
                     recommended_rollback_step=11,
                     recommended_repair_step=11,
                     details={"expected_headings": expected_titles, "actual_headings": final_titles},
+                ),
+            )
+
+    def check_final_document_not_premature(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        final_document = self.final_document_path(require_explicit=True)
+        if not final_document or not final_document.exists():
+            return
+        checkpoint = self.checkpoint(10, errors, flow_tier)
+        completed_at = parse_iso_datetime(checkpoint.get("completed_at"))
+        if not completed_at:
+            return
+        final_doc_mtime = datetime.fromtimestamp(final_document.stat().st_mtime, tz=completed_at.tzinfo)
+        if final_doc_mtime < completed_at:
+            add_issue(
+                errors,
+                make_issue(
+                    code="step_order_violation",
+                    message="步骤 11: 最终文档生成时间早于步骤 10 完成时间，存在先成稿后回填 WD-SYN 的顺序错误",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="final_document_path",
+                    recommended_rollback_step=10,
+                    recommended_repair_step=10,
+                    details={
+                        "final_document_path": str(final_document),
+                        "final_document_mtime": final_doc_mtime.isoformat(),
+                        "step_10_completed_at": completed_at.isoformat(),
+                    },
                 ),
             )
 
@@ -1296,6 +1343,7 @@ class GateValidator:
                 recommended_repair_step=ARTIFACT_REPAIR_STEP.get(artifact, 9 if str(artifact).startswith("WD-EXP-") else 11),
             )
         self.check_working_draft(artifacts, errors, 11, flow_tier)
+        self.check_final_document_not_premature(errors, 11, flow_tier)
         if flow_tier == "full":
             self.check_expert_blocks(errors, 11, flow_tier)
 
@@ -1416,6 +1464,8 @@ def completion_checks_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
         checks.append(check_field_equals("cleanup_allowed", False, "cleanup_allowed 已回退为 false"))
     elif code == "cleanup_attempt_before_validation":
         checks.append(check_field_equals("checkpoints.step-12.validator_passed", True, "step-12.validator_passed 已为 true"))
+    elif code == "step_order_violation":
+        checks.append({"type": "custom", "summary": "最终文档生成顺序已晚于 step-10 完成时间"})
     elif code == "completed_steps_invalid":
         checks.append({"type": "custom", "summary": "completed_steps 已恢复连续且与 current_step 一致"})
     elif code == "flow_tier_state_mismatch":
@@ -1455,7 +1505,7 @@ def action_types_for_issue(issue: dict[str, Any]) -> list[str]:
     code = issue.get("code")
     if code == "invalid_step_for_tier":
         return ["skip_step"]
-    if code in {"missing_artifact", "missing_working_draft_block", "final_document_missing", "final_document_headings_mismatch", "task_slots_incomplete"}:
+    if code in {"missing_artifact", "missing_working_draft_block", "final_document_missing", "final_document_headings_mismatch", "task_slots_incomplete", "step_order_violation"}:
         return ["generate_artifact", "update_state", "rerun_validation"]
     if code in {"schema_mismatch", "missing_working_draft_path", "missing_solution_root", "missing_template_snapshot", "template_changed_since_snapshot", "legacy_path_detected", "premature_cleanup_flags", "flow_tier_state_mismatch", "step_skipped_without_checkpoint", "cleanup_attempt_before_validation"}:
         return ["update_state", "rerun_validation"]
@@ -1514,6 +1564,9 @@ def state_patch_hints_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]]:
         hints.append({"field": "absorption_check_passed", "operation": "set", "value": False, "summary": "先回退 absorption_check_passed"})
         hints.append({"field": "cleanup_allowed", "operation": "set", "value": False, "summary": "先回退 cleanup_allowed"})
         hints.append({"field": "checkpoints.step-12.validator_passed", "operation": "set", "value": True, "summary": "在 validator 通过后写入 step-12.validator_passed"})
+    elif code == "step_order_violation":
+        hints.append({"field": "checkpoints.step-10", "operation": "update", "value": None, "summary": "先补齐 step-10 的 WD-SYN 与完成时间，再进入 step-11"})
+        hints.append({"field": "final_document_path", "operation": "update", "value": None, "summary": "必要时重生成最终文档，确保成稿顺序晚于 step-10"})
     elif code == "step_skipped_without_checkpoint":
         skipped_step = issue.get("skipped_step", "<step>")
         hints.append({"field": "skipped_steps", "operation": "set", "value": f"<包含 {skipped_step} 的步骤列表>", "summary": "补齐 skipped_steps"})
@@ -1575,6 +1628,29 @@ def artifact_write_hints_for_issue(issue: dict[str, Any]) -> list[dict[str, Any]
                 "summary": "按 template_snapshot 补齐 WD-TASK 的槽位任务单并同步 produced_artifacts",
             }
         )
+    if code == "step_order_violation":
+        hints.append(
+            {
+                "artifact": "WD-SYN",
+                "target": "working_draft",
+                "block": "WD-SYN",
+                "write_mode": "replace_block",
+                "status_sync_field": "produced_artifacts",
+                "status_sync_operation": "append_unique",
+                "summary": "先完成 WD-SYN 收敛区块，再重新生成最终文档",
+            }
+        )
+        hints.append(
+            {
+                "artifact": "final_document",
+                "target": "final_document",
+                "block": "final_markdown",
+                "write_mode": "replace_file",
+                "status_sync_field": "final_document_path",
+                "status_sync_operation": "set",
+                "summary": "在 step-10 完成后重新生成最终技术方案文档",
+            }
+        )
     return hints
 
 
@@ -1582,7 +1658,7 @@ def working_draft_context_hints_for_issue(issue: dict[str, Any]) -> list[dict[st
     code = issue.get("code")
     flow_tier = issue.get("flow_tier", "full")
     hints: list[dict[str, Any]] = []
-    if code not in {"missing_artifact", "missing_working_draft_block", "final_document_missing", "final_document_headings_mismatch"}:
+    if code not in {"missing_artifact", "missing_working_draft_block", "final_document_missing", "final_document_headings_mismatch", "step_order_violation"}:
         return hints
 
     for artifact in issue.get("missing_artifacts", []):

@@ -98,6 +98,7 @@ def main() -> int:
     checkpoint = {"summary": args.summary}
     checkpoint.update(parse_key_value(args.field))
     checkpoint.update(parse_json_key_value(args.field_json))
+    checkpoint["completed_at"] = iso_now()
     checkpoints[f"step-{args.step}"] = checkpoint
 
     if args.append_completed:
