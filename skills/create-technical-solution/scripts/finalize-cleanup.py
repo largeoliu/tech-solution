@@ -7,61 +7,22 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib.util
 import json
-from datetime import datetime, timezone
 from pathlib import Path
+import sys
 from typing import Any
 
-import yaml
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
-
-def iso_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-
-
-def load_yaml(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if not isinstance(data, dict):
-        raise SystemExit(f"状态文件必须是 YAML 对象: {path}")
-    return data
-
-
-def dump_yaml(path: Path, data: dict[str, Any]) -> None:
-    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
-
-
-def compute_state_fingerprint(state: dict[str, Any]) -> str:
-    receipt = state.get("gate_receipt")
-    scrubbed = dict(state)
-    if isinstance(receipt, dict):
-        scrubbed["gate_receipt"] = {
-            "step": receipt.get("step", 0),
-            "flow_tier": receipt.get("flow_tier", ""),
-            "state_fingerprint": "",
-            "validated_at": "",
-        }
-    payload = yaml.safe_dump(scrubbed, allow_unicode=True, sort_keys=True)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def require_receipt(state: dict[str, Any], expected_step: int, expected_flow_tier: str) -> None:
-    receipt = state.get("gate_receipt")
-    if not isinstance(receipt, dict):
-        raise SystemExit("缺少 gate_receipt，必须先运行 validate-state.py --write-pass-receipt。")
-    if int(receipt.get("step") or 0) != expected_step:
-        raise SystemExit(f"gate_receipt.step={receipt.get('step')}，期望 {expected_step}。")
-    if str(receipt.get("flow_tier") or "") != expected_flow_tier:
-        raise SystemExit(f"gate_receipt.flow_tier={receipt.get('flow_tier')}，期望 {expected_flow_tier}。")
-    if str(receipt.get("state_fingerprint") or "") != compute_state_fingerprint(state):
-        raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")
+from protocol_runtime import compute_state_fingerprint, dump_yaml, iso_now, load_yaml, require_receipt
 
 
 def load_validator_module(scripts_dir: Path):
     spec = importlib.util.spec_from_file_location("validate_state", scripts_dir / "validate-state.py")
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -70,6 +31,7 @@ def load_validator_module(scripts_dir: Path):
 
 def load_sync_module(scripts_dir: Path):
     spec = importlib.util.spec_from_file_location("sync_artifacts_from_draft", scripts_dir / "sync-artifacts-from-draft.py")
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -85,7 +47,7 @@ def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, di
             "state_path": str(state_path),
         }
 
-    state = load_yaml(state_path)
+    state = load_yaml(state_path, missing_ok=True)
     require_receipt(state, expected_step=12, expected_flow_tier=flow_tier)
     repo_root = state_path.parent.parent.parent.parent
     draft_value = str(state.get("working_draft_path") or "")

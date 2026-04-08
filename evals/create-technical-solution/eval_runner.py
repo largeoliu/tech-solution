@@ -9,28 +9,29 @@
 
 用法：
     # 列出现有用例
-    uv run evals/create-technical-solution/eval_runner.py list
+    python3 evals/create-technical-solution/eval_runner.py list
 
     # 初始化测试项目（一次性）
-    uv run evals/create-technical-solution/eval_runner.py setup-project
+    python3 evals/create-technical-solution/eval_runner.py setup-project
 
     # 生成测试 fixture
-    uv run evals/create-technical-solution/eval_runner.py fixture T01
-    uv run evals/create-technical-solution/eval_runner.py fixture --all
+    python3 evals/create-technical-solution/eval_runner.py fixture T01
+    python3 evals/create-technical-solution/eval_runner.py fixture --all
 
     # 在目标项目中运行 skill 后，检查结果
-    uv run evals/create-technical-solution/eval_runner.py grade T01
-    uv run evals/create-technical-solution/eval_runner.py grade T01 --state .architecture/.state/.../xxx.yaml
+    python3 evals/create-technical-solution/eval_runner.py grade T01
+    python3 evals/create-technical-solution/eval_runner.py grade T01 --state .architecture/.state/.../xxx.yaml
 
     # 生成报告
-    uv run evals/create-technical-solution/eval_runner.py report
-    uv run evals/create-technical-solution/eval_runner.py report --format json
+    python3 evals/create-technical-solution/eval_runner.py report
+    python3 evals/create-technical-solution/eval_runner.py report --format json
 
     # validate-state.py 单元测试
-    uv run evals/create-technical-solution/eval_runner.py test-validate
+    python3 evals/create-technical-solution/eval_runner.py test-validate
 """
 
 import argparse
+import copy
 import json
 import sys
 from datetime import datetime
@@ -62,46 +63,14 @@ DEFAULT_TARGET = Path(__file__).resolve().parents[2] / "tests" / "sample-project
 
 SKILL_ROOT = Path(__file__).resolve().parents[2] / "skills" / "create-technical-solution"
 VALIDATE_SCRIPT = SKILL_ROOT / "scripts" / "validate-state.py"
+STATE_TEMPLATE_PATH = SKILL_ROOT / "templates" / "_template.yaml"
 
-# 状态文件模板
-STATE_TEMPLATE = {
-    "skill": "create-technical-solution",
-    "slug": "",
-    "topic_summary": "",
-    "flow_tier": "",
-    "current_step": 1,
-    "step_status": "pending",
-    "started_at": "",
-    "updated_at": "",
-    "solution_root": ".architecture/technical-solutions",
-    "working_draft_path": "",
-    "final_document_path": "",
-    "template_snapshot": {
-        "path": ".architecture/templates/technical-solution-template.md",
-        "slot_level": None,
-        "headings": [],
-        "captured_at": "",
-    },
-    "completed_steps": [],
-    "required_artifacts": [],
-    "produced_artifacts": [],
-    "selected_members": [],
-    "blocked": False,
-    "block_reason": None,
-    "can_enter_step_8": False,
-    "can_enter_step_9": False,
-    "can_enter_step_10": False,
-    "can_enter_step_11": False,
-    "can_enter_step_12": False,
-    "absorption_check_passed": False,
-    "cleanup_allowed": False,
-    "checkpoints": {
-        "step-2": {"summary": "", "prerequisites_checked": False},
-        "step-3": {"summary": "", "template_loaded": False},
-        "step-4": {"summary": "", "solution_type": ""},
-        "step-6": {"summary": "", "repowiki_checked": False, "repowiki_exists": False, "repowiki_path": ""},
-    },
-}
+
+def load_state_template() -> dict:
+    template = yaml.safe_load(STATE_TEMPLATE_PATH.read_text(encoding="utf-8")) or {}
+    if not isinstance(template, dict):
+        raise ValueError(f"状态模板格式无效: {STATE_TEMPLATE_PATH}")
+    return template
 
 
 def load_cases() -> list[dict]:
@@ -257,6 +226,7 @@ def cmd_fixture(cases: list[dict], case_id: str, all_cases: bool = False) -> Non
 
     for case in cases_to_run:
         slug = case.get("query", "unknown")[:40].strip().lower().replace(" ", "-")
+        state_template = copy.deepcopy(load_state_template())
         fixture = {
             "case_id": f"T{cases.index(case)+1:02d}" if case in cases else "unknown",
             "query": case.get("query", ""),
@@ -266,13 +236,12 @@ def cmd_fixture(cases: list[dict], case_id: str, all_cases: bool = False) -> Non
             "files_required": case.get("files", []),
             "notes": case.get("notes", ""),
             "fixture_created_at": datetime.now().isoformat(),
-            "state_template": STATE_TEMPLATE.copy(),
+            "state_template": state_template,
             "status": "pending",
             "actual_flow_tier": None,
             "actual_behaviors": [],
             "assertion_results": {},
         }
-        fixture["state_template"]["slug"] = slug
 
         fname = f"{fixture['case_id']}_{slug}.json"
         fpath = FIXTURES_DIR / fname

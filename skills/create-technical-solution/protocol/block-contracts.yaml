@@ -1,0 +1,23 @@
+version: 1
+blocks:
+  WD-CTX:
+    type: singleton
+    heading: WD-CTX
+  WD-TASK:
+    type: singleton
+    heading: WD-TASK
+  WD-EXP:
+    type: pattern
+    heading_pattern: WD-EXP-[A-Z0-9_-]+
+    required_sections:
+      - 参与槽位
+      - 决策类型
+      - 核心理由
+      - 关键证据引用
+      - 未决点
+  WD-SYN:
+    type: singleton
+    heading: WD-SYN
+  WD-SYN-LIGHT:
+    type: singleton
+    heading: WD-SYN-LIGHT

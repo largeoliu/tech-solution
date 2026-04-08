@@ -7,67 +7,16 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-from datetime import datetime, timezone
 from pathlib import Path
+import sys
 from typing import Any
 
-import yaml
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
-
-def iso_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-
-
-def load_yaml(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        raise SystemExit(f"状态文件不存在: {path}。若步骤 12 已完成清理，不应再次调用 advance-state-step.py。")
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if not isinstance(data, dict):
-        raise SystemExit(f"状态文件必须是 YAML 对象: {path}")
-    return data
-
-
-def dump_yaml(path: Path, data: dict[str, Any]) -> None:
-    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
-
-
-def compute_state_fingerprint(state: dict[str, Any]) -> str:
-    receipt = state.get("gate_receipt")
-    scrubbed = dict(state)
-    if isinstance(receipt, dict):
-        scrubbed["gate_receipt"] = {
-            "step": receipt.get("step", 0),
-            "flow_tier": receipt.get("flow_tier", ""),
-            "state_fingerprint": "",
-            "validated_at": "",
-        }
-    payload = yaml.safe_dump(scrubbed, allow_unicode=True, sort_keys=True)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def require_receipt(state: dict[str, Any], expected_step: int) -> None:
-    receipt = state.get("gate_receipt")
-    if not isinstance(receipt, dict):
-        raise SystemExit("缺少 gate_receipt，必须先运行 validate-state.py --write-pass-receipt。")
-    if int(receipt.get("step") or 0) != expected_step:
-        raise SystemExit(f"gate_receipt.step={receipt.get('step')}，期望 {expected_step}。")
-    if str(receipt.get("state_fingerprint") or "") != compute_state_fingerprint(state):
-        raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")
-
-
-def refresh_receipt(state: dict[str, Any]) -> None:
-    flow_tier = str(state.get("flow_tier") or "").strip() or "light"
-    step = int(state.get("current_step") or 0) or 1
-    state["gate_receipt"] = {
-        "step": step,
-        "flow_tier": flow_tier,
-        "state_fingerprint": "",
-        "validated_at": "",
-    }
-    state["gate_receipt"]["state_fingerprint"] = compute_state_fingerprint(state)
-    state["gate_receipt"]["validated_at"] = iso_now()
+from protocol_runtime import dump_yaml, iso_now, load_yaml, refresh_receipt, require_receipt
 
 
 def set_path(target: dict[str, Any], dotted_path: str, value: Any) -> None:
@@ -114,6 +63,79 @@ def parse_json_key_value(raw: list[str]) -> dict[str, Any]:
     return values
 
 
+def advance_state_step(
+    *,
+    state_path: Path,
+    step: int,
+    summary: str,
+    field: list[str] | None = None,
+    field_json: list[str] | None = None,
+    state_fields: list[str] | None = None,
+    state_fields_json: list[str] | None = None,
+    append_completed: bool,
+    next_step: int | None,
+    require_receipt_step: int | None,
+) -> dict[str, Any]:
+    if step >= 10:
+        raise SystemExit(
+            f"advance-state-step.py 不允许用于 step-{step}。"
+            " step-10 只能用 upsert-draft-block.py；"
+            " step-11 只能用 render-final-document.py；"
+            " step-12 只能用 finalize-cleanup.py。"
+        )
+
+    state = load_yaml(
+        state_path,
+        missing_message=f"状态文件不存在: {state_path}。若步骤 12 已完成清理，不应再次调用 advance-state-step.py。",
+    )
+    if require_receipt_step is not None:
+        require_receipt(state, expected_step=require_receipt_step)
+
+    field = list(field or [])
+    field_json = list(field_json or [])
+    state_fields = list(state_fields or [])
+    state_fields_json = list(state_fields_json or [])
+
+    if step == 2:
+        found_checked = any(kv.startswith("prerequisites_checked=") for kv in field)
+        if not found_checked:
+            field.append("prerequisites_checked=true")
+
+    checkpoints = state.setdefault("checkpoints", {})
+    if not isinstance(checkpoints, dict):
+        checkpoints = {}
+        state["checkpoints"] = checkpoints
+    checkpoint = {"summary": summary}
+    checkpoint.update(parse_key_value(field))
+    checkpoint.update(parse_json_key_value(field_json))
+    checkpoint["completed_at"] = iso_now()
+    checkpoints[f"step-{step}"] = checkpoint
+
+    if append_completed:
+        completed = state.setdefault("completed_steps", [])
+        if not isinstance(completed, list):
+            completed = []
+            state["completed_steps"] = completed
+        if step not in completed:
+            completed.append(step)
+            completed.sort()
+
+    if next_step is not None:
+        state["current_step"] = next_step
+    for key, value in parse_key_value(state_fields).items():
+        set_path(state, key, value)
+    for key, value in parse_json_key_value(state_fields_json).items():
+        set_path(state, key, value)
+    refresh_receipt(state)
+    dump_yaml(state_path, state)
+    return {
+        "passed": True,
+        "step": step,
+        "next_step": state.get("current_step"),
+        "checkpoint": checkpoint,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="推进状态文件中的步骤和 checkpoint")
     parser.add_argument("--state", required=True, help="状态文件路径")
@@ -128,50 +150,18 @@ def main() -> int:
     parser.add_argument("--require-receipt-step", type=int, help="要求 gate_receipt.step 与该值一致")
     args = parser.parse_args()
 
-    if args.step >= 10:
-        raise SystemExit(
-            f"advance-state-step.py 不允许用于 step-{args.step}。"
-            " step-10 只能用 upsert-draft-block.py；"
-            " step-11 只能用 render-final-document.py；"
-            " step-12 只能用 finalize-cleanup.py。"
-        )
-
-    path = Path(args.state).resolve()
-    state = load_yaml(path)
-    if args.require_receipt_step is not None:
-        require_receipt(state, args.require_receipt_step)
-        
-    if args.step == 2:
-        found_checked = any(kv.startswith("prerequisites_checked=") for kv in args.field)
-        if not found_checked:
-            args.field.append("prerequisites_checked=true")
-    checkpoints = state.setdefault("checkpoints", {})
-    if not isinstance(checkpoints, dict):
-        checkpoints = {}
-        state["checkpoints"] = checkpoints
-    checkpoint = {"summary": args.summary}
-    checkpoint.update(parse_key_value(args.field))
-    checkpoint.update(parse_json_key_value(args.field_json))
-    checkpoint["completed_at"] = iso_now()
-    checkpoints[f"step-{args.step}"] = checkpoint
-
-    if args.append_completed:
-        completed = state.setdefault("completed_steps", [])
-        if not isinstance(completed, list):
-            completed = []
-            state["completed_steps"] = completed
-        if args.step not in completed:
-            completed.append(args.step)
-            completed.sort()
-
-    if args.next_step is not None:
-        state["current_step"] = args.next_step
-    for key, value in parse_key_value(args.state_fields).items():
-        set_path(state, key, value)
-    for key, value in parse_json_key_value(args.state_fields_json).items():
-        set_path(state, key, value)
-    refresh_receipt(state)
-    dump_yaml(path, state)
+    advance_state_step(
+        state_path=Path(args.state).resolve(),
+        step=args.step,
+        summary=args.summary,
+        field=args.field,
+        field_json=args.field_json,
+        state_fields=args.state_fields,
+        state_fields_json=args.state_fields_json,
+        append_completed=args.append_completed,
+        next_step=args.next_step,
+        require_receipt_step=args.require_receipt_step,
+    )
     return 0
 
 

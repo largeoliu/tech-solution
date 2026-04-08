@@ -39,11 +39,12 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
-import os
 import re
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -55,43 +56,10 @@ except ImportError:
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
-STEP_CARD_FILES = {
-    1: "01-定题与范围判断.md",
-    2: "02-检查语义前置文件.md",
-    3: "03-读取当前生效模板.md",
-    4: "04-判断方案类型.md",
-    5: "05-加载成员名册并选择参与者.md",
-    6: "06-检测repowiki目录.md",
-    7: "07-构建共享上下文.md",
-    8: "08-生成模板任务单.md",
-    9: "09-组织专家按模板逐槽位分析.md",
-    10: "10-按模板逐槽位协作收敛.md",
-    11: "11-严格模板成稿并保存结果.md",
-    12: "12-吸收检查与清理.md",
-}
-
-STEP_NAMES = {
-    1: "定题与范围判断",
-    2: "检查前置文件",
-    3: "读取当前生效模板",
-    4: "判断方案类型",
-    5: "加载成员名册",
-    6: "检测 repowiki",
-    7: "构建共享上下文 (WD-CTX)",
-    8: "生成模板任务单 (WD-TASK)",
-    9: "专家分析 (WD-EXP-*)",
-    10: "协作收敛 (WD-SYN)",
-    11: "严格模板成稿",
-    12: "吸收检查与清理",
-}
-
-# 步骤 -> 需要的 block 名称
-STEP_BLOCK_MAP = {
-    7: "WD-CTX",
-    8: "WD-TASK",
-    10: None,  # WD-SYN or WD-SYN-LIGHT, depends on flow_tier
-}
+from protocol_runtime import refresh_receipt, workflow_default_block, workflow_step_card_path, workflow_step_name
 
 
 def load_state(state_path: Path) -> dict[str, Any]:
@@ -99,6 +67,24 @@ def load_state(state_path: Path) -> dict[str, Any]:
         return {}
     data = yaml.safe_load(state_path.read_text(encoding="utf-8")) or {}
     return data if isinstance(data, dict) else {}
+
+
+def seed_checkpoint_summary(state_path: Path, step: int, summary: str) -> None:
+    state = load_state(state_path)
+    if not state:
+        return
+    checkpoints = state.get("checkpoints")
+    if not isinstance(checkpoints, dict):
+        return
+    checkpoint = checkpoints.get(f"step-{step}")
+    if not isinstance(checkpoint, dict):
+        checkpoint = {}
+        checkpoints[f"step-{step}"] = checkpoint
+    if str(checkpoint.get("summary") or "").strip():
+        return
+    checkpoint["summary"] = summary
+    refresh_receipt(state)
+    state_path.write_text(yaml.safe_dump(state, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
 def get_flow_tier(state: dict[str, Any]) -> str:
@@ -118,6 +104,24 @@ def get_slug(state_path: Path) -> str:
     return state_path.stem.replace(".yaml", "").replace(".yml", "")
 
 
+def get_step_name(step: int) -> str:
+    try:
+        return workflow_step_name(step)
+    except KeyError:
+        return "未知"
+
+
+def get_step_card_path(step: int) -> Path:
+    return workflow_step_card_path(step)
+
+
+def default_block_for_step(step: int, flow_tier: str) -> str | None:
+    try:
+        return workflow_default_block(step, flow_tier)
+    except KeyError:
+        return None
+
+
 def run_script(args: list[str], cwd: Path | None = None) -> tuple[int, str, str]:
     """运行子进程脚本，返回 (exit_code, stdout, stderr)。"""
     result = subprocess.run(
@@ -129,28 +133,317 @@ def run_script(args: list[str], cwd: Path | None = None) -> tuple[int, str, str]
     return result.returncode, result.stdout, result.stderr
 
 
+@lru_cache(maxsize=1)
+def load_initialize_state_module() -> Any:
+    spec = importlib.util.spec_from_file_location("create_technical_solution_initialize_state", SCRIPTS_DIR / "initialize-state.py")
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+@lru_cache(maxsize=1)
+def load_validate_state_module() -> Any:
+    spec = importlib.util.spec_from_file_location("create_technical_solution_validate_state", SCRIPTS_DIR / "validate-state.py")
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+@lru_cache(maxsize=1)
+def load_upsert_draft_block_module() -> Any:
+    spec = importlib.util.spec_from_file_location("create_technical_solution_upsert_draft_block", SCRIPTS_DIR / "upsert-draft-block.py")
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+@lru_cache(maxsize=1)
+def load_render_final_document_module() -> Any:
+    spec = importlib.util.spec_from_file_location("create_technical_solution_render_final_document", SCRIPTS_DIR / "render-final-document.py")
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+@lru_cache(maxsize=1)
+def load_finalize_cleanup_module() -> Any:
+    spec = importlib.util.spec_from_file_location("create_technical_solution_finalize_cleanup", SCRIPTS_DIR / "finalize-cleanup.py")
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+@lru_cache(maxsize=1)
+def load_mark_step_skipped_module() -> Any:
+    spec = importlib.util.spec_from_file_location("create_technical_solution_mark_step_skipped", SCRIPTS_DIR / "mark-step-skipped.py")
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+@lru_cache(maxsize=1)
+def load_set_flow_tier_module() -> Any:
+    spec = importlib.util.spec_from_file_location("create_technical_solution_set_flow_tier", SCRIPTS_DIR / "set-flow-tier.py")
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+@lru_cache(maxsize=1)
+def load_advance_state_step_module() -> Any:
+    spec = importlib.util.spec_from_file_location("create_technical_solution_advance_state_step", SCRIPTS_DIR / "advance-state-step.py")
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+@lru_cache(maxsize=1)
+def load_extract_template_snapshot_module() -> Any:
+    spec = importlib.util.spec_from_file_location("create_technical_solution_extract_template_snapshot", SCRIPTS_DIR / "extract-template-snapshot.py")
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def run_validator(state_path: Path, step: int, flow_tier: str, write_receipt: bool = False) -> tuple[bool, str]:
     """运行 validate-state.py，返回 (passed, output)。"""
-    cmd = [
-        str(SCRIPTS_DIR / "validate-state.py"),
-        "--state", str(state_path),
-        "--step", str(step),
-        "--flow-tier", flow_tier,
-        "--format", "json",
-    ]
+    module = load_validate_state_module()
+    state = module.load_state(state_path)
+    validator = module.GateValidator(state, state_path)
+    errors: list[dict[str, Any]] = []
+    getattr(validator, f"step_{step}")(flow_tier, errors)
+
+    if errors:
+        payload = {
+            "step": step,
+            "flow_tier": flow_tier,
+            "passed": False,
+            "summary": module.build_summary(errors),
+            "repair_plan": module.build_repair_plan(errors),
+            "issues": errors,
+        }
+        return False, json.dumps(payload, ensure_ascii=False, indent=2)
+
+    payload: dict[str, Any] = {
+        "step": step,
+        "flow_tier": flow_tier,
+        "passed": True,
+        "summary": {"error_count": 0},
+    }
     if write_receipt:
-        cmd.append("--write-pass-receipt")
-    code, stdout, stderr = run_script(cmd)
-    return code == 0, stdout or stderr
+        payload["gate_receipt"] = module.write_pass_receipt(state_path, validator.state, step, flow_tier)
+    return True, json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def upsert_block_in_process(
+    state_path: Path,
+    working_draft_path: Path,
+    block_name: str,
+    content_path: Path,
+    summary: str,
+    require_receipt_step: int | None,
+) -> tuple[int, str]:
+    module = load_upsert_draft_block_module()
+    try:
+        payload = module.upsert_block(
+            working_draft_path=working_draft_path,
+            state_path=state_path,
+            block_name=block_name,
+            content_path=content_path,
+            summary=summary,
+            require_receipt_step=require_receipt_step,
+        )
+    except SystemExit as exc:
+        return 1, str(exc)
+    return 0, json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def render_final_document_in_process(state_path: Path, flow_tier: str, summary: str) -> tuple[int, str]:
+    module = load_render_final_document_module()
+    try:
+        payload = module.render_final_document(
+            state_path=state_path,
+            flow_tier=flow_tier,
+            content_path=None,
+            summary=summary,
+        )
+    except SystemExit as exc:
+        return 1, str(exc)
+    return 0, json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def finalize_cleanup_in_process(state_path: Path, flow_tier: str, summary: str) -> tuple[int, str]:
+    module = load_finalize_cleanup_module()
+    try:
+        exit_code, payload = module.run_cleanup(state_path, flow_tier, summary)
+    except SystemExit as exc:
+        return 1, str(exc)
+    return exit_code, json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def mark_step_skipped_in_process(
+    state_path: Path,
+    step: int,
+    summary: str,
+    reason: str,
+    next_step: int,
+    require_receipt_step: int | None,
+) -> tuple[int, str]:
+    module = load_mark_step_skipped_module()
+    try:
+        payload = module.mark_step_skipped(
+            state_path=state_path,
+            step=step,
+            summary=summary,
+            reason=reason,
+            next_step=next_step,
+            require_receipt_step=require_receipt_step,
+        )
+    except SystemExit as exc:
+        return 1, str(exc)
+    return 0, json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def set_flow_tier_in_process(
+    state_path: Path,
+    flow_tier: str,
+    solution_type: str,
+    summary: str,
+    next_step: int | None,
+    append_completed: bool,
+    signals: list[str],
+    require_receipt_step: int | None,
+) -> tuple[int, str]:
+    module = load_set_flow_tier_module()
+    try:
+        payload = module.set_flow_tier(
+            state_path=state_path,
+            flow_tier=flow_tier,
+            solution_type=solution_type,
+            summary=summary,
+            next_step=next_step,
+            append_completed=append_completed,
+            signals=signals,
+            require_receipt_step=require_receipt_step,
+        )
+    except SystemExit as exc:
+        return 1, str(exc)
+    return 0, json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def advance_state_step_in_process(
+    state_path: Path,
+    step: int,
+    summary: str,
+    field: list[str] | None,
+    field_json: list[str] | None,
+    state_fields: list[str] | None,
+    state_fields_json: list[str] | None,
+    append_completed: bool,
+    next_step: int | None,
+    require_receipt_step: int | None,
+) -> tuple[int, str]:
+    module = load_advance_state_step_module()
+    try:
+        payload = module.advance_state_step(
+            state_path=state_path,
+            step=step,
+            summary=summary,
+            field=field,
+            field_json=field_json,
+            state_fields=state_fields,
+            state_fields_json=state_fields_json,
+            append_completed=append_completed,
+            next_step=next_step,
+            require_receipt_step=require_receipt_step,
+        )
+    except SystemExit as exc:
+        return 1, str(exc)
+    return 0, json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def initialize_state_in_process(state_path: Path, slug: str, summary: str) -> tuple[int, str]:
+    module = load_initialize_state_module()
+    try:
+        payload = module.initialize_state(
+            state_path=state_path,
+            slug=slug,
+            summary=summary,
+            next_step=2,
+            solution_root=".architecture/technical-solutions",
+        )
+    except SystemExit as exc:
+        return 1, str(exc)
+    return 0, json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def extract_template_snapshot_in_process(
+    *,
+    state_path: Path,
+    template_path: str,
+    slug: str,
+    draft_path: str,
+    repo_root: Path,
+) -> tuple[int, str]:
+    module = load_extract_template_snapshot_module()
+    template_file = (repo_root / template_path).resolve()
+    if not template_file.exists():
+        return 1, f"模板文件不存在: {template_file}"
+
+    template_markdown = template_file.read_text(encoding="utf-8")
+    headings = module.extract_slot_headings(template_markdown)
+    if not headings:
+        return 1, f"模板未提取到任何槽位: {template_file}"
+
+    fingerprint = module.compute_template_fingerprint(template_markdown, headings)
+    working_draft = (repo_root / draft_path).resolve()
+    working_draft.parent.mkdir(parents=True, exist_ok=True)
+    working_draft.write_text(module.build_working_draft(template_file, headings, slug), encoding="utf-8")
+    try:
+        module.update_state(
+            state_path=state_path.resolve(),
+            template_path=template_file,
+            working_draft=working_draft,
+            headings=headings,
+            fingerprint=fingerprint,
+        )
+    except SystemExit as exc:
+        return 1, str(exc)
+
+    payload = {
+        "template_path": str(template_file),
+        "template_fingerprint": fingerprint,
+        "slot_count": len(headings),
+        "slot_titles": [item["title"] for item in headings],
+        "working_draft_path": str(working_draft),
+    }
+    return 0, json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def extract_step_card_operations(step: int) -> str:
     """提取 step card 的'操作'段落。"""
-    steps_dir = SCRIPTS_DIR.parent / "steps"
-    filename = STEP_CARD_FILES.get(step)
-    if not filename:
+    try:
+        card_path = get_step_card_path(step)
+    except KeyError:
         return ""
-    card_path = steps_dir / filename
     if not card_path.exists():
         return f"（step card 文件不存在: {card_path}）"
     content = card_path.read_text(encoding="utf-8")
@@ -177,7 +470,7 @@ def print_status(state_path: Path) -> int:
     slug = get_slug(state_path)
 
     print("=" * 60)
-    print(f"  当前步骤: {step} - {STEP_NAMES.get(step, '未知')}")
+    print(f"  当前步骤: {step} - {get_step_name(step)}")
     print(f"  流程级别: {flow_tier}")
     print(f"  已完成:   {completed}")
     print(f"  Slug:     {slug}")
@@ -258,17 +551,9 @@ def _print_next_command(state_path: Path, step: int, flow_tier: str, state: dict
 def complete_step_1(state_path: Path, summary: str, slug: str | None, **_: Any) -> tuple[int, str]:
     if not slug:
         return 1, "步骤 1 需要 --slug 参数。"
-    # 先验证（可能是新建 state，失败是预期的）
-    # 直接调用 initialize-state.py
-    code, stdout, stderr = run_script([
-        str(SCRIPTS_DIR / "initialize-state.py"),
-        "--state", str(state_path),
-        "--slug", slug,
-        "--summary", summary,
-        "--next-step", "2",
-    ])
+    code, stdout = initialize_state_in_process(state_path, slug, summary)
     if code != 0:
-        return code, f"initialize-state.py 失败:\n{stderr or stdout}"
+        return code, f"initialize-state.py 失败:\n{stdout}"
     return 0, f"✅ 步骤 1 完成。slug={slug}，已推进到步骤 2。\n{stdout}"
 
 
@@ -284,17 +569,20 @@ def complete_step_2(state_path: Path, summary: str, **_: Any) -> tuple[int, str]
     if missing:
         return 2, f"前置文件缺失: {missing}。请先运行 bootstrap-architecture。"
     # 推进（advance-state-step 内部会自动补 prerequisites_checked=true）
-    code, stdout, stderr = run_script([
-        str(SCRIPTS_DIR / "advance-state-step.py"),
-        "--state", str(state_path),
-        "--step", "2",
-        "--summary", summary,
-        "--field", "prerequisites_checked=true",
-        "--append-completed",
-        "--next-step", "3",
-    ])
+    code, stdout = advance_state_step_in_process(
+        state_path=state_path,
+        step=2,
+        summary=summary,
+        field=["prerequisites_checked=true"],
+        field_json=None,
+        state_fields=None,
+        state_fields_json=None,
+        append_completed=True,
+        next_step=3,
+        require_receipt_step=None,
+    )
     if code != 0:
-        return code, f"advance-state-step.py 失败:\n{stderr or stdout}"
+        return code, f"advance-state-step.py 失败:\n{stdout}"
     return 0, f"✅ 步骤 2 完成。前置文件检查通过，已推进到步骤 3。"
 
 
@@ -304,17 +592,15 @@ def complete_step_3(state_path: Path, summary: str, **_: Any) -> tuple[int, str]
     repo_root = get_repo_root(state_path)
     template_path = str(state.get("template_path") or ".architecture/templates/technical-solution-template.md")
     draft_path = f".architecture/technical-solutions/working-drafts/{slug}.working.md"
-    # 调用 extract-template-snapshot（脚本内部会 require_receipt）
-    code, stdout, stderr = run_script([
-        str(SCRIPTS_DIR / "extract-template-snapshot.py"),
-        "--template", template_path,
-        "--slug", slug,
-        "--working-draft", draft_path,
-        "--state", str(state_path),
-        "--write",
-    ], cwd=repo_root)
+    code, stdout = extract_template_snapshot_in_process(
+        state_path=state_path,
+        template_path=template_path,
+        slug=slug,
+        draft_path=draft_path,
+        repo_root=repo_root,
+    )
     if code != 0:
-        return code, f"extract-template-snapshot.py 失败:\n{stderr or stdout}"
+        return code, f"extract-template-snapshot.py 失败:\n{stdout}"
     return 0, f"✅ 步骤 3 完成。模板已读取，working draft 已创建。\n{stdout}"
 
 
@@ -331,20 +617,18 @@ def complete_step_4(
         return 1, "步骤 4 需要 --solution-type 参数。"
     if not signals:
         return 1, "步骤 4 需要至少一个 --signal 参数。"
-    cmd = [
-        str(SCRIPTS_DIR / "set-flow-tier.py"),
-        "--state", str(state_path),
-        "--flow-tier", flow_tier_arg,
-        "--solution-type", solution_type,
-        "--summary", summary,
-        "--next-step", "5",
-        "--append-completed",
-    ]
-    for sig in signals:
-        cmd.extend(["--signal", sig])
-    code, stdout, stderr = run_script(cmd)
+    code, stdout = set_flow_tier_in_process(
+        state_path=state_path,
+        flow_tier=flow_tier_arg,
+        solution_type=solution_type,
+        summary=summary,
+        next_step=5,
+        append_completed=True,
+        signals=signals,
+        require_receipt_step=None,
+    )
     if code != 0:
-        return code, f"set-flow-tier.py 失败:\n{stderr or stdout}"
+        return code, f"set-flow-tier.py 失败:\n{stdout}"
     return 0, f"✅ 步骤 4 完成。flow_tier={flow_tier_arg}，已推进到步骤 5。\n{stdout}"
 
 
@@ -354,19 +638,20 @@ def complete_step_5(
     if not members:
         return 1, "步骤 5 需要至少一个 --member 参数。"
     members_json = json.dumps(members)
-    code, stdout, stderr = run_script([
-        str(SCRIPTS_DIR / "advance-state-step.py"),
-        "--state", str(state_path),
-        "--step", "5",
-        "--summary", summary,
-        "--field", "members_checked=true",
-        "--field-json", f"selected_members={members_json}",
-        "--field", f"selected_member_count={len(members)}",
-        "--append-completed",
-        "--next-step", "6",
-    ])
+    code, stdout = advance_state_step_in_process(
+        state_path=state_path,
+        step=5,
+        summary=summary,
+        field=["members_checked=true"],
+        field_json=[f"selected_members={members_json}", f"selected_member_count={len(members)}"],
+        state_fields=None,
+        state_fields_json=None,
+        append_completed=True,
+        next_step=6,
+        require_receipt_step=None,
+    )
     if code != 0:
-        return code, f"advance-state-step.py 失败:\n{stderr or stdout}"
+        return code, f"advance-state-step.py 失败:\n{stdout}"
     return 0, f"✅ 步骤 5 完成。参与成员: {members}，已推进到步骤 6。"
 
 
@@ -381,19 +666,23 @@ def complete_step_6(state_path: Path, summary: str, **_: Any) -> tuple[int, str]
         content_dir = repo_root / repowiki_path / "zh" / "content"
         if content_dir.exists():
             source_count = sum(1 for _ in content_dir.rglob("*.md"))
-    code, stdout, stderr = run_script([
-        str(SCRIPTS_DIR / "advance-state-step.py"),
-        "--state", str(state_path),
-        "--step", "6",
-        "--summary", summary,
-        "--field", "repowiki_checked=true",
-        "--field", f"repowiki_exists={'true' if repowiki_exists else 'false'}",
-        "--field", f"repowiki_source_count={source_count}",
-        "--append-completed",
-        "--next-step", "7",
-    ])
+    code, stdout = advance_state_step_in_process(
+        state_path=state_path,
+        step=6,
+        summary=summary,
+        field=[
+            "repowiki_checked=true",
+            f"repowiki_exists={'true' if repowiki_exists else 'false'}",
+        ],
+        field_json=[f"repowiki_source_count={source_count}"],
+        state_fields=None,
+        state_fields_json=None,
+        append_completed=True,
+        next_step=7,
+        require_receipt_step=None,
+    )
     if code != 0:
-        return code, f"advance-state-step.py 失败:\n{stderr or stdout}"
+        return code, f"advance-state-step.py 失败:\n{stdout}"
     status = "存在" if repowiki_exists else "不存在"
     return 0, f"✅ 步骤 6 完成。repowiki {status}，已推进到步骤 7。"
 
@@ -414,14 +703,10 @@ def _resolve_content_block(step: int, flow_tier: str, content_files: list[str]) 
             member = match.group(1).upper().replace("-", "_") if match else p.stem.upper()
             pairs.append((f"WD-EXP-{member}", p))
         elif step == 10 or "wd-syn" in name_lower or "syn" in name_lower:
-            block = "WD-SYN-LIGHT" if flow_tier == "light" else "WD-SYN"
+            block = default_block_for_step(10, flow_tier) or "WD-SYN"
             pairs.append((block, p))
         else:
-            # 根据步骤默认
-            default_blocks = {7: "WD-CTX", 8: "WD-TASK", 10: "WD-SYN"}
-            block = default_blocks.get(step, "WD-CTX")
-            if step == 10 and flow_tier == "light":
-                block = "WD-SYN-LIGHT"
+            block = default_block_for_step(step, flow_tier) or "WD-CTX"
             pairs.append((block, p))
     return pairs
 
@@ -459,66 +744,18 @@ def complete_creative_step(
                     return 2, f"步骤 {step} 验证失败:\n{output}"
                 step = current
 
-        # 对于 WD-EXP-* 类型的 block，upsert-draft-block 不直接支持
-        # 需要用 step 9 的特殊处理
         receipt_step = get_current_step(load_state(state_path))
-
-        if block_name.startswith("WD-EXP-"):
-            # WD-EXP-* 块不在 upsert-draft-block 的 STEP_FOR_BLOCK 中
-            # 直接手动追加到 working draft
-            existing = abs_draft.read_text(encoding="utf-8") if abs_draft.exists() else ""
-            block_content = content_path.read_text(encoding="utf-8").strip()
-            new_section = f"\n\n## {block_name}\n\n{block_content}\n"
-            abs_draft.write_text(existing.rstrip() + new_section, encoding="utf-8")
-            results.append(f"  ✓ {block_name} 已写入 working draft")
-        else:
-            code, stdout, stderr = run_script([
-                str(SCRIPTS_DIR / "upsert-draft-block.py"),
-                "--working-draft", str(abs_draft),
-                "--state", str(state_path),
-                "--block", block_name,
-                "--content-file", str(content_path),
-                "--summary", summary,
-                "--require-receipt-step", str(receipt_step),
-            ])
-            if code != 0:
-                return code, f"upsert-draft-block.py 失败 ({block_name}):\n{stderr or stdout}"
-            results.append(f"  ✓ {block_name} 已写入 working draft")
-
-    # 步骤 9 需要额外处理：sync artifacts + advance
-    if step == 9:
-        # sync artifacts
-        code, stdout, stderr = run_script([
-            str(SCRIPTS_DIR / "sync-artifacts-from-draft.py"),
-            "--working-draft", str(abs_draft),
-            "--state", str(state_path),
-            "--write",
-        ])
+        code, output = upsert_block_in_process(
+            state_path,
+            abs_draft,
+            block_name,
+            content_path,
+            summary,
+            receipt_step,
+        )
         if code != 0:
-            return code, f"sync-artifacts-from-draft.py 失败:\n{stderr or stdout}"
-        # 步骤 9 完成后设置 gate flags
-        state = load_state(state_path)
-        state["can_enter_step_10"] = True
-        state["current_step"] = 10
-        completed = state.setdefault("completed_steps", [])
-        if not isinstance(completed, list):
-            completed = []
-            state["completed_steps"] = completed
-        if 9 not in completed:
-            completed.append(9)
-            completed.sort()
-        checkpoints = state.setdefault("checkpoints", {})
-        checkpoints["step-9"] = {
-            "summary": summary,
-            "skipped": False,
-            "reason": "",
-            "wd_exp_count": len([b for b, _ in blocks if b.startswith("WD-EXP-")]),
-            "completed_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).replace(microsecond=0).isoformat(),
-        }
-        # refresh receipt
-        _refresh_receipt_inline(state)
-        dump_path = state_path
-        dump_path.write_text(yaml.safe_dump(state, allow_unicode=True, sort_keys=False), encoding="utf-8")
+            return code, f"upsert-draft-block.py 失败 ({block_name}):\n{output}"
+        results.append(f"  ✓ {block_name} 已写入 working draft")
 
     detail = "\n".join(results)
     new_state = load_state(state_path)
@@ -554,17 +791,16 @@ def _refresh_receipt_inline(state: dict[str, Any]) -> None:
 def complete_step_skip(state_path: Path, step: int, flow_tier: str, reason: str, next_step: int, summary: str) -> tuple[int, str]:
     """处理跳步（light/moderate 流程）。"""
     receipt_step = get_current_step(load_state(state_path))
-    code, stdout, stderr = run_script([
-        str(SCRIPTS_DIR / "mark-step-skipped.py"),
-        "--state", str(state_path),
-        "--step", str(step),
-        "--summary", summary,
-        "--reason", reason,
-        "--next-step", str(next_step),
-        "--require-receipt-step", str(receipt_step),
-    ])
+    code, stdout = mark_step_skipped_in_process(
+        state_path=state_path,
+        step=step,
+        summary=summary,
+        reason=reason,
+        next_step=next_step,
+        require_receipt_step=receipt_step,
+    )
     if code != 0:
-        return code, f"mark-step-skipped.py 失败:\n{stderr or stdout}"
+        return code, f"mark-step-skipped.py 失败:\n{stdout}"
     return 0, f"  ✓ 步骤 {step} 已显式跳过（{reason}）"
 
 
@@ -573,18 +809,14 @@ def complete_step_11(state_path: Path, summary: str, **_: Any) -> tuple[int, str
     flow_tier = get_flow_tier(state)
     if flow_tier not in {"light", "moderate", "full"}:
         return 1, f"步骤 11 需要正式的 flow_tier（当前: {flow_tier}）。请确保步骤 4 已完成。"
+    seed_checkpoint_summary(state_path, 11, summary)
     # 先验证并写 receipt
     passed, output = run_validator(state_path, 11, flow_tier, write_receipt=True)
     if not passed:
         return 2, f"步骤 11 验证失败:\n{output}"
-    code, stdout, stderr = run_script([
-        str(SCRIPTS_DIR / "render-final-document.py"),
-        "--state", str(state_path),
-        "--flow-tier", flow_tier,
-        "--summary", summary,
-    ])
+    code, stdout = render_final_document_in_process(state_path, flow_tier, summary)
     if code != 0:
-        return code, f"render-final-document.py 失败:\n{stderr or stdout}"
+        return code, f"render-final-document.py 失败:\n{stdout}"
     return 0, f"✅ 步骤 11 完成。最终文档已渲染。\n{stdout}"
 
 
@@ -593,19 +825,14 @@ def complete_step_12(state_path: Path, summary: str, **_: Any) -> tuple[int, str
     flow_tier = get_flow_tier(state)
     if flow_tier not in {"light", "moderate", "full"}:
         return 1, f"步骤 12 需要正式的 flow_tier（当前: {flow_tier}）。"
+    seed_checkpoint_summary(state_path, 12, summary)
     # 先验证并写 receipt
     passed, output = run_validator(state_path, 12, flow_tier, write_receipt=True)
     if not passed:
         return 2, f"步骤 12 验证失败:\n{output}"
-    code, stdout, stderr = run_script([
-        str(SCRIPTS_DIR / "finalize-cleanup.py"),
-        "--state", str(state_path),
-        "--flow-tier", flow_tier,
-        "--summary", summary,
-        "--format", "json",
-    ])
+    code, stdout = finalize_cleanup_in_process(state_path, flow_tier, summary)
     if code != 0:
-        return code, f"finalize-cleanup.py 失败:\n{stderr or stdout}"
+        return code, f"finalize-cleanup.py 失败:\n{stdout}"
     return 0, f"✅ 步骤 12 完成。working draft 与状态文件已清理。\n{stdout}"
 
 
@@ -618,8 +845,9 @@ def handle_skip_steps(state_path: Path, step: int, flow_tier: str, summary: str)
         for skip_step, next_s in [(8, 9), (9, 10)]:
             state = load_state(state_path)
             current = get_current_step(state)
-            if current == skip_step:
-                passed, _ = run_validator(state_path, skip_step, flow_tier, write_receipt=True)
+            checkpoint = state.get("checkpoints", {}).get(f"step-{skip_step}", {})
+            already_skipped = isinstance(checkpoint, dict) and checkpoint.get("skipped") is True
+            if current >= skip_step and not already_skipped:
                 code, msg = complete_step_skip(
                     state_path, skip_step, flow_tier,
                     f"{flow_tier} 流程不需要步骤 {skip_step}", next_s,
@@ -633,8 +861,9 @@ def handle_skip_steps(state_path: Path, step: int, flow_tier: str, summary: str)
         # moderate: 跳过 9
         state = load_state(state_path)
         current = get_current_step(state)
-        if current == 9:
-            passed, _ = run_validator(state_path, 9, flow_tier, write_receipt=True)
+        checkpoint = state.get("checkpoints", {}).get("step-9", {})
+        already_skipped = isinstance(checkpoint, dict) and checkpoint.get("skipped") is True
+        if current >= 9 and not already_skipped:
             code, msg = complete_step_skip(
                 state_path, 9, flow_tier,
                 "moderate 流程不需要步骤 9", 10,
@@ -669,7 +898,7 @@ def complete_step(args: argparse.Namespace) -> int:
     flow_tier = get_flow_tier(state)
 
     # 自动跳步处理
-    if step in {8, 9} and flow_tier == "light":
+    if step in {8, 9, 10} and flow_tier == "light":
         code, msg = handle_skip_steps(state_path, 10, flow_tier, summary)
         if code != 0:
             print(msg)
@@ -680,7 +909,7 @@ def complete_step(args: argparse.Namespace) -> int:
         step = get_current_step(state)
         flow_tier = get_flow_tier(state)
 
-    if step == 9 and flow_tier == "moderate":
+    if step in {9, 10} and flow_tier == "moderate":
         code, msg = handle_skip_steps(state_path, 10, flow_tier, summary)
         if code != 0:
             print(msg)
@@ -725,7 +954,7 @@ def complete_step(args: argparse.Namespace) -> int:
         new_step = get_current_step(new_state)
         new_tier = get_flow_tier(new_state)
         if new_step <= 12:
-            print(f"\n📌 下一步（步骤 {new_step} - {STEP_NAMES.get(new_step, '')}）：")
+            print(f"\n📌 下一步（步骤 {new_step} - {get_step_name(new_step)}）：")
             _print_next_command(state_path, new_step, new_tier, new_state)
 
     return code

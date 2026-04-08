@@ -166,7 +166,7 @@ compatibility:
 - working draft 只保存稳定、可复用、可回退的结论，不保存 scratchpad、原始推理片段或临时口径
 - 回退或重进时，必须先写 `WD-IMPACT-[n]`；已失效内容必须显式标注作废范围，无可复用内容时 `保持有效内容` 写 `无`
 - 状态文件中的 `required_artifacts` 与 `produced_artifacts` 是流程推进的唯一产物依据；不得以口头描述替代产物存在性
-- 凡 `required_artifacts` 未齐、`blocked = true`、`absorption_check_passed = false`、存在未解决阻塞槽位，或存在未经 `flow_tier` 明确允许的跳步时，禁止清理 working draft 和状态文件
+- 凡 `required_artifacts` 未齐、`pending_questions` 未清空、`absorption_check_passed = false`、存在未解决阻塞槽位，或存在未经 `flow_tier` 明确允许的跳步时，禁止清理 working draft 和状态文件
 
 ## 回退规则
 收到用户变更后先写 `WD-IMPACT-[n]`，再回到最早受影响步骤：

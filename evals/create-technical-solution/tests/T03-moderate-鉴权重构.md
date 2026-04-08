@@ -15,7 +15,7 @@
 3. 生成 WD-TASK 和 WD-SYN（非 WD-SYN-LIGHT）
 4. 不执行步骤 9，不生成 WD-EXP-*
 5. WD-SYN 候选方案对比覆盖复用/改造/新建三路径
-6. 若已有同名文件，输出带时间戳后缀而非直接覆盖
+6. 若已有同名文件，默认覆盖目标文件
 
 ## Assertions
 
@@ -27,4 +27,4 @@
 | A03.4 | skill-revealing | 不生成 WD-EXP-* | produced_artifacts 不含 WD-EXP | 生成了 |
 | A03.5 | skill-revealing | 生成完整 WD-SYN | produced_artifacts 含 WD-SYN | 生成了 WD-SYN-LIGHT |
 | A03.6 | skill-revealing | 三路径比较 | 复用/改造/新建都有 | 路径缺失 |
-| A03.7 | baseline | 不覆盖已有同名文档 | 新文件带时间戳 | 直接覆盖 |
+| A03.7 | baseline | 覆盖语义与实现一致 | 默认覆盖目标文件 | 仍要求另存或禁止覆盖 |

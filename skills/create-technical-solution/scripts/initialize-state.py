@@ -7,45 +7,16 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-from datetime import datetime, timezone
 from pathlib import Path
+import sys
 from typing import Any
 
-import yaml
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
-
-def iso_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-
-
-def load_yaml(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        raise SystemExit(f"状态文件不存在: {path}")
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if not isinstance(data, dict):
-        raise SystemExit(f"状态文件必须是 YAML 对象: {path}")
-    return data
-
-
-def dump_yaml(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
-
-
-def compute_state_fingerprint(state: dict[str, Any]) -> str:
-    receipt = state.get("gate_receipt")
-    scrubbed = dict(state)
-    if isinstance(receipt, dict):
-        scrubbed["gate_receipt"] = {
-            "step": receipt.get("step", 0),
-            "flow_tier": receipt.get("flow_tier", ""),
-            "state_fingerprint": "",
-            "validated_at": "",
-        }
-    payload = yaml.safe_dump(scrubbed, allow_unicode=True, sort_keys=True)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+from protocol_runtime import dump_yaml, iso_now, load_yaml, normalize_flow_tier, refresh_receipt
 
 
 def load_or_create_state(path: Path) -> dict[str, Any]:
@@ -55,19 +26,8 @@ def load_or_create_state(path: Path) -> dict[str, Any]:
     if not template_path.exists():
         raise SystemExit(f"状态模板不存在: {template_path}")
     state = load_yaml(template_path)
-    dump_yaml(path, state)
+    dump_yaml(path, state, ensure_parent=True)
     return state
-
-
-def refresh_receipt(state: dict[str, Any], *, step: int, flow_tier: str) -> None:
-    state["gate_receipt"] = {
-        "step": step,
-        "flow_tier": flow_tier,
-        "state_fingerprint": "",
-        "validated_at": "",
-    }
-    state["gate_receipt"]["state_fingerprint"] = compute_state_fingerprint(state)
-    state["gate_receipt"]["validated_at"] = iso_now()
 
 
 def initialize_state(
@@ -82,7 +42,7 @@ def initialize_state(
 
     solution_root_path = Path(solution_root.strip("/"))
     final_document_path = solution_root_path / f"{slug}.md"
-    current_flow_tier = str(state.get("flow_tier") or "").strip() or "pending"
+    current_flow_tier = normalize_flow_tier(state.get("flow_tier"), fallback="light")
 
     checkpoints = state.setdefault("checkpoints", {})
     if not isinstance(checkpoints, dict):
@@ -97,6 +57,9 @@ def initialize_state(
     state["solution_root"] = str(solution_root_path)
     state["final_document_path"] = str(final_document_path)
     state["flow_tier"] = current_flow_tier
+    pending_questions = state.setdefault("pending_questions", [])
+    if not isinstance(pending_questions, list):
+        state["pending_questions"] = []
     if next_step is not None:
         state["current_step"] = next_step
 
@@ -112,8 +75,9 @@ def initialize_state(
         state,
         step=int(state.get("current_step") or next_step or 1),
         flow_tier=current_flow_tier,
+        default_flow_tier="light",
     )
-    dump_yaml(state_path, state)
+    dump_yaml(state_path, state, ensure_parent=True)
     return {
         "slug": slug,
         "solution_root": state["solution_root"],

@@ -4,6 +4,7 @@ skipped_steps: []
 flow_tier: "pending"
 required_artifacts: []
 produced_artifacts: []
+pending_questions: []
 gate_receipt:
   step: 0
   flow_tier: ""

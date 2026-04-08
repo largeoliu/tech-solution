@@ -7,14 +7,17 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
+import sys
 from typing import Any
 
-import yaml
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from protocol_runtime import dump_yaml, iso_now, load_yaml, refresh_receipt, require_receipt
 
 
 BLOCK_ORDER = [
@@ -22,8 +25,6 @@ BLOCK_ORDER = [
     "Template Slots",
     "WD-CTX",
     "WD-TASK",
-    "WD-SYN",
-    "WD-SYN-LIGHT",
 ]
 
 STEP_FOR_BLOCK = {
@@ -41,58 +42,6 @@ FORBIDDEN_BODY_HEADINGS = {
     "WD-SYN",
     "WD-SYN-LIGHT",
 }
-
-
-def iso_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-
-
-def load_yaml(path: Path) -> dict[str, Any]:
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if not isinstance(data, dict):
-        raise SystemExit(f"状态文件必须是 YAML 对象: {path}")
-    return data
-
-
-def dump_yaml(path: Path, data: dict[str, Any]) -> None:
-    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
-
-
-def compute_state_fingerprint(state: dict[str, Any]) -> str:
-    receipt = state.get("gate_receipt")
-    scrubbed = dict(state)
-    if isinstance(receipt, dict):
-        scrubbed["gate_receipt"] = {
-            "step": receipt.get("step", 0),
-            "flow_tier": receipt.get("flow_tier", ""),
-            "state_fingerprint": "",
-            "validated_at": "",
-        }
-    payload = yaml.safe_dump(scrubbed, allow_unicode=True, sort_keys=True)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def require_receipt(state: dict[str, Any], expected_step: int) -> None:
-    receipt = state.get("gate_receipt")
-    if not isinstance(receipt, dict):
-        raise SystemExit("缺少 gate_receipt，必须先运行 validate-state.py --write-pass-receipt。")
-    if int(receipt.get("step") or 0) != expected_step:
-        raise SystemExit(f"gate_receipt.step={receipt.get('step')}，期望 {expected_step}。")
-    if str(receipt.get("state_fingerprint") or "") != compute_state_fingerprint(state):
-        raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")
-
-
-def refresh_receipt(state: dict[str, Any]) -> None:
-    flow_tier = str(state.get("flow_tier") or "").strip() or "light"
-    step = int(state.get("current_step") or 0) or 1
-    state["gate_receipt"] = {
-        "step": step,
-        "flow_tier": flow_tier,
-        "state_fingerprint": "",
-        "validated_at": "",
-    }
-    state["gate_receipt"]["state_fingerprint"] = compute_state_fingerprint(state)
-    state["gate_receipt"]["validated_at"] = iso_now()
 
 
 def extract_blocks(markdown: str) -> tuple[list[str], dict[str, str]]:
@@ -113,6 +62,8 @@ def compose_markdown(title_lines: list[str], blocks: dict[str, str]) -> str:
     lines = [title_lines[0], ""]
     emitted = set()
     ordered_names = [name for name in BLOCK_ORDER if name in blocks]
+    ordered_names.extend(sorted(name for name in blocks if name.startswith("WD-EXP-")))
+    ordered_names.extend(name for name in ("WD-SYN", "WD-SYN-LIGHT") if name in blocks)
     ordered_names.extend(name for name in blocks if name not in emitted and name not in ordered_names)
     for name in ordered_names:
         emitted.add(name)
@@ -144,11 +95,19 @@ def validate_block_body(block_name: str, content: str) -> None:
         if re.match(r"^#\s+Working Draft\b", stripped):
             raise SystemExit(f"{block_name} body 不得包含 Working Draft 标题。content-file 只能包含区块体内容。")
         match = re.match(r"^##\s+(.+?)\s*$", stripped)
-        if match and match.group(1).strip() in FORBIDDEN_BODY_HEADINGS:
-            raise SystemExit(
-                f"{block_name} body 不得包含区块标题 {match.group(1).strip()}。"
-                " content-file 只能包含区块体内容。"
-            )
+        if match:
+            nested_heading = match.group(1).strip()
+            if nested_heading in FORBIDDEN_BODY_HEADINGS or nested_heading.startswith("WD-EXP-"):
+                raise SystemExit(
+                    f"{block_name} body 不得包含区块标题 {nested_heading}."
+                    " content-file 只能包含区块体内容。"
+                )
+
+
+def block_step(block_name: str) -> int | None:
+    if block_name.startswith("WD-EXP-"):
+        return 9
+    return STEP_FOR_BLOCK.get(block_name)
 
 
 def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -> None:
@@ -189,10 +148,27 @@ def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -
             "task_slot_count": 0,
             "completed_at": iso_now(),
         }
-        state["can_enter_step_10"] = True
-        state["current_step"] = 10
+        if state.get("flow_tier") == "full":
+            state["can_enter_step_9"] = True
+            state["can_enter_step_10"] = False
+            state["current_step"] = 9
+        else:
+            state["can_enter_step_10"] = True
+            state["current_step"] = 10
         if 8 not in completed:
             completed.append(8)
+    elif block_name.startswith("WD-EXP-"):
+        checkpoints["step-9"] = {
+            "summary": summary,
+            "skipped": False,
+            "reason": "",
+            "wd_exp_count": 0,
+            "completed_at": iso_now(),
+        }
+        state["can_enter_step_10"] = True
+        state["current_step"] = 10
+        if 9 not in completed:
+            completed.append(9)
     elif block_name in {"WD-SYN", "WD-SYN-LIGHT"}:
         checkpoints["step-10"] = {
             "summary": summary,
@@ -209,10 +185,15 @@ def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -
 
 def update_counts(state: dict[str, Any], block_name: str, content: str) -> None:
     checkpoints = state.setdefault("checkpoints", {})
+    produced = state.get("produced_artifacts", [])
     if block_name == "WD-CTX":
         checkpoints["step-7"]["ctx_count"] = count_items(content, "CTX-")
     elif block_name == "WD-TASK":
         checkpoints["step-8"]["task_slot_count"] = count_slot_sections(content)
+    elif block_name.startswith("WD-EXP-"):
+        checkpoints["step-9"]["wd_exp_count"] = sum(
+            1 for item in produced if isinstance(item, str) and item.startswith("WD-EXP-")
+        )
     elif block_name in {"WD-SYN", "WD-SYN-LIGHT"}:
         checkpoints["step-10"]["syn_slot_count"] = count_slot_sections(content)
 
@@ -227,8 +208,8 @@ def upsert_block(
     require_receipt_step: int,
 ) -> dict[str, Any]:
     state = load_yaml(state_path)
-    require_receipt(state, require_receipt_step)
-    if block_name not in STEP_FOR_BLOCK:
+    require_receipt(state, expected_step=require_receipt_step)
+    if block_step(block_name) is None:
         raise SystemExit(f"不支持的 block: {block_name}")
     if not working_draft_path.exists():
         raise SystemExit(f"working draft 不存在: {working_draft_path}")
@@ -255,7 +236,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="按 block 安全更新 working draft，并同步步骤状态")
     parser.add_argument("--working-draft", required=True, help="working draft 路径")
     parser.add_argument("--state", required=True, help="状态文件路径")
-    parser.add_argument("--block", choices=sorted(STEP_FOR_BLOCK), required=True, help="待更新的 WD block")
+    parser.add_argument("--block", required=True, help="待更新的 WD block")
     parser.add_argument("--content-file", required=True, help="block 内容文件")
     parser.add_argument("--summary", required=True, help="对应步骤摘要")
     parser.add_argument("--require-receipt-step", type=int, required=True, help="要求 gate_receipt.step 与该值一致")

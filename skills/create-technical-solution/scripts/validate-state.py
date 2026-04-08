@@ -10,16 +10,18 @@ import argparse
 import hashlib
 import json
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
+import sys
 from typing import Any, Optional
 
-try:
-    import yaml  # type: ignore[import-untyped]
-except ImportError:
-    print("缺少 pyyaml。运行: pip install pyyaml", file=sys.stderr)
-    sys.exit(1)
+import yaml
+
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from protocol_runtime import compute_state_fingerprint, dump_yaml as dump_state, iso_now, load_yaml as load_state
 
 
 ALLOWED_TOP_LEVEL_FIELDS = {
@@ -29,6 +31,7 @@ ALLOWED_TOP_LEVEL_FIELDS = {
     "flow_tier",
     "required_artifacts",
     "produced_artifacts",
+    "pending_questions",
     "gate_receipt",
     "solution_root",
     "template_path",
@@ -111,41 +114,6 @@ def normalize_task_heading(title: str) -> str:
 def normalize_syn_heading(title: str) -> str:
     normalized = normalize_text(title)
     return re.sub(r"^槽位：\s*", "", normalized)
-
-
-def load_state(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        print(f"状态文件不存在: {path}", file=sys.stderr)
-        sys.exit(1)
-    with open(path, encoding="utf-8") as handle:
-        data = yaml.safe_load(handle) or {}
-    if not isinstance(data, dict):
-        print(f"状态文件必须是 YAML 对象: {path}", file=sys.stderr)
-        sys.exit(1)
-    return data
-
-
-def dump_state(path: Path, data: dict[str, Any]) -> None:
-    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
-
-
-def normalized_state_for_fingerprint(state: dict[str, Any]) -> dict[str, Any]:
-    scrubbed = dict(state)
-    receipt = scrubbed.get("gate_receipt")
-    if isinstance(receipt, dict):
-        scrubbed["gate_receipt"] = {
-            "step": receipt.get("step", 0),
-            "flow_tier": receipt.get("flow_tier", ""),
-            "state_fingerprint": "",
-            "validated_at": "",
-        }
-    return scrubbed
-
-
-def compute_state_fingerprint(state: dict[str, Any]) -> str:
-    payload = yaml.safe_dump(normalized_state_for_fingerprint(state), allow_unicode=True, sort_keys=True)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
 
 def normalize_text(value: str) -> str:
     return " ".join(str(value).replace("\xa0", " ").split())
@@ -470,6 +438,26 @@ class GateValidator:
         step5 = checkpoints.get("step-5", {}) if isinstance(checkpoints, dict) else {}
         raw = step5.get("selected_members", []) if isinstance(step5, dict) else []
         return [str(item) for item in raw if str(item).strip()] if isinstance(raw, list) else []
+
+    def pending_questions(self) -> list[dict[str, Any]]:
+        raw = self.state.get("pending_questions", [])
+        if not isinstance(raw, list):
+            return []
+        return [item for item in raw if isinstance(item, dict)]
+
+    def check_pending_questions(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        require(
+            not self.pending_questions(),
+            errors,
+            code="pending_questions_blocking_progress",
+            message=f"步骤 {step_num}: 存在待回答问题，必须先清空 pending_questions",
+            step=step_num,
+            flow_tier=flow_tier,
+            field="pending_questions",
+            skip_instead_of_retry=True,
+            recommended_rollback_step=step_num,
+            recommended_repair_step=step_num,
+        )
 
     def check_state_shape(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
         for key in self.state:
@@ -999,8 +987,13 @@ class GateValidator:
         )
         if not final_document or not final_document.exists():
             return
-        expected_titles = [item["normalized_title"] for item in self.template_headings()]
-        actual_titles = [item["normalized_title"] for item in extract_slot_headings(read_markdown(final_document))]
+        template_headings = self.template_headings()
+        expected_titles = [item["normalized_title"] for item in template_headings]
+        expected_level = template_headings[0]["level"] if template_headings else None
+        actual_titles = [
+            item["normalized_title"]
+            for item in extract_slot_headings(read_markdown(final_document), slot_level=expected_level)
+        ]
         if expected_titles != actual_titles:
             add_issue(
                 errors,
@@ -1122,7 +1115,7 @@ class GateValidator:
             recommended_rollback_step=4,
             recommended_repair_step=4,
         )
-        if any(str(signal) not in VALID_STEP4_SIGNALS for signal in signals):
+        if isinstance(signals, list) and any(str(signal) not in VALID_STEP4_SIGNALS for signal in signals):
             add_issue(
                 errors,
                 make_issue(
@@ -1261,6 +1254,7 @@ class GateValidator:
 
     def step_10(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(10, flow_tier, errors)
+        self.check_pending_questions(errors, 10, flow_tier)
         if flow_tier == "light":
             self.check_skip_record(8, errors, 10, flow_tier)
             self.check_skip_record(9, errors, 10, flow_tier)
@@ -1285,6 +1279,7 @@ class GateValidator:
 
     def step_11(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(11, flow_tier, errors)
+        self.check_pending_questions(errors, 11, flow_tier)
         if flow_tier == "light":
             self.check_skip_record(8, errors, 11, flow_tier)
             self.check_skip_record(9, errors, 11, flow_tier)
@@ -1310,7 +1305,8 @@ class GateValidator:
             self.check_wd_syn_quality(errors, 11, flow_tier)
         self.check_final_document_not_premature(errors, 11, flow_tier)
         checkpoint = self.checkpoint(11, errors, flow_tier)
-        if self.final_document_path() and self.final_document_path().exists():
+        final_document_path = self.final_document_path()
+        if final_document_path and final_document_path.exists():
             require(
                 checkpoint.get("rendered_via_script") is True,
                 errors,
@@ -1325,6 +1321,7 @@ class GateValidator:
 
     def step_12(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(12, flow_tier, errors)
+        self.check_pending_questions(errors, 12, flow_tier)
         if flow_tier == "light":
             self.check_skip_record(8, errors, 12, flow_tier)
             self.check_skip_record(9, errors, 12, flow_tier)
@@ -1386,7 +1383,7 @@ def write_pass_receipt(path: Path, state: dict[str, Any], step: int, flow_tier: 
         "step": step,
         "flow_tier": flow_tier,
         "state_fingerprint": fingerprint,
-        "validated_at": datetime.now().replace(microsecond=0).isoformat(),
+        "validated_at": iso_now(),
     }
     state["gate_receipt"] = receipt
     dump_state(path, state)

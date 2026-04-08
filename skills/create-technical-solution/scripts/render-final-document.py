@@ -7,69 +7,17 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
+import sys
 from typing import Any
 
-import yaml
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
-
-def iso_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-
-
-def load_yaml(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        raise SystemExit(f"状态文件不存在: {path}")
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if not isinstance(data, dict):
-        raise SystemExit(f"状态文件必须是 YAML 对象: {path}")
-    return data
-
-
-def dump_yaml(path: Path, data: dict[str, Any]) -> None:
-    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
-
-
-def compute_state_fingerprint(state: dict[str, Any]) -> str:
-    receipt = state.get("gate_receipt")
-    scrubbed = dict(state)
-    if isinstance(receipt, dict):
-        scrubbed["gate_receipt"] = {
-            "step": receipt.get("step", 0),
-            "flow_tier": receipt.get("flow_tier", ""),
-            "state_fingerprint": "",
-            "validated_at": "",
-        }
-    payload = yaml.safe_dump(scrubbed, allow_unicode=True, sort_keys=True)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def require_receipt(state: dict[str, Any], expected_step: int, expected_flow_tier: str) -> None:
-    receipt = state.get("gate_receipt")
-    if not isinstance(receipt, dict):
-        raise SystemExit("缺少 gate_receipt，必须先运行 validate-state.py --write-pass-receipt。")
-    if int(receipt.get("step") or 0) != expected_step:
-        raise SystemExit(f"gate_receipt.step={receipt.get('step')}，期望 {expected_step}。")
-    if str(receipt.get("flow_tier") or "") != expected_flow_tier:
-        raise SystemExit(f"gate_receipt.flow_tier={receipt.get('flow_tier')}，期望 {expected_flow_tier}。")
-    if str(receipt.get("state_fingerprint") or "") != compute_state_fingerprint(state):
-        raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")
-
-
-def refresh_receipt(state: dict[str, Any], flow_tier: str) -> None:
-    step = int(state.get("current_step") or 0) or 12
-    state["gate_receipt"] = {
-        "step": step,
-        "flow_tier": flow_tier,
-        "state_fingerprint": "",
-        "validated_at": "",
-    }
-    state["gate_receipt"]["state_fingerprint"] = compute_state_fingerprint(state)
-    state["gate_receipt"]["validated_at"] = iso_now()
+from protocol_runtime import dump_yaml, iso_now, load_yaml, refresh_receipt, require_receipt
 
 
 def count_absorbed_slots(markdown: str) -> int:
@@ -217,7 +165,7 @@ def render_final_document(
         completed.append(11)
         completed.sort()
     state["current_step"] = 12
-    refresh_receipt(state, flow_tier)
+    refresh_receipt(state, flow_tier=flow_tier, default_step=12, default_flow_tier=flow_tier)
     dump_yaml(state_path, state)
     return {
         "final_document_path": str(final_document_path),

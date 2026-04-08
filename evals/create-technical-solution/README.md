@@ -20,16 +20,16 @@ evals/create-technical-solution/
 
 ```bash
 # 初始化测试项目
-uv run evals/create-technical-solution/eval_runner.py setup-project
+python3 evals/create-technical-solution/eval_runner.py setup-project
 
 # 列出现有用例
-uv run evals/create-technical-solution/eval_runner.py list
+python3 evals/create-technical-solution/eval_runner.py list
 
 # 在测试项目中运行 skill 后评判
-uv run evals/create-technical-solution/eval_runner.py grade T01 --target tests/sample-project
+python3 evals/create-technical-solution/eval_runner.py grade T01 --target tests/sample-project
 
 # 生成报告
-uv run evals/create-technical-solution/eval_runner.py report
+python3 evals/create-technical-solution/eval_runner.py report
 ```
 
 ## 用例分类
