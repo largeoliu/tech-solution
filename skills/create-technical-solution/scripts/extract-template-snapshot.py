@@ -11,10 +11,15 @@ import hashlib
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+
+def iso_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def normalize_text(value: str) -> str:
@@ -115,6 +120,19 @@ def require_receipt(state: dict[str, Any], expected_step: int, expected_flow_tie
         raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")
 
 
+def refresh_receipt(state: dict[str, Any]) -> None:
+    flow_tier = str(state.get("flow_tier") or "").strip() or "light"
+    step = int(state.get("current_step") or 0) or 4
+    state["gate_receipt"] = {
+        "step": step,
+        "flow_tier": flow_tier,
+        "state_fingerprint": "",
+        "validated_at": "",
+    }
+    state["gate_receipt"]["state_fingerprint"] = compute_state_fingerprint(state)
+    state["gate_receipt"]["validated_at"] = iso_now()
+
+
 def update_state(
     *,
     state_path: Path,
@@ -138,7 +156,17 @@ def update_state(
         "template_loaded": True,
         "template_fingerprint": fingerprint,
         "slot_count": len(headings),
+        "completed_at": iso_now(),
     }
+    completed = state.setdefault("completed_steps", [])
+    if not isinstance(completed, list):
+        completed = []
+        state["completed_steps"] = completed
+    if 3 not in completed:
+        completed.append(3)
+        completed.sort()
+    state["current_step"] = 4
+    refresh_receipt(state)
     dump_yaml(state_path, state)
 
 

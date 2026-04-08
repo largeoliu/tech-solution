@@ -40,17 +40,17 @@ compatibility:
 7. 再次运行门禁验证，通过则进入下一步
 
 ## 状态文件初始化
-从 `templates/_template.yaml` 复制为 `.architecture/.state/create-technical-solution/[slug].yaml`。state 只保留最小流程控制字段、路径字段、gate flags、最小 checkpoint 与 cleanup 状态；不得写入正文内容。若目标目录不存在，先创建 `.architecture/.state/create-technical-solution/`。
+只能通过 `initialize-state.py` 初始化 `.architecture/.state/create-technical-solution/[slug].yaml`。该脚本负责在 state 缺失时自动创建文件、写入 step-1 最小 checkpoint、派生路径并刷新 receipt；不得再手工 `cp templates/_template.yaml` 后补 YAML。
 
 ## 确定性脚本
-- `python scripts/initialize-state.py --state <状态文件> --slug <slug> --summary "<步骤1摘要>" --next-step 2`
-  - 用于步骤 1，唯一负责写入 slug 派生路径与最小 step-1 checkpoint
-- `python scripts/extract-template-snapshot.py --template <模板路径> --slug <slug> --working-draft <draft路径> --state <状态文件> --write`
-  - 用于步骤 3，唯一负责提取模板指纹、槽位数量和 working draft 骨架
+- `python3 scripts/initialize-state.py --state <状态文件> --slug <slug> --summary "<步骤1摘要>" --next-step 2`
+  - 用于步骤 1，唯一负责创建 state、写入 slug 派生路径、最小 step-1 checkpoint 与最新 receipt
+- `python3 scripts/extract-template-snapshot.py --template <模板路径> --slug <slug> --working-draft <draft路径> --state <状态文件> --write`
+  - 用于步骤 3，唯一负责提取模板指纹、槽位数量、working draft 骨架，并原子推进到 step 4
 - `python scripts/sync-artifacts-from-draft.py --working-draft <draft路径> --state <状态文件> --write`
   - 用于步骤 7-10，唯一负责把 working draft 中真实存在的稳定区块同步到 `produced_artifacts`
 - `python scripts/advance-state-step.py --state <状态文件> --step <N> --summary <摘要> --append-completed --next-step <N+1>`
-  - 用于步骤推进和 checkpoint 原子更新，避免整份 YAML 手写重写
+  - 用于步骤推进和 checkpoint 原子更新，并刷新 receipt；不得把它当成“跳过 validator 的强制推进器”
 - `python scripts/set-flow-tier.py --state <状态文件> --flow-tier <light|moderate|full> --solution-type "<方案类型>" --summary "<步骤4摘要>" --next-step 5 --append-completed`
   - 用于步骤 4，原子写入 `flow_tier`、`checkpoints.step-4.flow_tier`、`required_artifacts` 与 `skipped_steps`
 - `python scripts/mark-step-skipped.py --state <状态文件> --step <N> --summary "<跳过摘要>" --reason "<跳过原因>" --next-step <下一步>`
@@ -58,7 +58,7 @@ compatibility:
 - `python scripts/finalize-cleanup.py --state <状态文件> --flow-tier <flow_tier> --summary "<步骤12摘要>" --format json`
   - 用于步骤 12 的唯一合法清理路径：先验证，再置标志、删除 working draft 与状态文件，并直接结束流程
 - `python scripts/render-final-document.py --state <状态文件> --flow-tier <flow_tier> --content-file <成稿临时文件> --summary "<步骤11摘要>"`
-  - 用于步骤 11，唯一负责把已收敛内容落盘到 `final_document_path`
+  - 用于步骤 11，唯一负责把已收敛内容落盘到 `final_document_path`，并留下 `rendered_via_script=true`
 
 ## 状态更新规则
 - 每步完成后写入 `checkpoints.step-N` 并追加 `completed_steps`
@@ -72,9 +72,11 @@ compatibility:
 - **step-4 必须走专用脚本**：`flow_tier`、`required_artifacts`、`skipped_steps` 必须由 `set-flow-tier.py` 同步写入，禁止先推进再手改 YAML
 - **step-3 先验只检查前置，不检查产物**：步骤 3 的 validator 只确认 step 1/2、模板文件与路径前置条件；`template_fingerprint`、`slot_count`、`working_draft_path` 必须由 `extract-template-snapshot.py` 首次生成，禁止因为 step 3 校验失败而手改 state
 - **所有写状态脚本都要求 receipt**：先运行 `python scripts/validate-state.py --write-pass-receipt`，再调用 `initialize-state.py`、`extract-template-snapshot.py`、`set-flow-tier.py`、`advance-state-step.py`、`mark-step-skipped.py`、`sync-artifacts-from-draft.py`、`render-final-document.py`、`finalize-cleanup.py`
+- **receipt 必须跟随 current_step 原子刷新**：任何 mutating script 成功后都必须把 `gate_receipt.step` 刷新到最新 `current_step`；若 `receipt.step` 落后于 `current_step`，视为非法状态，必须停下修复，不能继续写 draft、render 或 cleanup
 - **最终文档目录固定**：`final_document_path` 只能位于 `.architecture/technical-solutions/`，不得写入 `docs/`、项目根目录或其他自定义目录
 - **目录策略固定为双读单写**：可以读取历史 `.architecture/solutions/`，但本次流程的新 working draft 与最终文档统一写入 `.architecture/technical-solutions/`
 - **禁止外部脚本补状态**：不得用 inline Python、手工 Edit YAML、直接 `rm` 文件来伪造 receipt、fingerprint、checkpoint、cleanup 结果；一旦 gate fail，必须停在当前步修复脚本要求的最小前置
+- **禁止把现成 `docs/技术方案*.md` 当主路径**：若仓库内已有历史方案，只能当背景参考；不得先重写 `docs/` 再回头补 `.architecture` 流程
 
 ## 自动推进与过程证据
 - 流程默认自动连续执行，不要求用户逐步回复确认
@@ -209,3 +211,5 @@ compatibility:
 - **状态与模板指纹必须同源**：步骤 3 后如果模板被替换或修改，必须回退到步骤 3 重新提取模板指纹与 draft 骨架，不能继续沿用旧槽位定义。
 - step 11 若发生推理失败、写文件失败或标题顺序校验失败，必须停留在步骤 11 并先走 validator repair loop，禁止直接推进步骤 12。
 - step 12 只能通过 `finalize-cleanup.py` 完成；禁止手工先改 `absorption_check_passed=true`、再 `rm` 文件、再尝试推进状态。
+- 仓库里即使已有 `docs/技术方案*.md` 或其他分析 agent，也不能替代 `create-technical-solution` 主路径；最终产物仍必须落在 `.architecture/technical-solutions/`
+- 若某一步脚本失败，不得改成“一次性写完整 WD-CTX + WD-TASK + WD-SYN 再回填步骤”；这会让 receipt、checkpoint、produced_artifacts 脱节

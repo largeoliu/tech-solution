@@ -78,6 +78,18 @@ def require_receipt(state: dict[str, Any], expected_step: int, expected_flow_tie
         raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")
 
 
+def refresh_receipt(state: dict[str, Any], flow_tier: str) -> None:
+    step = int(state.get("current_step") or 0) or 4
+    state["gate_receipt"] = {
+        "step": step,
+        "flow_tier": flow_tier,
+        "state_fingerprint": "",
+        "validated_at": "",
+    }
+    state["gate_receipt"]["state_fingerprint"] = compute_state_fingerprint(state)
+    state["gate_receipt"]["validated_at"] = iso_now()
+
+
 def contract_for_tier(flow_tier: str) -> tuple[list[str], list[int]]:
     if flow_tier == "light":
         return ["WD-CTX", "WD-SYN-LIGHT"], [8, 9]
@@ -147,6 +159,7 @@ def set_flow_tier(
             completed.append(4)
             completed.sort()
 
+    refresh_receipt(state, flow_tier)
     dump_yaml(state_path, state)
     return {
         "flow_tier": flow_tier,
@@ -154,6 +167,7 @@ def set_flow_tier(
         "skipped_steps": skipped_steps,
         "signals": signals,
         "current_step": state.get("current_step"),
+        "gate_receipt_step": state["gate_receipt"]["step"],
     }
 
 

@@ -57,6 +57,19 @@ def require_receipt(state: dict[str, Any], expected_step: int) -> None:
         raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")
 
 
+def refresh_receipt(state: dict[str, Any]) -> None:
+    flow_tier = str(state.get("flow_tier") or "").strip() or "light"
+    step = int(state.get("current_step") or 0) or 1
+    state["gate_receipt"] = {
+        "step": step,
+        "flow_tier": flow_tier,
+        "state_fingerprint": "",
+        "validated_at": "",
+    }
+    state["gate_receipt"]["state_fingerprint"] = compute_state_fingerprint(state)
+    state["gate_receipt"]["validated_at"] = iso_now()
+
+
 def mark_step_skipped(
     *,
     state_path: Path,
@@ -95,12 +108,14 @@ def mark_step_skipped(
 
     if next_step is not None:
         state["current_step"] = next_step
+    refresh_receipt(state)
     dump_yaml(state_path, state)
     return {
         "skipped_step": step,
         "skipped_steps": state["skipped_steps"],
         "completed_steps": state["completed_steps"],
         "current_step": state.get("current_step"),
+        "gate_receipt_step": state["gate_receipt"]["step"],
     }
 
 

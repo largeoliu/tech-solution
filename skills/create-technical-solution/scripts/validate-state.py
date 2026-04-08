@@ -479,6 +479,22 @@ class GateValidator:
         if not isinstance(receipt, dict):
             return
         receipt_step = int(receipt.get("step") or 0)
+        current_step = int(self.state.get("current_step") or 0)
+        if current_step > 1 and receipt_step != current_step:
+            add_issue(
+                errors,
+                make_issue(
+                    code="invalid_gate_receipt",
+                    message=f"步骤 {step_num}: gate_receipt.step={receipt_step} 与 current_step={current_step} 不一致",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="gate_receipt.step",
+                    recommended_rollback_step=min(step_num, current_step),
+                    recommended_repair_step=min(step_num, current_step),
+                ),
+            )
+            if receipt_step <= 0:
+                return
         if receipt_step <= 0:
             return
         fingerprint = str(receipt.get("state_fingerprint") or "").strip()
@@ -1241,6 +1257,19 @@ class GateValidator:
             self.check_working_draft_block("WD-SYN", errors, 11, flow_tier)
             self.check_wd_syn_quality(errors, 11, flow_tier)
         self.check_final_document_not_premature(errors, 11, flow_tier)
+        checkpoint = self.checkpoint(11, errors, flow_tier)
+        if self.final_document_path() and self.final_document_path().exists():
+            require(
+                checkpoint.get("rendered_via_script") is True,
+                errors,
+                code="final_document_not_rendered_via_script",
+                message="步骤 11: 最终文档必须通过 render-final-document.py 生成",
+                step=11,
+                flow_tier=flow_tier,
+                field="checkpoints.step-11.rendered_via_script",
+                recommended_rollback_step=11,
+                recommended_repair_step=11,
+            )
 
     def step_12(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(12, flow_tier, errors)
@@ -1261,6 +1290,18 @@ class GateValidator:
             recommended_repair_step=11,
         )
         self.check_final_document(errors, 12, flow_tier)
+        step11 = self.checkpoint(11, errors, flow_tier)
+        require(
+            step11.get("rendered_via_script") is True,
+            errors,
+            code="final_document_not_rendered_via_script",
+            message="步骤 12: 最终文档必须通过 render-final-document.py 生成",
+            step=12,
+            flow_tier=flow_tier,
+            field="checkpoints.step-11.rendered_via_script",
+            recommended_rollback_step=11,
+            recommended_repair_step=11,
+        )
         checkpoint = self.checkpoint(12, errors, flow_tier)
         if self.state.get("absorption_check_passed") or self.state.get("cleanup_allowed"):
             require(

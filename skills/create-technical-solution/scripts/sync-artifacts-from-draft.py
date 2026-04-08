@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,10 @@ ARTIFACT_PATTERNS = {
     "WD-SYN": re.compile(r"^\s*#{2,6}\s+WD-SYN\b", re.MULTILINE),
     "WD-SYN-LIGHT": re.compile(r"^\s*#{2,6}\s+WD-SYN-LIGHT\b", re.MULTILINE),
 }
+
+
+def iso_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -57,6 +62,19 @@ def require_receipt(state: dict[str, Any], expected_step: int) -> None:
         raise SystemExit(f"gate_receipt.step={receipt.get('step')}，期望 {expected_step}。")
     if str(receipt.get("state_fingerprint") or "") != compute_state_fingerprint(state):
         raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")
+
+
+def refresh_receipt(state: dict[str, Any]) -> None:
+    flow_tier = str(state.get("flow_tier") or "").strip() or "light"
+    step = int(state.get("current_step") or 0) or 1
+    state["gate_receipt"] = {
+        "step": step,
+        "flow_tier": flow_tier,
+        "state_fingerprint": "",
+        "validated_at": "",
+    }
+    state["gate_receipt"]["state_fingerprint"] = compute_state_fingerprint(state)
+    state["gate_receipt"]["validated_at"] = iso_now()
 
 
 def sync_artifacts(content: str, selected_members: list[str]) -> list[str]:
@@ -100,6 +118,7 @@ def main() -> int:
 
     if args.write and args.state:
         state["produced_artifacts"] = artifacts
+        refresh_receipt(state)
         dump_yaml(Path(args.state).resolve(), state)
 
     print(json.dumps(output, ensure_ascii=False, indent=2))

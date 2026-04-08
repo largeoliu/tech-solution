@@ -9,10 +9,15 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+
+def iso_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -25,6 +30,7 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 
 def dump_yaml(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
@@ -42,16 +48,26 @@ def compute_state_fingerprint(state: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def require_receipt(state: dict[str, Any], expected_step: int, expected_flow_tier: str) -> None:
-    receipt = state.get("gate_receipt")
-    if not isinstance(receipt, dict):
-        raise SystemExit("缺少 gate_receipt，必须先运行 validate-state.py --write-pass-receipt。")
-    if int(receipt.get("step") or 0) != expected_step:
-        raise SystemExit(f"gate_receipt.step={receipt.get('step')}，期望 {expected_step}。")
-    if str(receipt.get("flow_tier") or "") != expected_flow_tier:
-        raise SystemExit(f"gate_receipt.flow_tier={receipt.get('flow_tier')}，期望 {expected_flow_tier}。")
-    if str(receipt.get("state_fingerprint") or "") != compute_state_fingerprint(state):
-        raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")
+def load_or_create_state(path: Path) -> dict[str, Any]:
+    if path.exists():
+        return load_yaml(path)
+    template_path = Path(__file__).resolve().parents[1] / "templates" / "_template.yaml"
+    if not template_path.exists():
+        raise SystemExit(f"状态模板不存在: {template_path}")
+    state = load_yaml(template_path)
+    dump_yaml(path, state)
+    return state
+
+
+def refresh_receipt(state: dict[str, Any], *, step: int, flow_tier: str) -> None:
+    state["gate_receipt"] = {
+        "step": step,
+        "flow_tier": flow_tier,
+        "state_fingerprint": "",
+        "validated_at": "",
+    }
+    state["gate_receipt"]["state_fingerprint"] = compute_state_fingerprint(state)
+    state["gate_receipt"]["validated_at"] = iso_now()
 
 
 def initialize_state(
@@ -62,11 +78,11 @@ def initialize_state(
     next_step: int | None,
     solution_root: str,
 ) -> dict[str, Any]:
-    state = load_yaml(state_path)
-    require_receipt(state, expected_step=1, expected_flow_tier="light")
+    state = load_or_create_state(state_path)
 
     solution_root_path = Path(solution_root.strip("/"))
     final_document_path = solution_root_path / f"{slug}.md"
+    current_flow_tier = str(state.get("flow_tier") or "").strip() or "light"
 
     checkpoints = state.setdefault("checkpoints", {})
     if not isinstance(checkpoints, dict):
@@ -76,9 +92,11 @@ def initialize_state(
         "summary": summary,
         "slug": slug,
         "scope_ready": True,
+        "completed_at": iso_now(),
     }
     state["solution_root"] = str(solution_root_path)
     state["final_document_path"] = str(final_document_path)
+    state["flow_tier"] = current_flow_tier
     if next_step is not None:
         state["current_step"] = next_step
 
@@ -90,12 +108,18 @@ def initialize_state(
         completed.append(1)
         completed.sort()
 
+    refresh_receipt(
+        state,
+        step=int(state.get("current_step") or next_step or 1),
+        flow_tier=current_flow_tier,
+    )
     dump_yaml(state_path, state)
     return {
         "slug": slug,
         "solution_root": state["solution_root"],
         "final_document_path": state["final_document_path"],
         "current_step": state.get("current_step"),
+        "gate_receipt_step": state["gate_receipt"]["step"],
     }
 
 
@@ -125,4 +149,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

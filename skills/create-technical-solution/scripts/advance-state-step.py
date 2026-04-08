@@ -57,6 +57,19 @@ def require_receipt(state: dict[str, Any], expected_step: int) -> None:
         raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")
 
 
+def refresh_receipt(state: dict[str, Any]) -> None:
+    flow_tier = str(state.get("flow_tier") or "").strip() or "light"
+    step = int(state.get("current_step") or 0) or 1
+    state["gate_receipt"] = {
+        "step": step,
+        "flow_tier": flow_tier,
+        "state_fingerprint": "",
+        "validated_at": "",
+    }
+    state["gate_receipt"]["state_fingerprint"] = compute_state_fingerprint(state)
+    state["gate_receipt"]["validated_at"] = iso_now()
+
+
 def set_path(target: dict[str, Any], dotted_path: str, value: Any) -> None:
     parts = [part for part in dotted_path.split(".") if part]
     if not parts:
@@ -144,6 +157,7 @@ def main() -> int:
         set_path(state, key, value)
     for key, value in parse_json_key_value(args.state_fields_json).items():
         set_path(state, key, value)
+    refresh_receipt(state)
     dump_yaml(path, state)
     return 0
 

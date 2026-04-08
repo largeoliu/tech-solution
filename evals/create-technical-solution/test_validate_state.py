@@ -113,7 +113,7 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
         "flow_tier": "moderate",
         "required_artifacts": ["WD-CTX", "WD-TASK", "WD-SYN"],
         "produced_artifacts": ["WD-CTX", "WD-TASK", "WD-SYN"],
-        "gate_receipt": {"step": 10, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": ""},
+        "gate_receipt": {"step": 10, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"},
         "solution_root": ".architecture/technical-solutions",
         "template_path": ".architecture/templates/technical-solution-template.md",
         "members_path": ".architecture/members.yml",
@@ -132,7 +132,7 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
             "step-8": {"summary": "完成；写入 WD-TASK；slots=4；gate: step-10 ready", "wd_task_written": True, "task_slot_count": 4},
             "step-9": {"summary": "跳过；WD-EXP=0；reason=moderate；gate: step-10 ready", "skipped": True, "reason": "moderate 无需 WD-EXP-*", "wd_exp_count": 0},
             "step-10": {"summary": "完成；写入 WD-SYN；slots=4；gate: step-11 ready", "wd_syn_written": True, "syn_slot_count": 4},
-            "step-11": {"summary": "完成；final_document=1；absorbed_slots=4；gate: step-12 ready", "final_document_written": True, "absorbed_slot_count": 4},
+            "step-11": {"summary": "完成；final_document=1；absorbed_slots=4；gate: step-12 ready", "final_document_written": True, "absorbed_slot_count": 4, "rendered_via_script": True},
             "step-12": {"summary": "完成；validator_passed=true；deleted=0", "validator_passed": False, "working_draft_deleted": False, "state_file_deleted": False},
         },
         "can_enter_step_8": True,
@@ -288,17 +288,19 @@ class TestScripts:
                 require_receipt_step=9,
             )
 
-    def test_initialize_state_requires_receipt(self, workspace: dict[str, Path]) -> None:
-        template = vs.load_state((Path(__file__).parent.parent.parent / "skills" / "create-technical-solution" / "templates" / "_template.yaml"))
-        write_state(workspace, template)
-        with pytest.raises(SystemExit):
-            iss.initialize_state(
-                state_path=workspace["state_path"],
-                slug="sample-solution",
-                summary="完成；slug=sample-solution；paths=1；gate: step-2 ready",
-                next_step=2,
-                solution_root=".architecture/technical-solutions",
-            )
+    def test_initialize_state_bootstraps_missing_state(self, workspace: dict[str, Path]) -> None:
+        payload = iss.initialize_state(
+            state_path=workspace["state_path"],
+            slug="sample-solution",
+            summary="完成；slug=sample-solution；paths=1；gate: step-2 ready",
+            next_step=2,
+            solution_root=".architecture/technical-solutions",
+        )
+        state = vs.load_state(workspace["state_path"])
+        assert payload["current_step"] == 2
+        assert state["checkpoints"]["step-1"]["scope_ready"] is True
+        assert state["gate_receipt"]["step"] == 2
+        assert state["gate_receipt"]["flow_tier"] == "light"
 
     def test_render_final_document_rejects_docs_directory(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
@@ -318,6 +320,15 @@ class TestScripts:
 
 
 class TestValidator:
+    def test_validator_rejects_receipt_lagging_current_step(self, workspace: dict[str, Path]) -> None:
+        state = make_state(workspace, current_step=11)
+        state["gate_receipt"] = {"step": 5, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_11("moderate", errors)
+        assert any(error["code"] == "invalid_gate_receipt" for error in errors)
+
     def test_step_3_allows_pre_extract_state(self, workspace: dict[str, Path]) -> None:
         state = make_state(
             workspace,
@@ -445,6 +456,16 @@ class TestValidator:
         validator.step_11("moderate", errors)
         assert any(error["code"] == "invalid_final_document_path" for error in errors)
 
+    def test_step_11_requires_render_script_marker(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        workspace["final_document_path"].write_text(FINAL_DOC, encoding="utf-8")
+        state = make_state(workspace, current_step=11)
+        state["checkpoints"]["step-11"]["rendered_via_script"] = False
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_11("moderate", errors)
+        assert any(error["code"] == "final_document_not_rendered_via_script" for error in errors)
+
     def test_step_12_rejects_wrong_final_document_order(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
         workspace["final_document_path"].write_text(
@@ -469,6 +490,24 @@ class TestValidator:
 
 
 class TestCleanup:
+    def test_render_final_document_refreshes_receipt(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        workspace["content_file"].write_text(FINAL_DOC, encoding="utf-8")
+        state = make_state(workspace, current_step=11)
+        state["gate_receipt"] = {"step": 11, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        payload = rfd.render_final_document(
+            state_path=workspace["state_path"],
+            flow_tier="moderate",
+            content_path=workspace["content_file"],
+            summary="完成；final_document=1；absorbed_slots=4；gate: step-12 ready",
+        )
+        refreshed = vs.load_state(workspace["state_path"])
+        assert payload["current_step"] == 12
+        assert refreshed["gate_receipt"]["step"] == 12
+        assert refreshed["checkpoints"]["step-11"]["rendered_via_script"] is True
+
     def test_finalize_cleanup_success(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
         workspace["final_document_path"].write_text(FINAL_DOC, encoding="utf-8")

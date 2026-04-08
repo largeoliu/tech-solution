@@ -10,10 +10,15 @@ import argparse
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+
+def iso_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -55,6 +60,18 @@ def require_receipt(state: dict[str, Any], expected_step: int, expected_flow_tie
         raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")
 
 
+def refresh_receipt(state: dict[str, Any], flow_tier: str) -> None:
+    step = int(state.get("current_step") or 0) or 12
+    state["gate_receipt"] = {
+        "step": step,
+        "flow_tier": flow_tier,
+        "state_fingerprint": "",
+        "validated_at": "",
+    }
+    state["gate_receipt"]["state_fingerprint"] = compute_state_fingerprint(state)
+    state["gate_receipt"]["validated_at"] = iso_now()
+
+
 def count_absorbed_slots(markdown: str) -> int:
     return len(re.findall(r"^(#{2,6})\s+.+$", markdown, flags=re.MULTILINE))
 
@@ -90,6 +107,8 @@ def render_final_document(
         "summary": summary,
         "final_document_written": True,
         "absorbed_slot_count": count_absorbed_slots(content),
+        "rendered_via_script": True,
+        "completed_at": iso_now(),
     }
     state["can_enter_step_12"] = True
     completed = state.setdefault("completed_steps", [])
@@ -100,11 +119,13 @@ def render_final_document(
         completed.append(11)
         completed.sort()
     state["current_step"] = 12
+    refresh_receipt(state, flow_tier)
     dump_yaml(state_path, state)
     return {
         "final_document_path": str(final_document_path),
         "absorbed_slot_count": checkpoints["step-11"]["absorbed_slot_count"],
         "current_step": state["current_step"],
+        "gate_receipt_step": state["gate_receipt"]["step"],
     }
 
 
