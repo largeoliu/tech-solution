@@ -82,7 +82,7 @@ def initialize_state(
 
     solution_root_path = Path(solution_root.strip("/"))
     final_document_path = solution_root_path / f"{slug}.md"
-    current_flow_tier = str(state.get("flow_tier") or "").strip() or "light"
+    current_flow_tier = str(state.get("flow_tier") or "").strip() or "pending"
 
     checkpoints = state.setdefault("checkpoints", {})
     if not isinstance(checkpoints, dict):

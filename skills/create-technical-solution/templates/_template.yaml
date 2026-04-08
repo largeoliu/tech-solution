@@ -1,7 +1,7 @@
 current_step: 1
 completed_steps: []
 skipped_steps: []
-flow_tier: ""
+flow_tier: "pending"
 required_artifacts: []
 produced_artifacts: []
 gate_receipt:

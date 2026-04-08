@@ -140,6 +140,11 @@ def main() -> int:
     state = load_yaml(path)
     if args.require_receipt_step is not None:
         require_receipt(state, args.require_receipt_step)
+        
+    if args.step == 2:
+        found_checked = any(kv.startswith("prerequisites_checked=") for kv in args.field)
+        if not found_checked:
+            args.field.append("prerequisites_checked=true")
     checkpoints = state.setdefault("checkpoints", {})
     if not isinstance(checkpoints, dict):
         checkpoints = {}

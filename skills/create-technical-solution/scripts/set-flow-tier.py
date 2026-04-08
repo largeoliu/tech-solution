@@ -72,7 +72,7 @@ def require_receipt(state: dict[str, Any], expected_step: int, expected_flow_tie
         raise SystemExit("缺少 gate_receipt，必须先运行 validate-state.py --write-pass-receipt。")
     if int(receipt.get("step") or 0) != expected_step:
         raise SystemExit(f"gate_receipt.step={receipt.get('step')}，期望 {expected_step}。")
-    if str(receipt.get("flow_tier") or "") != expected_flow_tier:
+    if expected_flow_tier != "pending" and str(receipt.get("flow_tier") or "") != expected_flow_tier:
         raise SystemExit(f"gate_receipt.flow_tier={receipt.get('flow_tier')}，期望 {expected_flow_tier}。")
     if str(receipt.get("state_fingerprint") or "") != compute_state_fingerprint(state):
         raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")

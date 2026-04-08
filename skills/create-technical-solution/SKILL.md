@@ -11,6 +11,9 @@ compatibility:
 # 创建技术方案
 
 ## 技能定位
+
+> ⚠️ Lite/Mini 模型请使用下方「简化执行循环」（基于 `run-step.py`），主力模型可使用原始执行循环或简化循环。
+
 按当前生效模板产出正式技术方案。依赖 `.architecture/members.yml`、`.architecture/principles.md`、`.architecture/templates/technical-solution-template.md`。当前模板是唯一正文骨架来源。
 
 - 本技能只消费当前模板结构，不得预设模板必须存在特定章节、表格、列名或固定小节。
@@ -34,15 +37,44 @@ compatibility:
 1. 读取状态文件
 2. 定位当前步骤
 3. **先加载对应 step card**
+
+<HARD-GATE>
+每步执行前必须 Read 对应的 `steps/NN-*.md` 文件。step card 包含该步骤的具体操作命令、参数格式和完成标准。未读取 step card 就执行操作视为流程违规。
+</HARD-GATE>
+
 4. **先运行当前步骤 validator 门禁**
 5. 执行本步操作
 6. 用确定性脚本更新状态 / 模板快照 / produced_artifacts
 7. 再次运行门禁验证，通过则进入下一步
 
+## 简化执行循环（推荐）
+
+使用 `run-step.py` 统一编排器，自动处理验证、receipt 刷新、参数推导和 step card 加载，Agent 只需关注创作工作。
+
+1. **查看任务**：`python scripts/run-step.py --state <状态文件>` → 输出当前步骤、验证状态、操作指引、下一步命令
+2. **执行并提交**：`python scripts/run-step.py --state <状态文件> --complete --summary "..." [--content-file /tmp/xxx.md]`
+3. **重复**直到步骤 12 完成
+
+各步骤的完整命令示例：
+
+| 步骤 | 命令 |
+|------|------|
+| 1 | `--complete --summary "..." --slug <slug>` |
+| 2, 3, 6 | `--complete --summary "..."` |
+| 4 | `--complete --summary "..." --flow-tier <tier> --solution-type "..." --signal <signal>` |
+| 5 | `--complete --summary "..." --member <ID> [--member ...]` |
+| 7, 8, 10 | `--complete --summary "..." --content-file /tmp/<block>.md` |
+| 9 | `--complete --summary "..." --content-file /tmp/wd-exp-<MEMBER>.md [--content-file ...]` |
+| 11, 12 | `--complete --summary "..."` |
+
+全自动步骤（2、3、6、11、12）无需额外输入，直接 `--complete` 即可。`light`/`moderate` 流程的跳步会自动处理。
+
 ## 状态文件初始化
 只能通过 `initialize-state.py` 初始化 `.architecture/.state/create-technical-solution/[slug].yaml`。该脚本负责在 state 缺失时自动创建文件、写入 step-1 最小 checkpoint、派生路径并刷新 receipt；不得再手工 `cp templates/_template.yaml` 后补 YAML。
 
 ## 确定性脚本
+- `python3 scripts/run-step.py --state <状态文件> [--complete --summary "..." ...]`
+  - 统一步骤编排器，封装验证、receipt 刷新、参数推导和 step card 加载。推荐 Lite 模型使用此脚本替代手动调用下方各脚本
 - `python3 scripts/initialize-state.py --state <状态文件> --slug <slug> --summary "<步骤1摘要>" --next-step 2`
   - 用于步骤 1，唯一负责创建 state、写入 slug 派生路径、最小 step-1 checkpoint 与最新 receipt
 - `python3 scripts/extract-template-snapshot.py --template <模板路径> --slug <slug> --working-draft <draft路径> --state <状态文件> --write`
@@ -202,11 +234,14 @@ compatibility:
 | members.yml 不存在 | `.architecture/` 未初始化 | 先调用 `bootstrap-architecture` 技能 |
 | 模板文件不存在 | 模板未创建或路径错误 | 检查 `.architecture/templates/technical-solution-template.md`，缺失则调用 `manage-technical-solution-template` |
 | working draft 内容丢失 | slug 不一致导致多份草稿 | 终止当前流程，以正确 slug 重启 |
+| fingerprint 反复不一致 | 手动修改 YAML 导致 receipt 失效 | 不要使用 inline Python 修改 state；重新运行 `validate-state.py --write-pass-receipt` 获取最新 receipt |
 
 ## 相关技能
 - `bootstrap-architecture`：初始化 `.architecture/` 目录、成员名册、原则文档和技术方案模板。
 
 ## 常见陷阱
+- 步骤 2-3 的 `--flow-tier` 必须使用 `pending`，因为步骤 4 才正式判定流程级别；使用 `light` 会导致后续 receipt 中的 `flow_tier` 与步骤 4 判定结果不一致
+- validate-state.py 返回 exit code 2 时，必须使用 `--format json` 查看结构化 `repair_plan[]`，按 `action_types → depends_on_steps → state_patch_hint → artifact_write_hint → completion_checks → retry_command` 顺序消费修复建议
 - 参与成员必须来自 `.architecture/members.yml` 实际条目——虚构角色会导致步骤 9 专家分析加载失败，产出无效。
 - 步骤 9 不得模拟 `WD-EXP-*` 产出或直接跳到最终文档，必须实际加载对应专家的角色和视角
 - 步骤 8 不得只生成粗粒度章节任务单，必须按当前模板真实槽位逐项分配

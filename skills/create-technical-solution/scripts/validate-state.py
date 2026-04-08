@@ -1373,7 +1373,11 @@ class GateValidator:
 
 
 def format_issue(issue: dict[str, Any]) -> str:
-    return f"  ✗ {issue['message']}\n    → 建议：{issue['repair_guidance']}"
+    lines = [f"  ✗ {issue['message']}", f"    → 建议：{issue['repair_guidance']}"]
+    repair_step = issue.get("recommended_repair_step")
+    if repair_step:
+        lines.append(f"    → 修复命令：python scripts/validate-state.py --state <状态文件> --step {repair_step} --flow-tier <tier> --write-pass-receipt --format json")
+    return "\n".join(lines)
 
 
 def write_pass_receipt(path: Path, state: dict[str, Any], step: int, flow_tier: str) -> dict[str, Any]:
@@ -1393,7 +1397,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="验证 create-technical-solution 状态文件")
     parser.add_argument("--state", required=True, help="状态文件路径")
     parser.add_argument("--step", type=int, required=True, help="要校验的步骤号")
-    parser.add_argument("--flow-tier", required=True, choices=["light", "moderate", "full"], help="当前流程级别")
+    parser.add_argument("--flow-tier", required=True, choices=["light", "moderate", "full", "pending"], help="当前流程级别")
     parser.add_argument("--format", choices=["json", "text"], default="text", help="输出格式")
     parser.add_argument("--write-pass-receipt", action="store_true", help="校验通过后写入 gate_receipt")
     args = parser.parse_args()
