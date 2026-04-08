@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -275,6 +276,23 @@ class TestScripts:
                 require_receipt_step=4,
             )
 
+    def test_set_flow_tier_requires_signal(self, workspace: dict[str, Path]) -> None:
+        state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3], flow_tier="light")
+        state["gate_receipt"] = {"step": 4, "flow_tier": "light", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        with pytest.raises(SystemExit):
+            sft.set_flow_tier(
+                state_path=workspace["state_path"],
+                flow_tier="light",
+                solution_type="单模块改动",
+                summary="完成；flow_tier=light；signals=0；gate: step-5 ready",
+                next_step=5,
+                append_completed=True,
+                signals=[],
+                require_receipt_step=4,
+            )
+
     def test_mark_step_skipped_requires_receipt(self, workspace: dict[str, Path]) -> None:
         state = make_state(workspace, current_step=9, completed_steps=[1, 2, 3, 4, 5, 6, 7, 8], skipped_steps=[])
         state["gate_receipt"] = {"step": 8, "flow_tier": "moderate", "state_fingerprint": "bad", "validated_at": ""}
@@ -345,6 +363,67 @@ class TestScripts:
         assert payload["gate_receipt_step"] == 10
         assert refreshed["checkpoints"]["step-8"]["wd_task_written"] is True
 
+    def test_upsert_draft_block_rejects_nested_block_heading(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(workspace, current_step=10)
+        state["gate_receipt"] = {"step": 10, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        content_file = workspace["repo"] / "wd-syn-invalid.md"
+        content_file.write_text("## WD-SYN\n\n### 槽位：1.1 需求概述\n\n内容\n", encoding="utf-8")
+        with pytest.raises(SystemExit):
+            udb.upsert_block(
+                working_draft_path=workspace["working_draft_path"],
+                state_path=workspace["state_path"],
+                block_name="WD-SYN",
+                content_path=content_file,
+                summary="完成；写入 WD-SYN；slots=1；gate: step-11 ready",
+                require_receipt_step=10,
+            )
+
+    def test_advance_state_step_rejects_step_10_plus(self, workspace: dict[str, Path]) -> None:
+        state = make_state(workspace, current_step=10)
+        write_state(workspace, state)
+        result = subprocess.run(
+            [
+                "python3",
+                str(scripts_path / "advance-state-step.py"),
+                "--state",
+                str(workspace["state_path"]),
+                "--step",
+                "10",
+                "--summary",
+                "完成；写入 WD-SYN；slots=4；gate: step-11 ready",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "step-10" in (result.stderr or result.stdout)
+
+    def test_render_cli_rejects_content_file_flag(self, workspace: dict[str, Path]) -> None:
+        workspace["content_file"].write_text(FINAL_DOC, encoding="utf-8")
+        result = subprocess.run(
+            [
+                "python3",
+                str(scripts_path / "render-final-document.py"),
+                "--state",
+                str(workspace["state_path"]),
+                "--flow-tier",
+                "moderate",
+                "--content-file",
+                str(workspace["content_file"]),
+                "--summary",
+                "完成；final_document=1；absorbed_slots=4；gate: step-12 ready",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "unrecognized arguments: --content-file" in (result.stderr or result.stdout)
+
 
 class TestValidator:
     def test_validator_rejects_receipt_lagging_current_step(self, workspace: dict[str, Path]) -> None:
@@ -389,6 +468,14 @@ class TestValidator:
     def test_step_4_rejects_unregistered_signals(self, workspace: dict[str, Path]) -> None:
         state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
         state["checkpoints"]["step-4"]["signals"] = ["existing_system_enhancement", "frontend_form_change"]
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_4("moderate", errors)
+        assert any(error["code"] == "invalid_step4_signals" for error in errors)
+
+    def test_step_4_requires_non_empty_signals(self, workspace: dict[str, Path]) -> None:
+        state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
+        state["checkpoints"]["step-4"]["signals"] = []
         validator = make_validator(state, workspace)
         errors: list[dict] = []
         validator.step_4("moderate", errors)

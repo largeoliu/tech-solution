@@ -1111,6 +1111,17 @@ class GateValidator:
             recommended_rollback_step=4,
             recommended_repair_step=4,
         )
+        require(
+            bool(signals),
+            errors,
+            code="invalid_step4_signals",
+            message="步骤 4: signals 不能为空，必须显式声明分类信号",
+            step=4,
+            flow_tier=flow_tier,
+            field="checkpoints.step-4.signals",
+            recommended_rollback_step=4,
+            recommended_repair_step=4,
+        )
         if any(str(signal) not in VALID_STEP4_SIGNALS for signal in signals):
             add_issue(
                 errors,

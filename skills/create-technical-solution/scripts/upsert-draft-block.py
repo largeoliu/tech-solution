@@ -33,6 +33,15 @@ STEP_FOR_BLOCK = {
     "WD-SYN-LIGHT": 10,
 }
 
+FORBIDDEN_BODY_HEADINGS = {
+    "Template Metadata",
+    "Template Slots",
+    "WD-CTX",
+    "WD-TASK",
+    "WD-SYN",
+    "WD-SYN-LIGHT",
+}
+
 
 def iso_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -124,6 +133,24 @@ def count_slot_sections(block: str) -> int:
     return len(re.findall(r"^\s*###\s+", block, re.MULTILINE))
 
 
+def validate_block_body(block_name: str, content: str) -> None:
+    body = content.strip()
+    if not body:
+        raise SystemExit(f"{block_name} body 不能为空。content-file 只能包含区块体内容。")
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if re.match(r"^#\s+Working Draft\b", stripped):
+            raise SystemExit(f"{block_name} body 不得包含 Working Draft 标题。content-file 只能包含区块体内容。")
+        match = re.match(r"^##\s+(.+?)\s*$", stripped)
+        if match and match.group(1).strip() in FORBIDDEN_BODY_HEADINGS:
+            raise SystemExit(
+                f"{block_name} body 不得包含区块标题 {match.group(1).strip()}。"
+                " content-file 只能包含区块体内容。"
+            )
+
+
 def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -> None:
     checkpoints = state.setdefault("checkpoints", {})
     if not isinstance(checkpoints, dict):
@@ -208,6 +235,7 @@ def upsert_block(
 
     title_lines, blocks = extract_blocks(working_draft_path.read_text(encoding="utf-8"))
     block_content = content_path.read_text(encoding="utf-8").strip()
+    validate_block_body(block_name, block_content)
     blocks[block_name] = block_content
     working_draft_path.write_text(compose_markdown(title_lines, blocks), encoding="utf-8")
 

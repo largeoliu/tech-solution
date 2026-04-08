@@ -49,18 +49,20 @@ compatibility:
   - 用于步骤 3，唯一负责提取模板指纹、槽位数量、working draft 骨架，并原子推进到 step 4
 - `python3 scripts/upsert-draft-block.py --working-draft <draft路径> --state <状态文件> --block <WD-CTX|WD-TASK|WD-SYN|WD-SYN-LIGHT> --content-file <block临时文件> --summary "<步骤摘要>" --require-receipt-step <N>`
   - 用于步骤 7/8/10，唯一负责块级更新 working draft，保留其他 `WD-*` 区块不被覆盖，并同步 checkpoint/produced_artifacts/gate flag
+  - `content-file` 只能包含目标 block 的区块体内容；不得再包含 `## WD-*`、`## Template Metadata`、`## Template Slots` 或 `# Working Draft`
 - `python scripts/sync-artifacts-from-draft.py --working-draft <draft路径> --state <状态文件> --write`
   - 用于步骤 7-10，唯一负责把 working draft 中真实存在的稳定区块同步到 `produced_artifacts`
 - `python scripts/advance-state-step.py --state <状态文件> --step <N> --summary <摘要> --append-completed --next-step <N+1>`
-  - 用于步骤推进和 checkpoint 原子更新，并刷新 receipt；不得把它当成“跳过 validator 的强制推进器”
+  - 只允许用于 step 2/5/6 这类纯流程推进；不得用于 step 10/11/12，也不得把它当成“跳过 validator 的强制推进器”
 - `python scripts/set-flow-tier.py --state <状态文件> --flow-tier <light|moderate|full> --solution-type "<方案类型>" --summary "<步骤4摘要>" --next-step 5 --append-completed`
   - 用于步骤 4，原子写入 `flow_tier`、`checkpoints.step-4.flow_tier`、`required_artifacts` 与 `skipped_steps`
+  - 步骤 4 必须至少传一个 `--signal`；禁止无信号判级
 - `python scripts/mark-step-skipped.py --state <状态文件> --step <N> --summary "<跳过摘要>" --reason "<跳过原因>" --next-step <下一步>`
   - 用于 `light` / `moderate` 的显式跳步；保证不会把跳过步骤写进 `completed_steps`
 - `python scripts/finalize-cleanup.py --state <状态文件> --flow-tier <flow_tier> --summary "<步骤12摘要>" --format json`
   - 用于步骤 12 的唯一合法清理路径：先验证，再置标志、删除 working draft 与状态文件，并直接结束流程
-- `python scripts/render-final-document.py --state <状态文件> --flow-tier <flow_tier> --content-file <成稿临时文件> --summary "<步骤11摘要>"`
-  - 用于步骤 11，主路径应直接从 working draft 渲染最终文档；`content-file` 仅作兼容入口
+- `python scripts/render-final-document.py --state <状态文件> --flow-tier <flow_tier> --summary "<步骤11摘要>"`
+  - 用于步骤 11，唯一合法路径是直接从 working draft 的 `WD-SYN / WD-SYN-LIGHT` 渲染最终文档
 
 ## 状态更新规则
 - 每步完成后写入 `checkpoints.step-N` 并追加 `completed_steps`
@@ -76,11 +78,13 @@ compatibility:
 - **所有写状态脚本都要求 receipt**：先运行 `python scripts/validate-state.py --write-pass-receipt`，再调用 `initialize-state.py`、`extract-template-snapshot.py`、`set-flow-tier.py`、`advance-state-step.py`、`mark-step-skipped.py`、`sync-artifacts-from-draft.py`、`render-final-document.py`、`finalize-cleanup.py`
 - **receipt 必须跟随 current_step 原子刷新**：任何 mutating script 成功后都必须把 `gate_receipt.step` 刷新到最新 `current_step`；若 `receipt.step` 落后于 `current_step`，视为非法状态，必须停下修复，不能继续写 draft、render 或 cleanup
 - **working draft 只能块级写入**：step 7/8/10 只能通过 `upsert-draft-block.py` 更新各自 `WD-*` 区块，禁止整份覆盖 draft；任何覆盖导致旧 block 消失，视为流程失败
+- **block body 不能再带 block 标题**：传给 `upsert-draft-block.py` 的 `content-file` 只允许是区块体内容；如果再次包含 `## WD-*` 或 draft 容器标题，视为无效输入
 - **state 中路径必须相对化**：`solution_root` 固定为 `.architecture/technical-solutions`，`working_draft_path` 固定为 `.architecture/technical-solutions/working-drafts/[slug].working.md`；不得把绝对路径写回 state
 - **最终文档目录固定**：`final_document_path` 只能位于 `.architecture/technical-solutions/`，不得写入 `docs/`、项目根目录或其他自定义目录
 - **目录策略固定为双读单写**：可以读取历史 `.architecture/solutions/`，但本次流程的新 working draft 与最终文档统一写入 `.architecture/technical-solutions/`
 - **禁止外部脚本补状态**：不得用 inline Python、手工 Edit YAML、直接 `rm` 文件来伪造 receipt、fingerprint、checkpoint、cleanup 结果；一旦 gate fail，必须停在当前步修复脚本要求的最小前置
 - **禁止先写 final 再 render 追认**：step 11 只能由 `render-final-document.py` 成稿；不得先 `Write` 最终文档，再补跑 render 脚本
+- **render 不接受外部整文**：step 11 只能从 working draft 渲染；不得先拼 `/tmp/final-document.md` 再传给脚本
 - **cleanup 失败只允许脚本化 repair**：step 12 失败时只能重跑 `sync-artifacts-from-draft.py`、`upsert-draft-block.py`、`render-final-document.py`、`finalize-cleanup.py`；不得阅读 validator 源码逆向补字段
 - **禁止把现成 `docs/技术方案*.md` 当主路径**：若仓库内已有历史方案，只能当背景参考；不得先重写 `docs/` 再回头补 `.architecture` 流程
 
@@ -115,6 +119,7 @@ compatibility:
 - `light`：适用于单模块小改动、无新建核心能力、无职责迁移、无高风险兼容性问题；最小产物为 `WD-CTX`、`WD-SYN-LIGHT`
 - `moderate`：适用于多模块协调或现有资产改造，但不涉及新建核心能力、拆分/迁移/平行建设、多系统集成或高风险兼容性改造；最小产物为 `WD-CTX`、`WD-TASK`、`WD-SYN`
 - `full`：适用于新建核心能力、拆分、迁移、平行建设、职责转移、多系统集成或高风险兼容性改造；最小产物为 `WD-CTX`、`WD-TASK`、`WD-EXP-*`、`WD-SYN`
+- 明确反例：在现有抽检系统上新增“按比例抽审能力 / 新抽样方式 / 新审核治理维度 / 新判定模式”属于 `introduces-core-capability`，必须判为 `full`
 - 任一流程级别都不得跳过本级别要求的最小产物；缺失时必须阻塞，不得成稿或清理
 - `full` 流程中的步骤 9 必须按槽位组织专家判断，不得要求每位专家完整覆盖所有槽位；步骤 10 必须支持按槽位增量收敛并落盘，避免全量中间产物滚雪球
 - step 8 必须按当前模板的真实槽位逐项生成任务单，不得只按“背景/总体设计/详细设计/测试/上线”这类粗粒度章节分配

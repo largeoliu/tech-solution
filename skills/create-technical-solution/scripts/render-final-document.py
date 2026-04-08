@@ -231,7 +231,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="步骤 11 的唯一合法成稿路径")
     parser.add_argument("--state", required=True, help="状态文件路径")
     parser.add_argument("--flow-tier", choices=["light", "moderate", "full"], required=True, help="流程级别")
-    parser.add_argument("--content-file", help="待写入最终文档的 Markdown 文件；缺省时从 draft 渲染")
     parser.add_argument("--summary", required=True, help="写入 checkpoints.step-11.summary 的摘要")
     parser.add_argument("--format", choices=["json", "text"], default="json", help="输出格式")
     args = parser.parse_args()
@@ -239,7 +238,7 @@ def main() -> int:
     payload = render_final_document(
         state_path=Path(args.state).resolve(),
         flow_tier=args.flow_tier,
-        content_path=Path(args.content_file).resolve() if args.content_file else None,
+        content_path=None,
         summary=args.summary,
     )
     if args.format == "json":

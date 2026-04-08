@@ -128,6 +128,14 @@ def main() -> int:
     parser.add_argument("--require-receipt-step", type=int, help="要求 gate_receipt.step 与该值一致")
     args = parser.parse_args()
 
+    if args.step >= 10:
+        raise SystemExit(
+            f"advance-state-step.py 不允许用于 step-{args.step}。"
+            " step-10 只能用 upsert-draft-block.py；"
+            " step-11 只能用 render-final-document.py；"
+            " step-12 只能用 finalize-cleanup.py。"
+        )
+
     path = Path(args.state).resolve()
     state = load_yaml(path)
     if args.require_receipt_step is not None:

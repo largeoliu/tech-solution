@@ -100,6 +100,8 @@ def contract_for_tier(flow_tier: str) -> tuple[list[str], list[int]]:
 
 def validate_tier_against_signals(flow_tier: str, signals: list[str]) -> None:
     signal_set = set(signals)
+    if not signal_set:
+        raise SystemExit("步骤 4 必须至少声明一个 signal，禁止无信号判级。")
     unknown = sorted(signal_set - VALID_SIGNALS)
     if unknown:
         raise SystemExit(f"存在未注册信号 {unknown}，只能使用受支持的 step-4 signals")
