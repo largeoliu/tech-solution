@@ -47,6 +47,8 @@ compatibility:
   - 用于步骤 1，唯一负责创建 state、写入 slug 派生路径、最小 step-1 checkpoint 与最新 receipt
 - `python3 scripts/extract-template-snapshot.py --template <模板路径> --slug <slug> --working-draft <draft路径> --state <状态文件> --write`
   - 用于步骤 3，唯一负责提取模板指纹、槽位数量、working draft 骨架，并原子推进到 step 4
+- `python3 scripts/upsert-draft-block.py --working-draft <draft路径> --state <状态文件> --block <WD-CTX|WD-TASK|WD-SYN|WD-SYN-LIGHT> --content-file <block临时文件> --summary "<步骤摘要>" --require-receipt-step <N>`
+  - 用于步骤 7/8/10，唯一负责块级更新 working draft，保留其他 `WD-*` 区块不被覆盖，并同步 checkpoint/produced_artifacts/gate flag
 - `python scripts/sync-artifacts-from-draft.py --working-draft <draft路径> --state <状态文件> --write`
   - 用于步骤 7-10，唯一负责把 working draft 中真实存在的稳定区块同步到 `produced_artifacts`
 - `python scripts/advance-state-step.py --state <状态文件> --step <N> --summary <摘要> --append-completed --next-step <N+1>`
@@ -58,7 +60,7 @@ compatibility:
 - `python scripts/finalize-cleanup.py --state <状态文件> --flow-tier <flow_tier> --summary "<步骤12摘要>" --format json`
   - 用于步骤 12 的唯一合法清理路径：先验证，再置标志、删除 working draft 与状态文件，并直接结束流程
 - `python scripts/render-final-document.py --state <状态文件> --flow-tier <flow_tier> --content-file <成稿临时文件> --summary "<步骤11摘要>"`
-  - 用于步骤 11，唯一负责把已收敛内容落盘到 `final_document_path`，并留下 `rendered_via_script=true`
+  - 用于步骤 11，主路径应直接从 working draft 渲染最终文档；`content-file` 仅作兼容入口
 
 ## 状态更新规则
 - 每步完成后写入 `checkpoints.step-N` 并追加 `completed_steps`
@@ -73,9 +75,13 @@ compatibility:
 - **step-3 先验只检查前置，不检查产物**：步骤 3 的 validator 只确认 step 1/2、模板文件与路径前置条件；`template_fingerprint`、`slot_count`、`working_draft_path` 必须由 `extract-template-snapshot.py` 首次生成，禁止因为 step 3 校验失败而手改 state
 - **所有写状态脚本都要求 receipt**：先运行 `python scripts/validate-state.py --write-pass-receipt`，再调用 `initialize-state.py`、`extract-template-snapshot.py`、`set-flow-tier.py`、`advance-state-step.py`、`mark-step-skipped.py`、`sync-artifacts-from-draft.py`、`render-final-document.py`、`finalize-cleanup.py`
 - **receipt 必须跟随 current_step 原子刷新**：任何 mutating script 成功后都必须把 `gate_receipt.step` 刷新到最新 `current_step`；若 `receipt.step` 落后于 `current_step`，视为非法状态，必须停下修复，不能继续写 draft、render 或 cleanup
+- **working draft 只能块级写入**：step 7/8/10 只能通过 `upsert-draft-block.py` 更新各自 `WD-*` 区块，禁止整份覆盖 draft；任何覆盖导致旧 block 消失，视为流程失败
+- **state 中路径必须相对化**：`solution_root` 固定为 `.architecture/technical-solutions`，`working_draft_path` 固定为 `.architecture/technical-solutions/working-drafts/[slug].working.md`；不得把绝对路径写回 state
 - **最终文档目录固定**：`final_document_path` 只能位于 `.architecture/technical-solutions/`，不得写入 `docs/`、项目根目录或其他自定义目录
 - **目录策略固定为双读单写**：可以读取历史 `.architecture/solutions/`，但本次流程的新 working draft 与最终文档统一写入 `.architecture/technical-solutions/`
 - **禁止外部脚本补状态**：不得用 inline Python、手工 Edit YAML、直接 `rm` 文件来伪造 receipt、fingerprint、checkpoint、cleanup 结果；一旦 gate fail，必须停在当前步修复脚本要求的最小前置
+- **禁止先写 final 再 render 追认**：step 11 只能由 `render-final-document.py` 成稿；不得先 `Write` 最终文档，再补跑 render 脚本
+- **cleanup 失败只允许脚本化 repair**：step 12 失败时只能重跑 `sync-artifacts-from-draft.py`、`upsert-draft-block.py`、`render-final-document.py`、`finalize-cleanup.py`；不得阅读 validator 源码逆向补字段
 - **禁止把现成 `docs/技术方案*.md` 当主路径**：若仓库内已有历史方案，只能当背景参考；不得先重写 `docs/` 再回头补 `.architecture` 流程
 
 ## 自动推进与过程证据

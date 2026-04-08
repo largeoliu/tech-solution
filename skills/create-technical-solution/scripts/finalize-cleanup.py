@@ -10,10 +10,15 @@ import argparse
 import hashlib
 import importlib.util
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+
+def iso_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -63,6 +68,14 @@ def load_validator_module(scripts_dir: Path):
     return module
 
 
+def load_sync_module(scripts_dir: Path):
+    spec = importlib.util.spec_from_file_location("sync_artifacts_from_draft", scripts_dir / "sync-artifacts-from-draft.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, dict[str, Any]]:
     if not state_path.exists():
         return 2, {
@@ -75,7 +88,8 @@ def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, di
     state = load_yaml(state_path)
     require_receipt(state, expected_step=12, expected_flow_tier=flow_tier)
     repo_root = state_path.parent.parent.parent.parent
-    working_draft = repo_root / str(state.get("working_draft_path") or "")
+    draft_value = str(state.get("working_draft_path") or "")
+    working_draft = Path(draft_value) if Path(draft_value).is_absolute() else (repo_root / draft_value)
     final_document = repo_root / str(state.get("final_document_path") or "")
 
     if not working_draft.exists():
@@ -86,10 +100,14 @@ def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, di
             "working_draft_path": str(working_draft),
         }
 
-    checkpoints = state.setdefault("checkpoints", {})
+    scripts_dir = Path(__file__).resolve().parent
+    sync_module = load_sync_module(scripts_dir)
+    sync_module.sync_artifacts_in_state(state_path, require_receipt_step=12)
+    refreshed_after_sync = load_yaml(state_path)
+    checkpoints = refreshed_after_sync.setdefault("checkpoints", {})
     if not isinstance(checkpoints, dict):
         checkpoints = {}
-        state["checkpoints"] = checkpoints
+        refreshed_after_sync["checkpoints"] = checkpoints
     step12 = checkpoints.setdefault("step-12", {})
     if not isinstance(step12, dict):
         step12 = {}
@@ -98,12 +116,17 @@ def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, di
     step12["validator_passed"] = False
     step12["working_draft_deleted"] = False
     step12["state_file_deleted"] = False
-    receipt = refreshed_receipt = state.get("gate_receipt")
-    if isinstance(receipt, dict):
-        refreshed_receipt["state_fingerprint"] = compute_state_fingerprint(state)
-    dump_yaml(state_path, state)
+    refreshed_after_sync["gate_receipt"] = {
+        "step": 12,
+        "flow_tier": flow_tier,
+        "state_fingerprint": "",
+        "validated_at": "",
+    }
+    refreshed_after_sync["gate_receipt"]["state_fingerprint"] = compute_state_fingerprint(refreshed_after_sync)
+    refreshed_after_sync["gate_receipt"]["validated_at"] = iso_now()
+    dump_yaml(state_path, refreshed_after_sync)
 
-    validator = load_validator_module(Path(__file__).resolve().parent)
+    validator = load_validator_module(scripts_dir)
     refreshed_state = load_yaml(state_path)
     gate = validator.GateValidator(refreshed_state, state_path)
     errors: list[dict[str, Any]] = []
@@ -125,6 +148,14 @@ def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, di
     step12["validator_passed"] = True
     step12["working_draft_deleted"] = False
     step12["state_file_deleted"] = False
+    refreshed_state["gate_receipt"] = {
+        "step": 12,
+        "flow_tier": flow_tier,
+        "state_fingerprint": "",
+        "validated_at": "",
+    }
+    refreshed_state["gate_receipt"]["state_fingerprint"] = compute_state_fingerprint(refreshed_state)
+    refreshed_state["gate_receipt"]["validated_at"] = iso_now()
     dump_yaml(state_path, refreshed_state)
 
     working_draft.unlink(missing_ok=False)

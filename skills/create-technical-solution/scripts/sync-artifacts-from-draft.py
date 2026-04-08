@@ -77,6 +77,11 @@ def refresh_receipt(state: dict[str, Any]) -> None:
     state["gate_receipt"]["validated_at"] = iso_now()
 
 
+def resolve_path(value: Any, base: Path) -> Path:
+    path = Path(str(value))
+    return path if path.is_absolute() else (base / path).resolve()
+
+
 def sync_artifacts(content: str, selected_members: list[str]) -> list[str]:
     artifacts: list[str] = []
     for artifact, pattern in ARTIFACT_PATTERNS.items():
@@ -86,6 +91,25 @@ def sync_artifacts(content: str, selected_members: list[str]) -> list[str]:
         artifact = f"WD-EXP-{str(member).upper()}"
         if re.search(rf"^\s*#{{2,6}}\s+{re.escape(artifact)}\b", content, re.MULTILINE):
             artifacts.append(artifact)
+    return artifacts
+
+
+def sync_artifacts_in_state(state_path: Path, require_receipt_step: int | None = None) -> list[str]:
+    state = load_yaml(state_path)
+    repo_root = state_path.parent.parent.parent.parent
+    draft_path = resolve_path(state.get("working_draft_path") or "", repo_root)
+    if not draft_path.exists():
+        raise SystemExit(f"working draft 不存在: {draft_path}")
+    if require_receipt_step is not None:
+        require_receipt(state, require_receipt_step)
+    checkpoints = state.get("checkpoints") or {}
+    step5 = checkpoints.get("step-5") if isinstance(checkpoints, dict) else {}
+    raw_members = step5.get("selected_members") if isinstance(step5, dict) else []
+    selected_members = [str(item) for item in raw_members if str(item).strip()] if isinstance(raw_members, list) else []
+    artifacts = sync_artifacts(draft_path.read_text(encoding="utf-8"), selected_members)
+    state["produced_artifacts"] = artifacts
+    refresh_receipt(state)
+    dump_yaml(state_path, state)
     return artifacts
 
 
@@ -117,9 +141,8 @@ def main() -> int:
     output = {"produced_artifacts": artifacts}
 
     if args.write and args.state:
-        state["produced_artifacts"] = artifacts
-        refresh_receipt(state)
-        dump_yaml(Path(args.state).resolve(), state)
+        state_path = Path(args.state).resolve()
+        sync_artifacts_in_state(state_path, args.require_receipt_step if args.write else None)
 
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0

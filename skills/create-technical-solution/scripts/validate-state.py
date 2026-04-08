@@ -349,29 +349,42 @@ def build_repair_plan(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
             repair_step,
             {
                 "step": repair_step,
-                "action_types": [],
+                "action_type": "",
+                "script_command": "",
                 "depends_on_steps": [],
-                "artifact_write_hint": [],
-                "completion_checks": [],
+                "expected_artifacts_after_fix": [],
+                "revalidate_step": repair_step,
             },
         )
         code = issue["code"]
-        if code in {"missing_artifact", "missing_working_draft_block"}:
-            if "generate_artifact" not in entry["action_types"]:
-                entry["action_types"].append("generate_artifact")
-            for artifact in issue.get("missing_artifacts", []):
-                entry["artifact_write_hint"].append(
-                    {
-                        "artifact": artifact if artifact != "final_document" else "final_document",
-                        "target": "working_draft" if artifact.startswith("WD-") else "final_document",
-                        "summary": remediation_for_issue(issue),
-                    }
-                )
+        if code in {"missing_artifact", "missing_working_draft_block", "draft_block_overwritten"}:
+            artifact = (issue.get("missing_artifacts") or [""])[0]
+            action_map = {
+                "WD-CTX": ("rewrite_wd_ctx_block", "python3 scripts/upsert-draft-block.py --block WD-CTX ..."),
+                "WD-TASK": ("rewrite_wd_task_block", "python3 scripts/upsert-draft-block.py --block WD-TASK ..."),
+                "WD-SYN": ("rewrite_wd_syn_block", "python3 scripts/upsert-draft-block.py --block WD-SYN ..."),
+                "WD-SYN-LIGHT": ("rewrite_wd_syn_block", "python3 scripts/upsert-draft-block.py --block WD-SYN-LIGHT ..."),
+                "final_document": ("rerun_render_final_document", "python3 scripts/render-final-document.py --state ... --flow-tier ... --summary ..."),
+            }
+            entry["action_type"], entry["script_command"] = action_map.get(
+                artifact,
+                ("rerun_sync_artifacts", "python3 scripts/sync-artifacts-from-draft.py --state ... --write ..."),
+            )
+            for missing in issue.get("missing_artifacts", []):
+                if missing not in entry["expected_artifacts_after_fix"]:
+                    entry["expected_artifacts_after_fix"].append(missing)
+        elif code in {"invalid_working_draft_path", "template_changed_since_snapshot"}:
+            entry["action_type"] = "rerun_extract_template_snapshot"
+            entry["script_command"] = "python3 scripts/extract-template-snapshot.py --template ... --slug ... --working-draft ... --state ... --write"
+        elif code == "final_document_not_rendered_via_script":
+            entry["action_type"] = "rerun_render_final_document"
+            entry["script_command"] = "python3 scripts/render-final-document.py --state ... --flow-tier ... --summary ..."
+        elif repair_step == 12:
+            entry["action_type"] = "rerun_finalize_cleanup"
+            entry["script_command"] = "python3 scripts/finalize-cleanup.py --state ... --flow-tier ... --summary ..."
         else:
-            if "update_state" not in entry["action_types"]:
-                entry["action_types"].append("update_state")
-        if issue.get("field"):
-            entry["completion_checks"].append({"type": "field_non_empty", "field": issue["field"], "summary": issue["field"]})
+            entry["action_type"] = "rerun_validate"
+            entry["script_command"] = "python3 scripts/validate-state.py --state ... --step ... --flow-tier ... --write-pass-receipt --format json"
     return [plan[key] for key in sorted(plan)]
 
 
@@ -641,6 +654,7 @@ class GateValidator:
             )
 
     def check_working_draft_path_contract(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        raw_path = str(self.state.get("working_draft_path") or "").strip()
         draft_path = self.working_draft_path()
         solution_root = self.solution_root_path()
         require(
@@ -658,6 +672,7 @@ class GateValidator:
             return
         expected_root = (solution_root / "working-drafts").resolve()
         valid = path_is_within(draft_path, expected_root) and draft_path.name.endswith(".working.md")
+        valid = valid and not Path(raw_path).is_absolute()
         require(
             valid,
             errors,
@@ -697,6 +712,19 @@ class GateValidator:
             field="final_document_path",
             recommended_rollback_step=1 if step_num < 11 else 11,
             recommended_repair_step=1 if step_num < 11 else 11,
+        )
+
+    def check_solution_root_contract(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        require(
+            str(self.state.get("solution_root") or "").strip() == ".architecture/technical-solutions",
+            errors,
+            code="invalid_solution_root",
+            message=f"步骤 {step_num}: solution_root 必须固定为 .architecture/technical-solutions",
+            step=step_num,
+            flow_tier=flow_tier,
+            field="solution_root",
+            recommended_rollback_step=1 if step_num < 3 else 3,
+            recommended_repair_step=1 if step_num < 3 else 3,
         )
 
     def check_template_loaded(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
@@ -770,10 +798,20 @@ class GateValidator:
         else:
             present = re.search(rf"^\s*#{{2,6}}\s+{re.escape(artifact)}\b", content, re.MULTILINE) is not None
         if not present:
+            checkpoint_step = ARTIFACT_REPAIR_STEP.get(artifact, step_num)
+            prior_checkpoint = self.checkpoint(checkpoint_step, errors, flow_tier)
+            overwritten = False
+            if artifact == "WD-CTX":
+                overwritten = prior_checkpoint.get("wd_ctx_written") is True
+            elif artifact == "WD-TASK":
+                overwritten = prior_checkpoint.get("wd_task_written") is True
+            elif artifact in {"WD-SYN", "WD-SYN-LIGHT"}:
+                overwritten = prior_checkpoint.get("wd_syn_written") is True
+            code = "draft_block_overwritten" if overwritten else "missing_working_draft_block"
             add_issue(
                 errors,
                 make_issue(
-                    code="missing_working_draft_block",
+                    code=code,
                     message=f"步骤 {step_num}: working draft 缺少 {artifact} 区块",
                     step=step_num,
                     flow_tier=flow_tier,
@@ -1011,6 +1049,7 @@ class GateValidator:
             self.check_summary(checkpoint, step_num, errors, flow_tier)
         if step_num >= 2:
             self.check_step1_ready(errors, step_num, flow_tier)
+            self.check_solution_root_contract(errors, step_num, flow_tier)
             self.check_final_document_path_contract(errors, step_num, flow_tier)
         if step_num >= 3:
             self.check_prerequisite_files(errors, step_num, flow_tier)
@@ -1251,9 +1290,11 @@ class GateValidator:
             recommended_rollback_step=10,
             recommended_repair_step=10,
         )
+        self.check_working_draft_block("WD-CTX", errors, 11, flow_tier)
         if flow_tier == "light":
             self.check_working_draft_block("WD-SYN-LIGHT", errors, 11, flow_tier)
         else:
+            self.check_working_draft_block("WD-TASK", errors, 11, flow_tier)
             self.check_working_draft_block("WD-SYN", errors, 11, flow_tier)
             self.check_wd_syn_quality(errors, 11, flow_tier)
         self.check_final_document_not_premature(errors, 11, flow_tier)
@@ -1289,6 +1330,9 @@ class GateValidator:
             recommended_rollback_step=11,
             recommended_repair_step=11,
         )
+        self.check_working_draft_block("WD-CTX", errors, 12, flow_tier)
+        if flow_tier != "light":
+            self.check_working_draft_block("WD-TASK", errors, 12, flow_tier)
         self.check_final_document(errors, 12, flow_tier)
         step11 = self.checkpoint(11, errors, flow_tier)
         require(

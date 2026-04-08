@@ -28,6 +28,7 @@ sft = load_script("set-flow-tier")
 mss = load_script("mark-step-skipped")
 iss = load_script("initialize-state")
 rfd = load_script("render-final-document")
+udb = load_script("upsert-draft-block")
 
 
 TEMPLATE = """# 技术方案文档
@@ -318,6 +319,32 @@ class TestScripts:
                 summary="完成；final_document=1；absorbed_slots=4；gate: step-12 ready",
             )
 
+    def test_upsert_draft_block_preserves_existing_blocks(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text(
+            "# Working Draft: sample-solution\n\n## Template Metadata\n\nmeta\n\n## Template Slots\n\nslots\n\n## WD-CTX\n\n### CTX-01\n\n来源\n",
+            encoding="utf-8",
+        )
+        state = make_state(workspace, current_step=8, completed_steps=[1, 2, 3, 4, 5, 6, 7])
+        state["gate_receipt"] = {"step": 8, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        content_file = workspace["repo"] / "wd-task.md"
+        content_file.write_text("### 1.1 需求概述\n\n任务\n", encoding="utf-8")
+        payload = udb.upsert_block(
+            working_draft_path=workspace["working_draft_path"],
+            state_path=workspace["state_path"],
+            block_name="WD-TASK",
+            content_path=content_file,
+            summary="完成；写入 WD-TASK；slots=1；gate: step-10 ready",
+            require_receipt_step=8,
+        )
+        updated = workspace["working_draft_path"].read_text(encoding="utf-8")
+        refreshed = vs.load_state(workspace["state_path"])
+        assert "## WD-CTX" in updated
+        assert "## WD-TASK" in updated
+        assert payload["gate_receipt_step"] == 10
+        assert refreshed["checkpoints"]["step-8"]["wd_task_written"] is True
+
 
 class TestValidator:
     def test_validator_rejects_receipt_lagging_current_step(self, workspace: dict[str, Path]) -> None:
@@ -466,6 +493,33 @@ class TestValidator:
         validator.step_11("moderate", errors)
         assert any(error["code"] == "final_document_not_rendered_via_script" for error in errors)
 
+    def test_step_11_rejects_absolute_working_draft_path(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        workspace["final_document_path"].write_text(FINAL_DOC, encoding="utf-8")
+        state = make_state(workspace, current_step=11)
+        state["working_draft_path"] = str(workspace["working_draft_path"])
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_11("moderate", errors)
+        assert any(error["code"] == "invalid_working_draft_path" for error in errors)
+
+    def test_step_11_rejects_invalid_solution_root(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        workspace["final_document_path"].write_text(FINAL_DOC, encoding="utf-8")
+        state = make_state(workspace, current_step=11, solution_root=".architecture")
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_11("moderate", errors)
+        assert any(error["code"] == "invalid_solution_root" for error in errors)
+
+    def test_step_11_detects_overwritten_wd_ctx(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text("## WD-TASK\n\n### 1.1 需求概述\n\n任务\n\n## WD-SYN\n\n### 槽位：1.1 需求概述\n\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ❌ | CTX-01 | 不足 |\n| 改造 | ✅ | CTX-01 | 推荐 |\n| 新建 | ❌ | CTX-01 | 成本高 |\n#### 选定路径\n- **关键证据引用**：CTX-01\n", encoding="utf-8")
+        state = make_state(workspace, current_step=11)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_11("moderate", errors)
+        assert any(error["code"] == "draft_block_overwritten" for error in errors)
+
     def test_step_12_rejects_wrong_final_document_order(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
         workspace["final_document_path"].write_text(
@@ -492,7 +546,6 @@ class TestValidator:
 class TestCleanup:
     def test_render_final_document_refreshes_receipt(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
-        workspace["content_file"].write_text(FINAL_DOC, encoding="utf-8")
         state = make_state(workspace, current_step=11)
         state["gate_receipt"] = {"step": 11, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
@@ -500,13 +553,27 @@ class TestCleanup:
         payload = rfd.render_final_document(
             state_path=workspace["state_path"],
             flow_tier="moderate",
-            content_path=workspace["content_file"],
+            content_path=None,
             summary="完成；final_document=1；absorbed_slots=4；gate: step-12 ready",
         )
         refreshed = vs.load_state(workspace["state_path"])
         assert payload["current_step"] == 12
         assert refreshed["gate_receipt"]["step"] == 12
         assert refreshed["checkpoints"]["step-11"]["rendered_via_script"] is True
+
+    def test_finalize_cleanup_failure_keeps_files(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text("# Working Draft: sample\n\n## WD-TASK\n\n### 1.1 需求概述\n\n任务\n", encoding="utf-8")
+        workspace["final_document_path"].write_text(FINAL_DOC, encoding="utf-8")
+        state = make_state(workspace, current_step=12, completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 10, 11], produced_artifacts=["WD-TASK"])
+        state["checkpoints"]["step-7"]["wd_ctx_written"] = True
+        state["gate_receipt"] = {"step": 12, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        exit_code, payload = fc.run_cleanup(workspace["state_path"], "moderate", "完成；validator_passed=true；deleted=2")
+        assert exit_code == 2
+        assert payload["passed"] is False
+        assert workspace["working_draft_path"].exists()
+        assert workspace["state_path"].exists()
 
     def test_finalize_cleanup_success(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
