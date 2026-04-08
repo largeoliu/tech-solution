@@ -75,7 +75,6 @@ def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, di
     step12["validator_passed"] = False
     step12["working_draft_deleted"] = False
     step12["state_file_deleted"] = False
-    state["updated_at"] = iso_now()
     dump_yaml(state_path, state)
 
     validator = load_validator_module(Path(__file__).resolve().parent)
@@ -95,7 +94,6 @@ def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, di
 
     refreshed_state["absorption_check_passed"] = True
     refreshed_state["cleanup_allowed"] = True
-    refreshed_state["updated_at"] = iso_now()
     step12 = refreshed_state.setdefault("checkpoints", {}).setdefault("step-12", {})
     step12["summary"] = summary
     step12["validator_passed"] = True

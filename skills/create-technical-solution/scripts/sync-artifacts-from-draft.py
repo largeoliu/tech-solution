@@ -62,7 +62,9 @@ def main() -> int:
     selected_members: list[str] = []
     if args.state:
         state = load_yaml(Path(args.state).resolve())
-        raw_members = state.get("selected_members") or []
+        checkpoints = state.get("checkpoints") or {}
+        step5 = checkpoints.get("step-5") if isinstance(checkpoints, dict) else {}
+        raw_members = step5.get("selected_members") if isinstance(step5, dict) else []
         if isinstance(raw_members, list):
             selected_members = [str(item) for item in raw_members if str(item).strip()]
     artifacts = sync_artifacts(content, selected_members)

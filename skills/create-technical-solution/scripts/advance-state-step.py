@@ -112,7 +112,6 @@ def main() -> int:
 
     if args.next_step is not None:
         state["current_step"] = args.next_step
-    state["updated_at"] = iso_now()
     for key, value in parse_key_value(args.state_fields).items():
         set_path(state, key, value)
     for key, value in parse_json_key_value(args.state_fields_json).items():

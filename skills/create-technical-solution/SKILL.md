@@ -40,11 +40,11 @@ compatibility:
 7. 再次运行门禁验证，通过则进入下一步
 
 ## 状态文件初始化
-从 `templates/_template.yaml` 复制为 `.architecture/.state/create-technical-solution/[slug].yaml`，填充 slug、topic_summary、时间戳与 `solution_root`。若目标目录不存在，先创建 `.architecture/.state/create-technical-solution/`。
+从 `templates/_template.yaml` 复制为 `.architecture/.state/create-technical-solution/[slug].yaml`。state 只保留最小流程控制字段、路径字段、gate flags、最小 checkpoint 与 cleanup 状态；不得写入正文内容。若目标目录不存在，先创建 `.architecture/.state/create-technical-solution/`。
 
 ## 确定性脚本
 - `python scripts/extract-template-snapshot.py --template <模板路径> --slug <slug> --working-draft <draft路径> --state <状态文件> --write`
-  - 用于步骤 3，唯一负责提取 `template_snapshot`、`template_slots` 和 working draft 骨架
+  - 用于步骤 3，唯一负责提取模板指纹、槽位数量和 working draft 骨架
 - `python scripts/sync-artifacts-from-draft.py --working-draft <draft路径> --state <状态文件> --write`
   - 用于步骤 7-10，唯一负责把 working draft 中真实存在的稳定区块同步到 `produced_artifacts`
 - `python scripts/advance-state-step.py --state <状态文件> --step <N> --summary <摘要> --append-completed --next-step <N+1>`
@@ -57,14 +57,12 @@ compatibility:
   - 用于步骤 12 的唯一合法清理路径：先验证，再置标志、删除 working draft 与状态文件，并直接结束流程
 
 ## 状态更新规则
-- 每步完成后写入 `checkpoints.step-N`，追加 `completed_steps`，更新 `updated_at`
-- 阻塞时设 `blocked: true` 并填写 `block_reason`
+- 每步完成后写入 `checkpoints.step-N` 并追加 `completed_steps`
 - 回退时从 `completed_steps` 移除受影响步骤，重置 `current_step`
-- **严禁追加重复内容**：每次更新必须使用完整替换，不得追加到文件末尾
-- **状态文件唯一性**：全流程只维护一份状态文件，不得创建多个版本
-- **checkpoint 必须结构化**：`checkpoints.step-N` 必须写成对象，至少包含 `summary` 和该步门禁字段；不得只写自然语言字符串
-- **中间产物必须落在 working draft**：`produced_artifacts` 声明的 `WD-*` 必须对应到 working draft 中的稳定区块，不得只改状态不落盘
-- **严禁手写模板快照**：`template_snapshot` 和 `template_slots` 只能由 `extract-template-snapshot.py` 生成，不得由模型自行概括成粗粒度大章节
+- **state / draft 职责固定**：state 只保留 `current_step`、`completed_steps`、`skipped_steps`、`flow_tier`、`required_artifacts`、`produced_artifacts`、gate flags、路径字段、最小 checkpoint、cleanup 状态
+- **正文只允许写入 working draft**：`WD-CTX`、`WD-TASK`、`WD-EXP-*`、`WD-SYN / WD-SYN-LIGHT`、`WD-IMPACT-*` 一律只存在于 working draft；共享上下文、专家判断、收敛结论、详细设计正文不得写进 state
+- **checkpoint 必须结构化且瘦身**：`checkpoints.step-N.summary` 只能写流程摘要，不得复述正文
+- **流程摘要只允许描述**：本步是否完成/跳过、写入了什么区块、区块数量/槽位数量、下一步 gate 是否齐备
 - **严禁手写 produced_artifacts**：必须以 `sync-artifacts-from-draft.py` 的结果为准，不得口头宣称某个 `WD-*` 已存在
 - **严禁把被跳过步骤记为已完成**：`light/moderate` 流程允许跳过的步骤必须写入 `skipped_steps` 与结构化 checkpoint，不得写入 `completed_steps`
 - **step-4 必须走专用脚本**：`flow_tier`、`required_artifacts`、`skipped_steps` 必须由 `set-flow-tier.py` 同步写入，禁止先推进再手改 YAML
@@ -73,7 +71,7 @@ compatibility:
 ## 自动推进与过程证据
 - 流程默认自动连续执行，不要求用户逐步回复确认
 - 每步必须输出 `checkpoints.step-N` 摘要；凡写入 working draft 的步骤，必须同步展示对应 `WD-*` 区块摘要
-- 每步 checkpoint 至少包含：本步新增文件或区块、本步消费的输入区块、本步新增条目数量、下一步门控所需产物是否齐备；若无法列出，视为本步未完成
+- 每步 checkpoint 至少包含：本步新增区块、本步新增条目数量、下一步门控所需产物是否齐备；若无法列出，视为本步未完成
 - 不得仅以”已完成””已读取””已写入””已删除”等口头表述推进步骤，必须给出本步结果摘要
 - 参与成员必须来自 `.architecture/members.yml` 的实际条目——虚构角色会导致后续专家分析步骤加载不到真实视角，产出无效。
 - 步骤 9 必须实际加载对应专家的角色和视角，不得模拟 `WD-EXP-*` 产出——跳过专家分析等于跳过多视角验证，方案会遗漏关键风险。
@@ -102,7 +100,7 @@ compatibility:
 - `full`：适用于新建核心能力、拆分、迁移、平行建设、职责转移、多系统集成或高风险兼容性改造；最小产物为 `WD-CTX`、`WD-TASK`、`WD-EXP-*`、`WD-SYN`
 - 任一流程级别都不得跳过本级别要求的最小产物；缺失时必须阻塞，不得成稿或清理
 - `full` 流程中的步骤 9 必须按槽位组织专家判断，不得要求每位专家完整覆盖所有槽位；步骤 10 必须支持按槽位增量收敛并落盘，避免全量中间产物滚雪球
-- step 8 必须按 `template_snapshot.headings` 的真实槽位逐项生成任务单，不得只按“背景/总体设计/详细设计/测试/上线”这类粗粒度章节分配
+- step 8 必须按当前模板的真实槽位逐项生成任务单，不得只按“背景/总体设计/详细设计/测试/上线”这类粗粒度章节分配
 - step 4 必须原子写入 `flow_tier`、`checkpoints.step-4.flow_tier`、`required_artifacts` 与 `skipped_steps`；不得先推进到下一步再手改 tier
 
 ## 中间产物文档完整性
@@ -194,6 +192,6 @@ compatibility:
 - working draft 全流程只维护一份，若主题变化导致 slug 变化，必须终止当前流程并以新 slug 重启，不得并行保留多份草稿
 - 不得以"更清晰""更优雅"等空泛表述替代代码证据——这些主观判断无法验证，且容易跳过实际的代码搜索，导致方案建立在假设而非事实上。
 - 若现有模板槽位无法承载必要结论且必须改模板，必须阻塞并交由模板管理流程，不得擅自增删模板章节
-- **状态与模板快照必须同源**：步骤 3 后如果模板被替换或修改，必须回退到步骤 3 重新提取 `template_snapshot`，不得继续沿用旧槽位定义。
+- **状态与模板指纹必须同源**：步骤 3 后如果模板被替换或修改，必须回退到步骤 3 重新提取模板指纹与 draft 骨架，不能继续沿用旧槽位定义。
 - step 11 若发生推理失败、写文件失败或标题顺序校验失败，必须停留在步骤 11 并先走 validator repair loop，禁止直接推进步骤 12。
 - step 12 只能通过 `finalize-cleanup.py` 完成；禁止手工先改 `absorption_check_passed=true`、再 `rm` 文件、再尝试推进状态。

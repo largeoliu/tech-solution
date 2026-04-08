@@ -60,7 +60,6 @@ def mark_step_skipped(*, state_path: Path, step: int, summary: str, reason: str,
 
     if next_step is not None:
         state["current_step"] = next_step
-    state["updated_at"] = iso_now()
     dump_yaml(state_path, state)
     return {
         "skipped_step": step,

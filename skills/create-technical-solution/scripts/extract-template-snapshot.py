@@ -2,14 +2,15 @@
 # requires-python = ">=3.9"
 # dependencies = ["pyyaml>=6.0"]
 # ///
-"""提取当前模板快照，并按快照生成 working draft 骨架。"""
+"""提取模板指纹并生成 working draft 骨架。"""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,8 +22,6 @@ def normalize_text(value: str) -> str:
 
 
 def extract_slot_headings(markdown: str, slot_level: int | None = None) -> list[dict[str, Any]]:
-    import re
-
     headings: list[tuple[int, str]] = []
     for line in markdown.splitlines():
         match = re.match(r"^(#{2,6})\s+(.+?)\s*$", line)
@@ -47,47 +46,33 @@ def extract_slot_headings(markdown: str, slot_level: int | None = None) -> list[
     for level, title in headings:
         if level != slot_level:
             continue
-        slots.append(
-            {
-                "slot": f"SLOT-{slot_index:02d}",
-                "level": level,
-                "title": title,
-                "normalized_title": normalize_text(title),
-            }
-        )
+        slots.append({"slot": f"SLOT-{slot_index:02d}", "level": level, "title": title})
         slot_index += 1
     return slots
 
 
-def iso_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+def compute_template_fingerprint(markdown: str, headings: list[dict[str, Any]]) -> str:
+    normalized = "\n".join(item["title"] for item in headings)
+    payload = f"{normalize_text(markdown)}\n--slot-headings--\n{normalized}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def build_working_draft(snapshot: dict[str, Any], slug: str) -> str:
+def build_working_draft(template_path: Path, headings: list[dict[str, Any]], slug: str) -> str:
     lines = [
         f"# Working Draft: {slug}",
         "",
-        "## Template Snapshot",
+        "## Template Metadata",
         "",
-        f"- template_path: {snapshot['path']}",
-        f"- slot_level: H{snapshot['slot_level']}" if snapshot.get("slot_level") else "- slot_level: unknown",
-        f"- captured_at: {snapshot['captured_at']}",
+        f"- template_path: {template_path}",
+        f"- slot_count: {len(headings)}",
         "",
         "## Template Slots",
         "",
     ]
-    for item in snapshot["headings"]:
+    for item in headings:
         lines.append(f"- {item['slot']}: {item['title']}")
-    lines.extend(
-        [
-            "",
-            "## WD-CTX",
-            "",
-            "_待填充_",
-            "",
-        ]
-    )
-    return "\n".join(lines) + "\n"
+    lines.extend(["", "## WD-CTX", "", "_待填充_", ""])
+    return "\n".join(lines)
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -104,13 +89,39 @@ def dump_yaml(path: Path, data: dict[str, Any]) -> None:
     path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
+def update_state(
+    *,
+    state_path: Path,
+    template_path: Path,
+    working_draft: Path,
+    headings: list[dict[str, Any]],
+    fingerprint: str,
+) -> None:
+    state = load_yaml(state_path)
+    repo_root = state_path.parents[3]
+    state["solution_root"] = str(working_draft.parent.parent.relative_to(repo_root))
+    state["template_path"] = str(template_path.relative_to(repo_root))
+    state["working_draft_path"] = str(working_draft.relative_to(repo_root))
+    checkpoints = state.setdefault("checkpoints", {})
+    if not isinstance(checkpoints, dict):
+        checkpoints = {}
+        state["checkpoints"] = checkpoints
+    checkpoints["step-3"] = {
+        "summary": f"完成；写入 draft 骨架；slots={len(headings)}；gate: step-4 ready",
+        "template_loaded": True,
+        "template_fingerprint": fingerprint,
+        "slot_count": len(headings),
+    }
+    dump_yaml(state_path, state)
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="提取技术方案模板快照并生成 working draft 骨架")
+    parser = argparse.ArgumentParser(description="提取模板指纹并生成 working draft 骨架")
     parser.add_argument("--template", required=True, help="模板路径")
     parser.add_argument("--slug", required=True, help="方案 slug")
     parser.add_argument("--working-draft", required=True, help="working draft 路径")
-    parser.add_argument("--state", help="状态文件路径；若提供则同步写入 template_snapshot/template_slots")
-    parser.add_argument("--write", action="store_true", help="实际写入 working draft / state；默认仅输出 JSON")
+    parser.add_argument("--state", help="状态文件路径；若提供则同步写入最小 checkpoint")
+    parser.add_argument("--write", action="store_true", help="实际写入 working draft / state")
     args = parser.parse_args()
 
     template_path = Path(args.template).resolve()
@@ -118,47 +129,33 @@ def main() -> int:
         print(f"模板文件不存在: {template_path}", file=sys.stderr)
         return 1
 
-    headings = extract_slot_headings(template_path.read_text(encoding="utf-8"))
+    template_markdown = template_path.read_text(encoding="utf-8")
+    headings = extract_slot_headings(template_markdown)
     if not headings:
         print(f"模板未提取到任何槽位: {template_path}", file=sys.stderr)
         return 1
 
-    snapshot = {
-        "path": str(template_path),
-        "slot_level": headings[0]["level"],
-        "headings": headings,
-        "captured_at": iso_now(),
-    }
+    fingerprint = compute_template_fingerprint(template_markdown, headings)
     working_draft = Path(args.working_draft).resolve()
-    draft_text = build_working_draft(snapshot, args.slug)
-
     output = {
-        "template_snapshot": snapshot,
-        "template_slots": [item["title"] for item in headings],
+        "template_path": str(template_path),
+        "template_fingerprint": fingerprint,
+        "slot_count": len(headings),
+        "slot_titles": [item["title"] for item in headings],
         "working_draft_path": str(working_draft),
     }
 
     if args.write:
         working_draft.parent.mkdir(parents=True, exist_ok=True)
-        working_draft.write_text(draft_text, encoding="utf-8")
+        working_draft.write_text(build_working_draft(template_path, headings, args.slug), encoding="utf-8")
         if args.state:
-            state_path = Path(args.state).resolve()
-            state = load_yaml(state_path)
-            state["solution_root"] = str(working_draft.parent.parent.relative_to(state_path.parent.parent.parent.parent))
-            state["working_draft_path"] = str(working_draft.relative_to(state_path.parent.parent.parent.parent))
-            state["template_snapshot"] = snapshot
-            state["template_slots"] = output["template_slots"]
-            checkpoints = state.setdefault("checkpoints", {})
-            if not isinstance(checkpoints, dict):
-                checkpoints = {}
-                state["checkpoints"] = checkpoints
-            checkpoints["step-3"] = {
-                "summary": f"模板快照已提取。槽位数: {len(headings)}；层级: H{headings[0]['level']}",
-                "template_loaded": True,
-                "slot_count": len(headings),
-                "slot_level": f"H{headings[0]['level']}",
-            }
-            dump_yaml(state_path, state)
+            update_state(
+                state_path=Path(args.state).resolve(),
+                template_path=template_path,
+                working_draft=working_draft,
+                headings=headings,
+                fingerprint=fingerprint,
+            )
 
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0

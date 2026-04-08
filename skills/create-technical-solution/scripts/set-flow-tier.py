@@ -15,6 +15,20 @@ from typing import Any
 import yaml
 
 
+FULL_SIGNALS = {
+    "introduces-core-capability",
+    "cross-system",
+    "boundary-redraw",
+    "high-compat-risk",
+    "split-or-migrate",
+}
+MODERATE_SIGNALS = {
+    "cross-module",
+    "existing-asset-refactor",
+    "medium-compat-risk",
+}
+
+
 def iso_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -40,6 +54,14 @@ def contract_for_tier(flow_tier: str) -> tuple[list[str], list[int]]:
     return ["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"], []
 
 
+def validate_tier_against_signals(flow_tier: str, signals: list[str]) -> None:
+    signal_set = set(signals)
+    if signal_set & FULL_SIGNALS and flow_tier != "full":
+        raise SystemExit(f"命中 full 信号 {sorted(signal_set & FULL_SIGNALS)}，flow_tier 必须为 full")
+    if flow_tier == "light" and signal_set & MODERATE_SIGNALS:
+        raise SystemExit(f"命中 moderate 信号 {sorted(signal_set & MODERATE_SIGNALS)}，flow_tier 不得为 light")
+
+
 def set_flow_tier(
     *,
     state_path: Path,
@@ -48,7 +70,9 @@ def set_flow_tier(
     summary: str,
     next_step: int | None,
     append_completed: bool,
+    signals: list[str],
 ) -> dict[str, Any]:
+    validate_tier_against_signals(flow_tier, signals)
     state = load_yaml(state_path)
     required_artifacts, skipped_steps = contract_for_tier(flow_tier)
 
@@ -65,7 +89,7 @@ def set_flow_tier(
             "summary": summary,
             "solution_type": solution_type,
             "flow_tier": flow_tier,
-            "required_artifacts": required_artifacts,
+            "signals": signals,
             "completed_at": iso_now(),
         }
     )
@@ -73,7 +97,6 @@ def set_flow_tier(
     state["flow_tier"] = flow_tier
     state["required_artifacts"] = required_artifacts
     state["skipped_steps"] = skipped_steps
-    state["updated_at"] = iso_now()
     if next_step is not None:
         state["current_step"] = next_step
 
@@ -91,6 +114,7 @@ def set_flow_tier(
         "flow_tier": flow_tier,
         "required_artifacts": required_artifacts,
         "skipped_steps": skipped_steps,
+        "signals": signals,
         "current_step": state.get("current_step"),
     }
 
@@ -103,6 +127,7 @@ def main() -> int:
     parser.add_argument("--summary", required=True, help="写入 checkpoints.step-4.summary 的摘要")
     parser.add_argument("--next-step", type=int, help="设置 current_step")
     parser.add_argument("--append-completed", action="store_true", help="将 step-4 追加到 completed_steps")
+    parser.add_argument("--signal", action="append", default=[], help="步骤4命中的分类信号，可重复传入")
     parser.add_argument("--format", choices=["json", "text"], default="json", help="输出格式")
     args = parser.parse_args()
 
@@ -113,6 +138,7 @@ def main() -> int:
         summary=args.summary,
         next_step=args.next_step,
         append_completed=args.append_completed,
+        signals=[item.strip() for item in args.signal if item.strip()],
     )
     if args.format == "json":
         print(json.dumps(payload, ensure_ascii=False, indent=2))

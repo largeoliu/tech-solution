@@ -7,7 +7,7 @@
 | **skill-revealing** | 有 skill PASS，无 skill FAIL |
 | **baseline** | 有无 skill 都能通过 |
 
-## 核心 Skill-Revealing Assertions (35 条)
+## 核心 Skill-Revealing Assertions (39 条)
 
 ### 1. 成员与专家管理 (6 条)
 - A01.7: 所有 selected_members 来自 `.architecture/members.yml` 实际条目，不虚构
@@ -25,13 +25,19 @@
 
 ### 3. 中间产物完整性 (8 条)
 - A01.19: 全流程仅维护 1 份 working draft
-- A01.20: checkpoint 含具体数据（条目数、消费区块名）
+- A01.20: checkpoint 只保留流程摘要（区块名、数量、gate），不承载正文
 - A02.2: light 不生成 WD-TASK
 - A02.3: light 不执行步骤 8/9
 - A03.2: moderate 不生成 WD-EXP
 - A03.4: moderate 不执行步骤 9
 - A03.5: moderate 生成 WD-SYN（非 WD-SYN-LIGHT）
 - A04.3: WD-EXP 数量匹配成员数
+
+### 3.1 State / Draft 边界 (4 条)
+- A07.1: state.yaml 仅保留最小流程控制字段
+- A07.2: 共享上下文、专家判断、收敛正文不得写入 state
+- A07.3: step-7~12 summary 必须为单行短摘要
+- A07.4: 正文证据仅存在于 working draft / final document
 
 ### 4. Validation Gate 执行 (6 条)
 - A01.11: validate-state.py 门禁被执行

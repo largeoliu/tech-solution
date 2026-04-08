@@ -8,18 +8,19 @@
       ".architecture/templates/technical-solution-template.md"
     ],
     "expected_behavior": [
-      "状态文件初始化，slug 为 ASCII kebab-case",
+      "状态文件初始化仅包含最小流程控制字段，不承载正文内容",
       "步骤 2 确认三前置文件存在",
       "步骤 3 提取模板一级章节并编号 SLOT-01, SLOT-02, ...",
       "步骤 4 判定 flow_tier = full，required_artifacts 含 WD-CTX, WD-TASK, WD-EXP, WD-SYN",
-      "步骤 5 selected_members 全部来自 .architecture/members.yml 实际条目",
+      "步骤 5 selected_members 记录在 checkpoints.step-5，且全部来自 .architecture/members.yml 实际条目",
       "步骤 6 检测 repowiki（存在或不存在均报告）",
-      "步骤 7 WD-CTX 写入 working draft，每条来源可追溯至少 2 个文件",
+      "步骤 7 WD-CTX 写入 working draft，state 仅保留短摘要与数量信息",
       "步骤 8 运行 validate-state.py 门禁通过，WD-TASK 写入，必答问题具体",
       "步骤 9 每位专家仅对参与槽位写 WD-EXP-*，新建结论含不可复用/不可改造证据",
       "步骤 10 按槽位增量写入 WD-SYN，三路径比较完整",
       "步骤 11 最终文档一级章节与模板完全一致",
-      "步骤 12 absorption_check_passed 为 true 后才清理中间产物"
+      "步骤 12 absorption_check_passed 为 true 后才清理中间产物",
+      "step-7~12 summary 只描述流程结果、区块数量与 gate 状态"
     ],
     "tags": ["train", "full", "步骤覆盖"]
   },
@@ -36,7 +37,7 @@
       "required_artifacts 仅含 WD-CTX, WD-SYN-LIGHT",
       "不生成 WD-TASK 和 WD-EXP-*",
       "生成 WD-CTX 和 WD-SYN-LIGHT",
-      "步骤 8/9 显式跳过并记录原因",
+      "步骤 8/9 显式跳过并记录原因，且不把正文写入 state",
       "最终文档写入 .architecture/technical-solutions/[slug].md"
     ],
     "tags": ["train", "light", "步骤覆盖"]
@@ -70,7 +71,7 @@
     ],
     "expected_behavior": [
       "flow_tier 判定为 full",
-      "步骤 6 检测并记录 repowiki 路径，后续分析引用其中内容",
+      "步骤 6 检测并记录 repowiki 路径，后续分析引用其中内容但正文仍只写入 draft",
       "专家分析的关键结论仍绑定 CTX 编号，repowiki 仅作补充",
       "每个需要专家判断的槽位均有对应的 WD-EXP-* 区块",
       "每位专家仅对参与槽位写判断，参与槽位字段非全部",

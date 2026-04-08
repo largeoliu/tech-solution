@@ -6,6 +6,8 @@
 
 - 所有 `WD-*` 都是 **working draft 内的稳定区块**，不是独立文件名约定。状态文件中的 `produced_artifacts` 仅表示这些区块已经落盘到 `working_draft_path`。
 - `solution_root` 固定采用双读单写策略：兼容读取历史 `.architecture/solutions/`，但新 working draft 和最终文档统一写入 `.architecture/technical-solutions/`。
+- `state.yaml` 只保留流程控制字段、路径字段、gate flags、最小 checkpoint 与 cleanup 状态；不得承载正文。
+- `checkpoints.step-N.summary` 只能写单行流程摘要，不得复述 CTX、专家分析、收敛结论或详细设计正文。
 
 - **共享上下文（WD-CTX）**：默认只保留 `上下文编号`、`来源`、`结论或约束`、`适用槽位`、`可信度或缺口`（必填）；仅当涉及新增、拆分、迁移、平行建设或职责转移时，才补充 `资产类型`、`资产标识`、`位置`、`当前职责`、`当前能力`、`可扩展点`、`已知限制`、`调用方/依赖方`、`相关证据路径`；若结论为"未发现候选"，还必须补 `搜索范围`、`搜索关键词`、`已排除目录或对象`、`未发现结论`
 - **模板任务单（WD-TASK）**：只保留 `槽位标识`、`必须消费的共享上下文`、`参与专家`、`每位专家必答问题`、`建议落位槽位`、`落位表达要求`、`缺口或阻塞项`（必填）；不重复抄写 CTX 事实详情，统一通过 CTX 编号引用
@@ -49,22 +51,13 @@
 
 ```text
 LIGHT checkpoint.step-10 摘要示例：
-- 新增区块：WD-SYN-LIGHT
-- 消费输入：WD-CTX
-- 新增条目数：SLOT-01 ~ SLOT-03 共 3 条轻量收敛
-- 下一步门控：WD-CTX、WD-SYN-LIGHT 已齐备，可进入 step-11
+`完成；写入 WD-SYN-LIGHT；slots=3；gate: step-11 ready`
 
 MODERATE checkpoint.step-8 摘要示例：
-- 新增区块：WD-TASK
-- 消费输入：WD-CTX、模板结构快照
-- 新增条目数：SLOT-01 ~ SLOT-05 共 5 条任务单
-- 下一步门控：WD-TASK 已落盘，可进入 step-10
+`完成；写入 WD-TASK；slots=5；gate: step-10 ready`
 
 FULL checkpoint.step-9 摘要示例：
-- 新增区块：WD-EXP-systems_architect、WD-EXP-domain_expert
-- 消费输入：当前槽位任务单、相关 CTX、当前槽位前序摘要
-- 新增条目数：SLOT-02 共 2 位专家判断片段
-- 下一步门控：当前需要专家判断的槽位均已具备 WD-EXP 片段，可进入 step-10
+`完成；写入 WD-EXP-*；blocks=2；gate: step-10 ready`
 ```
 
 ## 结果汇报格式
