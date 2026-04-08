@@ -196,6 +196,36 @@ def write_good_draft(workspace: dict[str, Path]) -> None:
 | 新建 | ❌ | CTX-01 | 成本高 |
 #### 选定路径
 - **关键证据引用**：CTX-01
+
+### 槽位：1.2 核心目标
+#### 候选方案对比
+| 路径 | 可行性 | 关键证据 | 选择理由 |
+|------|--------|----------|----------|
+| 复用 | ❌ | CTX-01 | 不足 |
+| 改造 | ✅ | CTX-01 | 推荐 |
+| 新建 | ❌ | CTX-01 | 成本高 |
+#### 选定路径
+- **关键证据引用**：CTX-01
+
+### 槽位：2.1 方案设计
+#### 候选方案对比
+| 路径 | 可行性 | 关键证据 | 选择理由 |
+|------|--------|----------|----------|
+| 复用 | ❌ | CTX-01 | 不足 |
+| 改造 | ✅ | CTX-01 | 推荐 |
+| 新建 | ❌ | CTX-01 | 成本高 |
+#### 选定路径
+- **关键证据引用**：CTX-01
+
+### 槽位：2.2 风险与验证
+#### 候选方案对比
+| 路径 | 可行性 | 关键证据 | 选择理由 |
+|------|--------|----------|----------|
+| 复用 | ❌ | CTX-01 | 不足 |
+| 改造 | ✅ | CTX-01 | 推荐 |
+| 新建 | ❌ | CTX-01 | 成本高 |
+#### 选定路径
+- **关键证据引用**：CTX-01
 """,
         encoding="utf-8",
     )
@@ -288,12 +318,43 @@ class TestScripts:
 
 
 class TestValidator:
+    def test_step_3_allows_pre_extract_state(self, workspace: dict[str, Path]) -> None:
+        state = make_state(
+            workspace,
+            current_step=3,
+            completed_steps=[1, 2],
+            working_draft_path="",
+        )
+        state["checkpoints"]["step-3"] = {"summary": "准备提取模板；前置已就绪；gate: extract pending"}
+        state["gate_receipt"] = {"step": 3, "flow_tier": "light", "state_fingerprint": "", "validated_at": ""}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_3("light", errors)
+        assert not any(error["code"] in {"template_not_loaded", "missing_template_snapshot", "invalid_working_draft_path"} for error in errors)
+
+    def test_step_4_rejects_incomplete_receipt(self, workspace: dict[str, Path]) -> None:
+        state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
+        state["gate_receipt"] = {"step": 4, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": ""}
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_4("moderate", errors)
+        assert any(error["code"] == "invalid_gate_receipt" for error in errors)
+
     def test_step_4_requires_working_draft_path(self, workspace: dict[str, Path]) -> None:
         state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3], working_draft_path="")
         validator = make_validator(state, workspace)
         errors: list[dict] = []
         validator.step_4("moderate", errors)
         assert any(error["code"] == "invalid_working_draft_path" for error in errors)
+
+    def test_step_4_rejects_unregistered_signals(self, workspace: dict[str, Path]) -> None:
+        state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
+        state["checkpoints"]["step-4"]["signals"] = ["existing_system_enhancement", "frontend_form_change"]
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_4("moderate", errors)
+        assert any(error["code"] == "invalid_step4_signals" for error in errors)
 
     def test_step_8_detects_missing_task_slots(self, workspace: dict[str, Path]) -> None:
         workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n### 一、背景\n\n粗粒度任务\n", encoding="utf-8")
@@ -308,6 +369,17 @@ class TestValidator:
         validator.step_8("full", errors)
         assert any(error["code"] == "task_slots_incomplete" for error in errors)
 
+    def test_step_8_rejects_ctx_mixed_into_task_block(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text(
+            "## WD-CTX\n\n### CTX-01\n\n来源\n\n## WD-TASK\n\n### SLOT-01: 1.1 需求概述\n\n任务\n\n### CTX-02\n\n错误位置\n",
+            encoding="utf-8",
+        )
+        state = make_state(workspace, current_step=8, completed_steps=[1, 2, 3, 4, 5, 6, 7], flow_tier="moderate", can_enter_step_8=True)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_8("moderate", errors)
+        assert any(error["code"] == "task_block_structure_invalid" for error in errors)
+
     def test_step_10_requires_explicit_skip_record(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
         state = make_state(workspace, skipped_steps=[], completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9])
@@ -316,6 +388,22 @@ class TestValidator:
         errors: list[dict] = []
         validator.step_10("moderate", errors)
         assert any(error["code"] == "step_skipped_without_checkpoint" for error in errors)
+
+    def test_step_10_rejects_draft_state_desync(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(
+            workspace,
+            current_step=10,
+            produced_artifacts=[],
+            can_enter_step_10=True,
+        )
+        state["checkpoints"]["step-7"]["wd_ctx_written"] = False
+        state["checkpoints"]["step-8"]["wd_task_written"] = False
+        state["checkpoints"]["step-10"]["wd_syn_written"] = False
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_10("moderate", errors)
+        assert any(error["code"] == "artifact_state_desync" for error in errors)
 
     def test_step_7_requires_repowiki_consumption_when_exists(self, workspace: dict[str, Path]) -> None:
         workspace["working_draft_path"].write_text("## WD-CTX\n\n", encoding="utf-8")
@@ -334,6 +422,17 @@ class TestValidator:
         errors: list[dict] = []
         validator.step_10("moderate", errors)
         assert any(error["code"] == "missing_working_draft_block" for error in errors)
+
+    def test_step_10_requires_wd_syn_per_slot(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text(
+            "## WD-CTX\n\n### CTX-01\n\n来源\n\n## WD-TASK\n\n### 1.1 需求概述\n\n任务\n\n### 1.2 核心目标\n\n任务\n\n### 2.1 方案设计\n\n任务\n\n### 2.2 风险与验证\n\n任务\n\n## WD-SYN\n\n### 槽位：1.1 需求概述\n\n#### 候选方案对比\n\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ❌ | CTX-01 | 不足 |\n| 改造 | ✅ | CTX-01 | 推荐 |\n| 新建 | ❌ | CTX-01 | 成本高 |\n\n#### 选定路径\n\n- **关键证据引用**：CTX-01\n",
+            encoding="utf-8",
+        )
+        state = make_state(workspace)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_10("moderate", errors)
+        assert any(error["code"] == "wd_syn_slots_incomplete" for error in errors)
 
     def test_step_11_rejects_docs_final_document_path(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
@@ -374,7 +473,7 @@ class TestCleanup:
         write_good_draft(workspace)
         workspace["final_document_path"].write_text(FINAL_DOC, encoding="utf-8")
         state = make_state(workspace, current_step=12, completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 10, 11])
-        state["gate_receipt"] = {"step": 12, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": ""}
+        state["gate_receipt"] = {"step": 12, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
         write_state(workspace, state)
         exit_code, payload = fc.run_cleanup(workspace["state_path"], "moderate", "完成；validator_passed=true；deleted=2")

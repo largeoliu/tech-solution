@@ -28,6 +28,11 @@ MODERATE_SIGNALS = {
     "existing-asset-refactor",
     "medium-compat-risk",
 }
+LIGHT_SIGNALS = {
+    "single-module",
+    "low-compat-risk",
+}
+VALID_SIGNALS = FULL_SIGNALS | MODERATE_SIGNALS | LIGHT_SIGNALS
 
 
 def iso_now() -> str:
@@ -83,6 +88,9 @@ def contract_for_tier(flow_tier: str) -> tuple[list[str], list[int]]:
 
 def validate_tier_against_signals(flow_tier: str, signals: list[str]) -> None:
     signal_set = set(signals)
+    unknown = sorted(signal_set - VALID_SIGNALS)
+    if unknown:
+        raise SystemExit(f"存在未注册信号 {unknown}，只能使用受支持的 step-4 signals")
     if signal_set & FULL_SIGNALS and flow_tier != "full":
         raise SystemExit(f"命中 full 信号 {sorted(signal_set & FULL_SIGNALS)}，flow_tier 必须为 full")
     if flow_tier == "light" and signal_set & MODERATE_SIGNALS:

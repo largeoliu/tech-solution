@@ -98,6 +98,9 @@ def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, di
     step12["validator_passed"] = False
     step12["working_draft_deleted"] = False
     step12["state_file_deleted"] = False
+    receipt = refreshed_receipt = state.get("gate_receipt")
+    if isinstance(receipt, dict):
+        refreshed_receipt["state_fingerprint"] = compute_state_fingerprint(state)
     dump_yaml(state_path, state)
 
     validator = load_validator_module(Path(__file__).resolve().parent)

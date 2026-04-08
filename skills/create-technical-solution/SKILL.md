@@ -70,9 +70,11 @@ compatibility:
 - **严禁手写 produced_artifacts**：必须以 `sync-artifacts-from-draft.py` 的结果为准，不得口头宣称某个 `WD-*` 已存在
 - **严禁把被跳过步骤记为已完成**：`light/moderate` 流程允许跳过的步骤必须写入 `skipped_steps` 与结构化 checkpoint，不得写入 `completed_steps`
 - **step-4 必须走专用脚本**：`flow_tier`、`required_artifacts`、`skipped_steps` 必须由 `set-flow-tier.py` 同步写入，禁止先推进再手改 YAML
+- **step-3 先验只检查前置，不检查产物**：步骤 3 的 validator 只确认 step 1/2、模板文件与路径前置条件；`template_fingerprint`、`slot_count`、`working_draft_path` 必须由 `extract-template-snapshot.py` 首次生成，禁止因为 step 3 校验失败而手改 state
 - **所有写状态脚本都要求 receipt**：先运行 `python scripts/validate-state.py --write-pass-receipt`，再调用 `initialize-state.py`、`extract-template-snapshot.py`、`set-flow-tier.py`、`advance-state-step.py`、`mark-step-skipped.py`、`sync-artifacts-from-draft.py`、`render-final-document.py`、`finalize-cleanup.py`
 - **最终文档目录固定**：`final_document_path` 只能位于 `.architecture/technical-solutions/`，不得写入 `docs/`、项目根目录或其他自定义目录
 - **目录策略固定为双读单写**：可以读取历史 `.architecture/solutions/`，但本次流程的新 working draft 与最终文档统一写入 `.architecture/technical-solutions/`
+- **禁止外部脚本补状态**：不得用 inline Python、手工 Edit YAML、直接 `rm` 文件来伪造 receipt、fingerprint、checkpoint、cleanup 结果；一旦 gate fail，必须停在当前步修复脚本要求的最小前置
 
 ## 自动推进与过程证据
 - 流程默认自动连续执行，不要求用户逐步回复确认
@@ -108,6 +110,8 @@ compatibility:
 - 任一流程级别都不得跳过本级别要求的最小产物；缺失时必须阻塞，不得成稿或清理
 - `full` 流程中的步骤 9 必须按槽位组织专家判断，不得要求每位专家完整覆盖所有槽位；步骤 10 必须支持按槽位增量收敛并落盘，避免全量中间产物滚雪球
 - step 8 必须按当前模板的真实槽位逐项生成任务单，不得只按“背景/总体设计/详细设计/测试/上线”这类粗粒度章节分配
+- `WD-TASK` 必须与模板槽位一一对应且顺序一致，不得多写 `SLOT-20`、不得把 `CTX-*` 混入任务单
+- `WD-SYN` 必须按模板槽位逐项收敛，不接受用一段“总体结论”替代逐槽位收敛
 - step 4 必须原子写入 `flow_tier`、`checkpoints.step-4.flow_tier`、`required_artifacts` 与 `skipped_steps`；不得先推进到下一步再手改 tier
 
 ## 中间产物文档完整性

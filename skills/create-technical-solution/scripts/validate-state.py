@@ -74,6 +74,44 @@ GATE_REPAIR_STEP = {
     "can_enter_step_12": 11,
 }
 
+VALID_STEP4_SIGNALS = {
+    "introduces-core-capability",
+    "cross-system",
+    "boundary-redraw",
+    "high-compat-risk",
+    "split-or-migrate",
+    "cross-module",
+    "existing-asset-refactor",
+    "medium-compat-risk",
+    "single-module",
+    "low-compat-risk",
+}
+
+
+def extract_named_block(markdown: str, heading: str) -> str:
+    pattern = re.compile(rf"^\s*##\s+{re.escape(heading)}\s*$", re.MULTILINE)
+    match = pattern.search(markdown)
+    if not match:
+        return ""
+    start = match.end()
+    next_match = re.search(r"^\s*##\s+.+$", markdown[start:], re.MULTILINE)
+    end = start + next_match.start() if next_match else len(markdown)
+    return markdown[start:end].strip()
+
+
+def extract_block_headings(block: str) -> list[str]:
+    return [normalize_text(match.group(1)) for match in re.finditer(r"^\s*###\s+(.+?)\s*$", block, re.MULTILINE)]
+
+
+def normalize_task_heading(title: str) -> str:
+    normalized = normalize_text(title)
+    return re.sub(r"^SLOT-\d+\s*:\s*", "", normalized)
+
+
+def normalize_syn_heading(title: str) -> str:
+    normalized = normalize_text(title)
+    return re.sub(r"^槽位：\s*", "", normalized)
+
 
 def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
@@ -436,6 +474,44 @@ class GateValidator:
                     ),
                 )
 
+    def check_receipt_integrity(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        receipt = self.state.get("gate_receipt")
+        if not isinstance(receipt, dict):
+            return
+        receipt_step = int(receipt.get("step") or 0)
+        if receipt_step <= 0:
+            return
+        fingerprint = str(receipt.get("state_fingerprint") or "").strip()
+        validated_at = str(receipt.get("validated_at") or "").strip()
+        receipt_tier = str(receipt.get("flow_tier") or "").strip()
+        if not fingerprint or not validated_at or not receipt_tier:
+            add_issue(
+                errors,
+                make_issue(
+                    code="invalid_gate_receipt",
+                    message=f"步骤 {step_num}: gate_receipt 不完整，禁止手工伪造 receipt",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="gate_receipt",
+                    recommended_rollback_step=min(step_num, receipt_step),
+                    recommended_repair_step=min(step_num, receipt_step),
+                ),
+            )
+            return
+        if fingerprint != compute_state_fingerprint(self.state):
+            add_issue(
+                errors,
+                make_issue(
+                    code="invalid_gate_receipt",
+                    message=f"步骤 {step_num}: gate_receipt.state_fingerprint 与当前状态不一致",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="gate_receipt.state_fingerprint",
+                    recommended_rollback_step=min(step_num, receipt_step),
+                    recommended_repair_step=min(step_num, receipt_step),
+                ),
+            )
+
     def check_summary(self, checkpoint: dict[str, Any], step_num: int, errors: list[dict[str, Any]], flow_tier: str) -> None:
         summary = str(checkpoint.get("summary") or "")
         require(
@@ -692,25 +768,78 @@ class GateValidator:
                 ),
             )
 
+    def check_block_state_sync(self, artifact: str, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        draft_path = self.working_draft_path()
+        if not draft_path or not draft_path.exists():
+            return
+        content = read_markdown(draft_path)
+        if artifact == "WD-EXP-*":
+            present = re.search(r"^\s*#{2,6}\s+WD-EXP-[A-Z0-9_-]+\b", content, re.MULTILINE) is not None
+        else:
+            present = re.search(rf"^\s*#{{2,6}}\s+{re.escape(artifact)}\b", content, re.MULTILINE) is not None
+        if not present:
+            return
+
+        checkpoint_step = ARTIFACT_REPAIR_STEP.get(artifact, step_num)
+        checkpoint = self.checkpoint(checkpoint_step, errors, flow_tier)
+        expected_field = {
+            "WD-CTX": "wd_ctx_written",
+            "WD-TASK": "wd_task_written",
+            "WD-SYN": "wd_syn_written",
+            "WD-SYN-LIGHT": "wd_syn_written",
+        }.get(artifact)
+        checkpoint_ok = checkpoint.get(expected_field) is True if expected_field else True
+        artifact_ok = artifact in self.state.get("produced_artifacts", [])
+        if not artifact_ok or not checkpoint_ok:
+            add_issue(
+                errors,
+                make_issue(
+                    code="artifact_state_desync",
+                    message=f"步骤 {step_num}: {artifact} 已写入 draft，但 state 未同步",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="produced_artifacts",
+                    missing_artifacts=[artifact],
+                    recommended_rollback_step=checkpoint_step,
+                    recommended_repair_step=checkpoint_step,
+                ),
+            )
+
     def check_task_slots_cover_template(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
         draft_path = self.working_draft_path()
         if not draft_path or not draft_path.exists():
             return
-        headings = self.template_headings()
+        headings = [item["title"] for item in self.template_headings()]
         content = read_markdown(draft_path)
-        missing = [item["title"] for item in headings if item["title"] not in content]
-        if missing:
+        block = extract_named_block(content, "WD-TASK")
+        if not block:
+            return
+        actual_headings = [normalize_task_heading(title) for title in extract_block_headings(block)]
+        if any(title.startswith("CTX-") for title in actual_headings):
             add_issue(
                 errors,
                 make_issue(
-                    code="task_slots_incomplete",
-                    message=f"步骤 {step_num}: WD-TASK 未覆盖当前模板全部槽位",
+                    code="task_block_structure_invalid",
+                    message=f"步骤 {step_num}: WD-TASK 不得混入 CTX 条目",
                     step=step_num,
                     flow_tier=flow_tier,
                     field="working_draft_path",
                     recommended_rollback_step=8,
                     recommended_repair_step=8,
-                    details={"missing_slots": missing},
+                ),
+            )
+        if actual_headings != headings:
+            add_issue(
+                errors,
+                make_issue(
+                    code="task_slots_incomplete",
+                    message=f"步骤 {step_num}: WD-TASK 必须与模板槽位一一对应且顺序一致",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="working_draft_path",
+                    recommended_rollback_step=8,
+                    recommended_repair_step=8,
+                    details={"expected_slots": headings, "actual_slots": actual_headings},
                 ),
             )
 
@@ -763,8 +892,26 @@ class GateValidator:
             return
         if "## WD-SYN" not in content:
             return
-        required_fragments = ["候选方案对比", "| 复用 |", "| 改造 |", "| 新建 |", "关键证据引用"]
-        missing = [fragment for fragment in required_fragments if fragment not in content]
+        block = extract_named_block(content, "WD-SYN")
+        template_titles = [item["title"] for item in self.template_headings()]
+        actual_titles = [normalize_syn_heading(title) for title in extract_block_headings(block)]
+        if actual_titles != template_titles:
+            add_issue(
+                errors,
+                make_issue(
+                    code="wd_syn_slots_incomplete",
+                    message=f"步骤 {step_num}: WD-SYN 必须按模板槽位逐项收敛",
+                    step=step_num,
+                    flow_tier=flow_tier,
+                    field="working_draft_path",
+                    missing_artifacts=["WD-SYN"],
+                    recommended_rollback_step=10,
+                    recommended_repair_step=10,
+                    details={"expected_slots": template_titles, "actual_slots": actual_titles},
+                ),
+            )
+        required_fragments = ["#### 候选方案对比", "| 复用 |", "| 改造 |", "| 新建 |", "#### 选定路径", "关键证据引用"]
+        missing = [fragment for fragment in required_fragments if fragment not in block]
         if missing:
             add_issue(
                 errors,
@@ -841,6 +988,7 @@ class GateValidator:
 
     def common(self, step_num: int, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.check_state_shape(errors, step_num, flow_tier)
+        self.check_receipt_integrity(errors, step_num, flow_tier)
         self.check_completed_steps(errors, step_num, flow_tier)
         checkpoint = self.checkpoint(step_num, errors, flow_tier)
         if checkpoint:
@@ -850,7 +998,14 @@ class GateValidator:
             self.check_final_document_path_contract(errors, step_num, flow_tier)
         if step_num >= 3:
             self.check_prerequisite_files(errors, step_num, flow_tier)
+        if step_num >= 4:
             self.check_template_loaded(errors, step_num, flow_tier)
+        if step_num >= 7:
+            self.check_block_state_sync("WD-CTX", errors, step_num, flow_tier)
+        if step_num >= 8 and flow_tier != "light":
+            self.check_block_state_sync("WD-TASK", errors, step_num, flow_tier)
+        if step_num >= 10:
+            self.check_block_state_sync("WD-SYN-LIGHT" if flow_tier == "light" else "WD-SYN", errors, step_num, flow_tier)
 
     def step_1(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.check_state_shape(errors, 1, flow_tier)
@@ -878,6 +1033,7 @@ class GateValidator:
     def step_4(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(4, flow_tier, errors)
         checkpoint = self.checkpoint(4, errors, flow_tier)
+        signals = checkpoint.get("signals") if isinstance(checkpoint.get("signals"), list) else []
         require(
             self.state.get("flow_tier") in {"light", "moderate", "full"},
             errors,
@@ -900,6 +1056,20 @@ class GateValidator:
             recommended_rollback_step=4,
             recommended_repair_step=4,
         )
+        if any(str(signal) not in VALID_STEP4_SIGNALS for signal in signals):
+            add_issue(
+                errors,
+                make_issue(
+                    code="invalid_step4_signals",
+                    message="步骤 4: signals 只能使用受支持的分类信号",
+                    step=4,
+                    flow_tier=flow_tier,
+                    field="checkpoints.step-4.signals",
+                    recommended_rollback_step=4,
+                    recommended_repair_step=4,
+                    details={"signals": signals},
+                ),
+            )
 
     def step_5(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(5, flow_tier, errors)
