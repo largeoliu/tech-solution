@@ -89,6 +89,32 @@ def dump_yaml(path: Path, data: dict[str, Any]) -> None:
     path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
+def compute_state_fingerprint(state: dict[str, Any]) -> str:
+    receipt = state.get("gate_receipt")
+    scrubbed = dict(state)
+    if isinstance(receipt, dict):
+        scrubbed["gate_receipt"] = {
+            "step": receipt.get("step", 0),
+            "flow_tier": receipt.get("flow_tier", ""),
+            "state_fingerprint": "",
+            "validated_at": "",
+        }
+    payload = yaml.safe_dump(scrubbed, allow_unicode=True, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def require_receipt(state: dict[str, Any], expected_step: int, expected_flow_tier: str) -> None:
+    receipt = state.get("gate_receipt")
+    if not isinstance(receipt, dict):
+        raise SystemExit("缺少 gate_receipt，必须先运行 validate-state.py --write-pass-receipt。")
+    if int(receipt.get("step") or 0) != expected_step:
+        raise SystemExit(f"gate_receipt.step={receipt.get('step')}，期望 {expected_step}。")
+    if str(receipt.get("flow_tier") or "") != expected_flow_tier:
+        raise SystemExit(f"gate_receipt.flow_tier={receipt.get('flow_tier')}，期望 {expected_flow_tier}。")
+    if str(receipt.get("state_fingerprint") or "") != compute_state_fingerprint(state):
+        raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")
+
+
 def update_state(
     *,
     state_path: Path,
@@ -98,6 +124,7 @@ def update_state(
     fingerprint: str,
 ) -> None:
     state = load_yaml(state_path)
+    require_receipt(state, expected_step=3, expected_flow_tier=str(state.get("flow_tier") or "light"))
     repo_root = state_path.parents[3]
     state["solution_root"] = str(working_draft.parent.parent.relative_to(repo_root))
     state["template_path"] = str(template_path.relative_to(repo_root))

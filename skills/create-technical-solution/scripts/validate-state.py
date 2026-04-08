@@ -29,6 +29,7 @@ ALLOWED_TOP_LEVEL_FIELDS = {
     "flow_tier",
     "required_artifacts",
     "produced_artifacts",
+    "gate_receipt",
     "solution_root",
     "template_path",
     "members_path",
@@ -50,6 +51,7 @@ SUMMARY_MAX_LEN = 120
 SUMMARY_FORBIDDEN_PATTERNS = [
     re.compile(r"\n"),
     re.compile(r"CTX-\d+"),
+    re.compile(r"WD-EXP"),
     re.compile(r"^#{1,6}\s", re.MULTILINE),
     re.compile(r"```"),
     re.compile(r"^\s*\|.+\|\s*$", re.MULTILINE),
@@ -85,6 +87,28 @@ def load_state(path: Path) -> dict[str, Any]:
     return data
 
 
+def dump_state(path: Path, data: dict[str, Any]) -> None:
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+
+def normalized_state_for_fingerprint(state: dict[str, Any]) -> dict[str, Any]:
+    scrubbed = dict(state)
+    receipt = scrubbed.get("gate_receipt")
+    if isinstance(receipt, dict):
+        scrubbed["gate_receipt"] = {
+            "step": receipt.get("step", 0),
+            "flow_tier": receipt.get("flow_tier", ""),
+            "state_fingerprint": "",
+            "validated_at": "",
+        }
+    return scrubbed
+
+
+def compute_state_fingerprint(state: dict[str, Any]) -> str:
+    payload = yaml.safe_dump(normalized_state_for_fingerprint(state), allow_unicode=True, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def normalize_text(value: str) -> str:
     return " ".join(str(value).replace("\xa0", " ").split())
 
@@ -106,7 +130,6 @@ def extract_slot_headings(markdown: str, slot_level: Optional[int] = None) -> li
         for level, _title in headings:
             counts[level] = counts.get(level, 0) + 1
         slot_level = max(counts.items(), key=lambda item: (item[1], item[0]))[0]
-
     slots: list[dict[str, Any]] = []
     slot_index = 1
     for level, title in headings:
@@ -148,16 +171,26 @@ def parse_iso_datetime(value: Any) -> Optional[datetime]:
         return None
 
 
+def path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
 def remediation_for_issue(issue: dict[str, Any]) -> str:
     code = issue["code"]
     if code == "forbidden_state_field":
         return "删除 state 中的正文型或冗余字段，仅保留最小流程控制字段后重试。"
     if code == "verbose_summary":
         return "将 checkpoints.step-N.summary 改为单行短摘要，只写流程结果、区块数量和 gate 状态。"
+    if code == "missing_step1_scope":
+        return "回到步骤 1，通过 initialize-state.py 写入 slug、final_document_path 与最小 checkpoint。"
     if code == "missing_artifact":
         artifact = issue.get("missing_artifacts", ["未知产物"])[0]
         if artifact == "final_document":
-            return "回到步骤 11 生成最终文档并写入 final_document_path。"
+            return "回到步骤 11，通过 render-final-document.py 生成最终文档并写入 final_document_path。"
         return f"回到步骤 {ARTIFACT_REPAIR_STEP.get(artifact, issue['step'])} 补齐 {artifact} 并同步 produced_artifacts。"
     if code == "missing_working_draft_block":
         artifact = issue.get("missing_artifacts", ["未知产物"])[0]
@@ -170,6 +203,10 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
         return "回到步骤 4 重新判定 flow_tier，并同步 required_artifacts、skipped_steps 与 signals。"
     if code == "repowiki_not_consumed":
         return "回到步骤 7，实际读取并引用 repowiki，再把来源条目写入 WD-CTX。"
+    if code == "invalid_working_draft_path":
+        return "回到步骤 3，重新生成 .architecture/technical-solutions/working-drafts/[slug].working.md。"
+    if code == "invalid_final_document_path":
+        return "回到步骤 1 或 11，把 final_document_path 固定到 .architecture/technical-solutions/[slug].md。"
     if code == "final_document_headings_mismatch":
         return "回到步骤 11，按当前模板顺序重生成最终文档。"
     if code == "step_order_violation":
@@ -346,6 +383,15 @@ class GateValidator:
     def template_path(self) -> Optional[Path]:
         return resolve_path(self.state.get("template_path"), self.repo_root)
 
+    def members_path(self) -> Optional[Path]:
+        return resolve_path(self.state.get("members_path"), self.repo_root)
+
+    def principles_path(self) -> Optional[Path]:
+        return resolve_path(self.state.get("principles_path"), self.repo_root)
+
+    def solution_root_path(self) -> Optional[Path]:
+        return resolve_path(self.state.get("solution_root"), self.repo_root)
+
     def working_draft_path(self) -> Optional[Path]:
         return resolve_path(self.state.get("working_draft_path"), self.repo_root)
 
@@ -469,6 +515,98 @@ class GateValidator:
                 )
                 break
 
+    def check_step1_ready(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        step1 = self.checkpoint(1, errors, flow_tier)
+        require(
+            step1.get("scope_ready") is True and bool(str(step1.get("slug") or "").strip()),
+            errors,
+            code="missing_step1_scope",
+            message=f"步骤 {step_num}: 步骤 1 尚未完成最小定题与 slug 初始化",
+            step=step_num,
+            flow_tier=flow_tier,
+            field="checkpoints.step-1.scope_ready",
+            recommended_rollback_step=1,
+            recommended_repair_step=1,
+        )
+
+    def check_prerequisite_files(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        for field, resolver in {
+            "members_path": self.members_path,
+            "principles_path": self.principles_path,
+            "template_path": self.template_path,
+        }.items():
+            path = resolver()
+            require(
+                path is not None and path.exists(),
+                errors,
+                code="missing_prerequisite_file",
+                message=f"步骤 {step_num}: {field} 不存在或不可读",
+                step=step_num,
+                flow_tier=flow_tier,
+                field=field,
+                recommended_rollback_step=2,
+                recommended_repair_step=2,
+            )
+
+    def check_working_draft_path_contract(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        draft_path = self.working_draft_path()
+        solution_root = self.solution_root_path()
+        require(
+            draft_path is not None,
+            errors,
+            code="invalid_working_draft_path",
+            message=f"步骤 {step_num}: working_draft_path 不能为空",
+            step=step_num,
+            flow_tier=flow_tier,
+            field="working_draft_path",
+            recommended_rollback_step=3,
+            recommended_repair_step=3,
+        )
+        if not draft_path or not solution_root:
+            return
+        expected_root = (solution_root / "working-drafts").resolve()
+        valid = path_is_within(draft_path, expected_root) and draft_path.name.endswith(".working.md")
+        require(
+            valid,
+            errors,
+            code="invalid_working_draft_path",
+            message=f"步骤 {step_num}: working_draft_path 必须位于 .architecture/technical-solutions/working-drafts/ 下",
+            step=step_num,
+            flow_tier=flow_tier,
+            field="working_draft_path",
+            recommended_rollback_step=3,
+            recommended_repair_step=3,
+        )
+
+    def check_final_document_path_contract(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        final_document = self.final_document_path()
+        solution_root = self.solution_root_path()
+        require(
+            final_document is not None,
+            errors,
+            code="invalid_final_document_path",
+            message=f"步骤 {step_num}: final_document_path 不能为空",
+            step=step_num,
+            flow_tier=flow_tier,
+            field="final_document_path",
+            recommended_rollback_step=1,
+            recommended_repair_step=1,
+        )
+        if not final_document or not solution_root:
+            return
+        valid = path_is_within(final_document, solution_root.resolve()) and "working-drafts" not in final_document.parts
+        require(
+            valid,
+            errors,
+            code="invalid_final_document_path",
+            message=f"步骤 {step_num}: final_document_path 必须位于 .architecture/technical-solutions/ 下，不得写入 docs/ 等目录",
+            step=step_num,
+            flow_tier=flow_tier,
+            field="final_document_path",
+            recommended_rollback_step=1 if step_num < 11 else 11,
+            recommended_repair_step=1 if step_num < 11 else 11,
+        )
+
     def check_template_loaded(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
         checkpoint = self.checkpoint(3, errors, flow_tier)
         current_headings = self.template_headings()
@@ -494,6 +632,7 @@ class GateValidator:
             recommended_rollback_step=3,
             recommended_repair_step=3,
         )
+        self.check_working_draft_path_contract(errors, step_num, flow_tier)
         if current_headings:
             require(
                 checkpoint.get("slot_count") == len(current_headings),
@@ -643,6 +782,7 @@ class GateValidator:
             )
 
     def check_final_document(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        self.check_final_document_path_contract(errors, step_num, flow_tier)
         final_document = self.final_document_path()
         require(
             final_document is not None and final_document.exists(),
@@ -676,6 +816,7 @@ class GateValidator:
             )
 
     def check_final_document_not_premature(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+        self.check_final_document_path_contract(errors, step_num, flow_tier)
         final_document = self.final_document_path()
         if not final_document or not final_document.exists():
             return
@@ -704,11 +845,16 @@ class GateValidator:
         checkpoint = self.checkpoint(step_num, errors, flow_tier)
         if checkpoint:
             self.check_summary(checkpoint, step_num, errors, flow_tier)
+        if step_num >= 2:
+            self.check_step1_ready(errors, step_num, flow_tier)
+            self.check_final_document_path_contract(errors, step_num, flow_tier)
         if step_num >= 3:
+            self.check_prerequisite_files(errors, step_num, flow_tier)
             self.check_template_loaded(errors, step_num, flow_tier)
 
     def step_1(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
-        self.common(1, flow_tier, errors)
+        self.check_state_shape(errors, 1, flow_tier)
+        self.check_completed_steps(errors, 1, flow_tier)
 
     def step_2(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(2, flow_tier, errors)
@@ -727,6 +873,7 @@ class GateValidator:
 
     def step_3(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(3, flow_tier, errors)
+        self.check_prerequisite_files(errors, 3, flow_tier)
 
     def step_4(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
         self.common(4, flow_tier, errors)
@@ -963,12 +1110,26 @@ def format_issue(issue: dict[str, Any]) -> str:
     return f"  ✗ {issue['message']}\n    → 建议：{issue['repair_guidance']}"
 
 
+def write_pass_receipt(path: Path, state: dict[str, Any], step: int, flow_tier: str) -> dict[str, Any]:
+    fingerprint = compute_state_fingerprint(state)
+    receipt = {
+        "step": step,
+        "flow_tier": flow_tier,
+        "state_fingerprint": fingerprint,
+        "validated_at": datetime.now().replace(microsecond=0).isoformat(),
+    }
+    state["gate_receipt"] = receipt
+    dump_state(path, state)
+    return receipt
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="验证 create-technical-solution 状态文件")
     parser.add_argument("--state", required=True, help="状态文件路径")
     parser.add_argument("--step", type=int, required=True, help="要校验的步骤号")
     parser.add_argument("--flow-tier", required=True, choices=["light", "moderate", "full"], help="当前流程级别")
     parser.add_argument("--format", choices=["json", "text"], default="text", help="输出格式")
+    parser.add_argument("--write-pass-receipt", action="store_true", help="校验通过后写入 gate_receipt")
     args = parser.parse_args()
 
     state_path = Path(args.state).resolve()
@@ -995,6 +1156,8 @@ def main() -> int:
         return 2
 
     payload = {"step": args.step, "flow_tier": args.flow_tier, "passed": True, "summary": {"error_count": 0}}
+    if args.write_pass_receipt:
+        payload["gate_receipt"] = write_pass_receipt(state_path, state, args.step, args.flow_tier)
     if args.format == "json":
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:

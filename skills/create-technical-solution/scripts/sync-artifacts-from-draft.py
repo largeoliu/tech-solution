@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -34,6 +35,30 @@ def dump_yaml(path: Path, data: dict[str, Any]) -> None:
     path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
+def compute_state_fingerprint(state: dict[str, Any]) -> str:
+    receipt = state.get("gate_receipt")
+    scrubbed = dict(state)
+    if isinstance(receipt, dict):
+        scrubbed["gate_receipt"] = {
+            "step": receipt.get("step", 0),
+            "flow_tier": receipt.get("flow_tier", ""),
+            "state_fingerprint": "",
+            "validated_at": "",
+        }
+    payload = yaml.safe_dump(scrubbed, allow_unicode=True, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def require_receipt(state: dict[str, Any], expected_step: int) -> None:
+    receipt = state.get("gate_receipt")
+    if not isinstance(receipt, dict):
+        raise SystemExit("缺少 gate_receipt，必须先运行 validate-state.py --write-pass-receipt。")
+    if int(receipt.get("step") or 0) != expected_step:
+        raise SystemExit(f"gate_receipt.step={receipt.get('step')}，期望 {expected_step}。")
+    if str(receipt.get("state_fingerprint") or "") != compute_state_fingerprint(state):
+        raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")
+
+
 def sync_artifacts(content: str, selected_members: list[str]) -> list[str]:
     artifacts: list[str] = []
     for artifact, pattern in ARTIFACT_PATTERNS.items():
@@ -51,6 +76,7 @@ def main() -> int:
     parser.add_argument("--working-draft", required=True, help="working draft 路径")
     parser.add_argument("--state", help="状态文件路径；若提供则回写 produced_artifacts")
     parser.add_argument("--write", action="store_true", help="是否回写状态文件")
+    parser.add_argument("--require-receipt-step", type=int, help="要求 gate_receipt.step 与该值一致")
     args = parser.parse_args()
 
     draft_path = Path(args.working_draft).resolve()
@@ -62,6 +88,8 @@ def main() -> int:
     selected_members: list[str] = []
     if args.state:
         state = load_yaml(Path(args.state).resolve())
+        if args.write and args.require_receipt_step is not None:
+            require_receipt(state, args.require_receipt_step)
         checkpoints = state.get("checkpoints") or {}
         step5 = checkpoints.get("step-5") if isinstance(checkpoints, dict) else {}
         raw_members = step5.get("selected_members") if isinstance(step5, dict) else []

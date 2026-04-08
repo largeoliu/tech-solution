@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,6 +47,32 @@ def dump_yaml(path: Path, data: dict[str, Any]) -> None:
     path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
+def compute_state_fingerprint(state: dict[str, Any]) -> str:
+    receipt = state.get("gate_receipt")
+    scrubbed = dict(state)
+    if isinstance(receipt, dict):
+        scrubbed["gate_receipt"] = {
+            "step": receipt.get("step", 0),
+            "flow_tier": receipt.get("flow_tier", ""),
+            "state_fingerprint": "",
+            "validated_at": "",
+        }
+    payload = yaml.safe_dump(scrubbed, allow_unicode=True, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def require_receipt(state: dict[str, Any], expected_step: int, expected_flow_tier: str) -> None:
+    receipt = state.get("gate_receipt")
+    if not isinstance(receipt, dict):
+        raise SystemExit("缺少 gate_receipt，必须先运行 validate-state.py --write-pass-receipt。")
+    if int(receipt.get("step") or 0) != expected_step:
+        raise SystemExit(f"gate_receipt.step={receipt.get('step')}，期望 {expected_step}。")
+    if str(receipt.get("flow_tier") or "") != expected_flow_tier:
+        raise SystemExit(f"gate_receipt.flow_tier={receipt.get('flow_tier')}，期望 {expected_flow_tier}。")
+    if str(receipt.get("state_fingerprint") or "") != compute_state_fingerprint(state):
+        raise SystemExit("gate_receipt.state_fingerprint 与当前状态不一致，请重新运行 validator。")
+
+
 def contract_for_tier(flow_tier: str) -> tuple[list[str], list[int]]:
     if flow_tier == "light":
         return ["WD-CTX", "WD-SYN-LIGHT"], [8, 9]
@@ -71,9 +98,12 @@ def set_flow_tier(
     next_step: int | None,
     append_completed: bool,
     signals: list[str],
+    require_receipt_step: int | None,
 ) -> dict[str, Any]:
     validate_tier_against_signals(flow_tier, signals)
     state = load_yaml(state_path)
+    if require_receipt_step is not None:
+        require_receipt(state, require_receipt_step, flow_tier)
     required_artifacts, skipped_steps = contract_for_tier(flow_tier)
 
     checkpoints = state.setdefault("checkpoints", {})
@@ -128,6 +158,7 @@ def main() -> int:
     parser.add_argument("--next-step", type=int, help="设置 current_step")
     parser.add_argument("--append-completed", action="store_true", help="将 step-4 追加到 completed_steps")
     parser.add_argument("--signal", action="append", default=[], help="步骤4命中的分类信号，可重复传入")
+    parser.add_argument("--require-receipt-step", type=int, help="要求 gate_receipt.step 与该值一致")
     parser.add_argument("--format", choices=["json", "text"], default="json", help="输出格式")
     args = parser.parse_args()
 
@@ -139,6 +170,7 @@ def main() -> int:
         next_step=args.next_step,
         append_completed=args.append_completed,
         signals=[item.strip() for item in args.signal if item.strip()],
+        require_receipt_step=args.require_receipt_step,
     )
     if args.format == "json":
         print(json.dumps(payload, ensure_ascii=False, indent=2))
