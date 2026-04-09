@@ -360,6 +360,8 @@ def write_step11_draft(workspace: dict[str, Path]) -> None:
 ## WD-SYN
 
 ### 槽位：1.1 需求概述
+#### 目标能力
+- 明确需求边界与改造目标。
 #### 候选方案对比
 | 路径 | 可行性 | 关键证据 | 选择理由 |
 |------|--------|----------|----------|
@@ -367,9 +369,16 @@ def write_step11_draft(workspace: dict[str, Path]) -> None:
 | 改造 | ✅ | CTX-01 | 推荐 |
 | 新建 | ❌ | CTX-01 | 成本高 |
 #### 选定路径
-- **关键证据引用**：CTX-01
+- 路径: 改造
+- 选定写法: 在现有实现上扩展。
+- 关键证据引用: CTX-01
+- 建议落位槽位: 1.1 需求概述
+- 模板承载缺口: 无
+- 未决问题: 无
 
 ### 槽位：1.2 核心目标
+#### 目标能力
+- 收敛核心目标与验收标准。
 #### 候选方案对比
 | 路径 | 可行性 | 关键证据 | 选择理由 |
 |------|--------|----------|----------|
@@ -377,9 +386,16 @@ def write_step11_draft(workspace: dict[str, Path]) -> None:
 | 改造 | ✅ | CTX-01 | 推荐 |
 | 新建 | ❌ | CTX-01 | 成本高 |
 #### 选定路径
-- **关键证据引用**：CTX-01
+- 路径: 改造
+- 选定写法: 保留目标结构并补齐约束。
+- 关键证据引用: CTX-01
+- 建议落位槽位: 1.2 核心目标
+- 模板承载缺口: 无
+- 未决问题: 无
 
 ### 槽位：2.1 方案设计
+#### 目标能力
+- 收敛实现路径与关键设计点。
 #### 候选方案对比
 | 路径 | 可行性 | 关键证据 | 选择理由 |
 |------|--------|----------|----------|
@@ -387,9 +403,16 @@ def write_step11_draft(workspace: dict[str, Path]) -> None:
 | 改造 | ✅ | CTX-01 | 推荐 |
 | 新建 | ❌ | CTX-01 | 成本高 |
 #### 选定路径
-- **关键证据引用**：CTX-01
+- 路径: 改造
+- 选定写法: 在现有骨架上补充实现细节。
+- 关键证据引用: CTX-01
+- 建议落位槽位: 2.1 方案设计
+- 模板承载缺口: 无
+- 未决问题: 无
 
 ### 槽位：2.2 风险与验证
+#### 目标能力
+- 明确风险与验证手段。
 #### 候选方案对比
 | 路径 | 可行性 | 关键证据 | 选择理由 |
 |------|--------|----------|----------|
@@ -397,7 +420,12 @@ def write_step11_draft(workspace: dict[str, Path]) -> None:
 | 改造 | ✅ | CTX-01 | 推荐 |
 | 新建 | ❌ | CTX-01 | 成本高 |
 #### 选定路径
-- **关键证据引用**：CTX-01
+- 路径: 改造
+- 选定写法: 沿用现有验证流程并补足检查项。
+- 关键证据引用: CTX-01
+- 建议落位槽位: 2.2 风险与验证
+- 模板承载缺口: 无
+- 未决问题: 无
 """,
         encoding="utf-8",
     )
@@ -464,6 +492,8 @@ WD_EXP_BODY = """### 参与槽位
 
 
 WD_SYN_BODY = """### 槽位：1.1 需求概述
+#### 目标能力
+- 明确需求边界与改造目标。
 #### 候选方案对比
 | 路径 | 可行性 | 关键证据 | 选择理由 |
 |------|--------|----------|----------|
@@ -471,9 +501,16 @@ WD_SYN_BODY = """### 槽位：1.1 需求概述
 | 改造 | ✅ | CTX-01 | 推荐 |
 | 新建 | ❌ | CTX-01 | 成本高 |
 #### 选定路径
-- **关键证据引用**：CTX-01
+- 路径: 改造
+- 选定写法: 在现有实现上扩展。
+- 关键证据引用: CTX-01
+- 建议落位槽位: 1.1 需求概述
+- 模板承载缺口: 无
+- 未决问题: 无
 
 ### 槽位：1.2 核心目标
+#### 目标能力
+- 收敛核心目标与验收标准。
 #### 候选方案对比
 | 路径 | 可行性 | 关键证据 | 选择理由 |
 |------|--------|----------|----------|
@@ -481,9 +518,16 @@ WD_SYN_BODY = """### 槽位：1.1 需求概述
 | 改造 | ✅ | CTX-01 | 推荐 |
 | 新建 | ❌ | CTX-01 | 成本高 |
 #### 选定路径
-- **关键证据引用**：CTX-01
+- 路径: 改造
+- 选定写法: 保留目标结构并补齐约束。
+- 关键证据引用: CTX-01
+- 建议落位槽位: 1.2 核心目标
+- 模板承载缺口: 无
+- 未决问题: 无
 
 ### 槽位：2.1 方案设计
+#### 目标能力
+- 收敛实现路径与关键设计点。
 #### 候选方案对比
 | 路径 | 可行性 | 关键证据 | 选择理由 |
 |------|--------|----------|----------|
@@ -491,9 +535,16 @@ WD_SYN_BODY = """### 槽位：1.1 需求概述
 | 改造 | ✅ | CTX-01 | 推荐 |
 | 新建 | ❌ | CTX-01 | 成本高 |
 #### 选定路径
-- **关键证据引用**：CTX-01
+- 路径: 改造
+- 选定写法: 在现有骨架上补充实现细节。
+- 关键证据引用: CTX-01
+- 建议落位槽位: 2.1 方案设计
+- 模板承载缺口: 无
+- 未决问题: 无
 
 ### 槽位：2.2 风险与验证
+#### 目标能力
+- 明确风险与验证手段。
 #### 候选方案对比
 | 路径 | 可行性 | 关键证据 | 选择理由 |
 |------|--------|----------|----------|
@@ -501,7 +552,12 @@ WD_SYN_BODY = """### 槽位：1.1 需求概述
 | 改造 | ✅ | CTX-01 | 推荐 |
 | 新建 | ❌ | CTX-01 | 成本高 |
 #### 选定路径
-- **关键证据引用**：CTX-01
+- 路径: 改造
+- 选定写法: 沿用现有验证流程并补足检查项。
+- 关键证据引用: CTX-01
+- 建议落位槽位: 2.2 风险与验证
+- 模板承载缺口: 无
+- 未决问题: 无
 """
 
 
@@ -599,6 +655,181 @@ class TestProtocolContracts:
 
 
 class TestRunStepBehavior:
+    def test_main_emit_scaffold_mode_keeps_summary_optional(
+        self,
+        workspace: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_emit_scaffold(state_path: Path, members: list[str] | None = None) -> int:
+            captured["state_path"] = state_path
+            captured["members"] = members
+            return 0
+
+        monkeypatch.setattr(run_step, "emit_scaffold", fake_emit_scaffold)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["run-step.py", "--state", str(workspace["state_path"]), "--emit-scaffold"],
+        )
+
+        assert run_step.main() == 0
+        assert captured == {
+            "state_path": workspace["state_path"].resolve(),
+            "members": [],
+        }
+
+    def test_main_rejects_emit_scaffold_with_complete(
+        self,
+        workspace: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "run-step.py",
+                "--state",
+                str(workspace["state_path"]),
+                "--emit-scaffold",
+                "--complete",
+                "--summary",
+                "noop",
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_step.main()
+
+        assert exc_info.value.code == 2
+
+    def test_main_preserves_public_cli_flags_for_complete_mode(
+        self,
+        workspace: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_complete_step(args: argparse.Namespace) -> int:
+            captured["state"] = args.state
+            captured["complete"] = args.complete
+            captured["summary"] = args.summary
+            captured["slug"] = args.slug
+            captured["flow_tier"] = args.flow_tier
+            captured["solution_type"] = args.solution_type
+            captured["signal"] = args.signal
+            captured["member"] = args.member
+            captured["content_file"] = args.content_file
+            return 0
+
+        monkeypatch.setattr(run_step, "complete_step", fake_complete_step)
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "run-step.py",
+                "--state",
+                str(workspace["state_path"]),
+                "--complete",
+                "--summary",
+                "专家分析完成",
+                "--slug",
+                "sample-solution",
+                "--flow-tier",
+                "full",
+                "--solution-type",
+                "新功能方案",
+                "--signal",
+                "introduces-core-capability",
+                "--member",
+                "SYSTEMS_ARCHITECT",
+                "--content-file",
+                "/tmp/wd-exp-systems_architect.md",
+            ],
+        )
+
+        assert run_step.main() == 0
+        assert captured == {
+            "state": str(workspace["state_path"]),
+            "complete": True,
+            "summary": "专家分析完成",
+            "slug": "sample-solution",
+            "flow_tier": "full",
+            "solution_type": "新功能方案",
+            "signal": ["introduces-core-capability"],
+            "member": ["SYSTEMS_ARCHITECT"],
+            "content_file": ["/tmp/wd-exp-systems_architect.md"],
+        }
+
+    def test_main_status_mode_keeps_summary_optional(
+        self,
+        workspace: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, Path] = {}
+
+        def fake_print_status(state_path: Path) -> int:
+            captured["state_path"] = state_path
+            return 0
+
+        monkeypatch.setattr(run_step, "print_status", fake_print_status)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["run-step.py", "--state", str(workspace["state_path"])],
+        )
+
+        assert run_step.main() == 0
+        assert captured["state_path"] == workspace["state_path"].resolve()
+
+    def test_emit_scaffold_does_not_mutate_state_or_draft(self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]) -> None:
+        state = make_step9_state(workspace)
+        write_state(workspace, state)
+        write_step9_draft(workspace)
+        before_state = workspace["state_path"].read_text(encoding="utf-8")
+        before_draft = workspace["working_draft_path"].read_text(encoding="utf-8")
+
+        exit_code = run_step.emit_scaffold(workspace["state_path"])
+
+        assert exit_code == 0
+        output = capsys.readouterr().out
+        assert "## WD-EXP-SYSTEMS_ARCHITECT" in output
+        assert "### 参与槽位" in output
+        assert workspace["state_path"].read_text(encoding="utf-8") == before_state
+        assert workspace["working_draft_path"].read_text(encoding="utf-8") == before_draft
+
+    def test_emit_scaffold_step9_member_filter_limits_output(self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]) -> None:
+        state = make_step9_state(workspace)
+        state["checkpoints"]["step-5"]["selected_members"] = ["systems_architect", "domain_expert"]
+        state["checkpoints"]["step-5"]["selected_member_count"] = 2
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        write_step9_draft(workspace)
+
+        exit_code = run_step.emit_scaffold(workspace["state_path"], members=["domain_expert"])
+
+        assert exit_code == 0
+        output = capsys.readouterr().out
+        assert "## WD-EXP-DOMAIN_EXPERT" in output
+        assert "## WD-EXP-SYSTEMS_ARCHITECT" not in output
+
+    def test_emit_scaffold_uses_stdout_instead_of_complete_path(
+        self,
+        workspace: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        state = make_step9_state(workspace)
+        write_state(workspace, state)
+        write_step9_draft(workspace)
+
+        def forbid_complete(*_args, **_kwargs):
+            raise AssertionError("emit_scaffold should not call complete path")
+
+        monkeypatch.setattr(run_step, "complete_creative_step", forbid_complete)
+
+        exit_code = run_step.emit_scaffold(workspace["state_path"])
+
+        assert exit_code == 0
+        assert "WD-EXP" in capsys.readouterr().out
+
     def test_run_step_reads_names_and_default_blocks_from_workflow(self) -> None:
         assert run_step.get_step_name(7) == "构建共享上下文 (WD-CTX)"
         assert run_step.get_step_name(10) == "协作收敛 (WD-SYN)"
@@ -715,8 +946,10 @@ class TestRunStepBehavior:
         )
 
         assert code != 0
+        assert message.startswith("upsert-draft-block.py 失败:\n")
         assert "WD-EXP" in message or "嵌套" in message
         assert workspace["working_draft_path"].read_text(encoding="utf-8") == before_draft
+        assert "## WD-EXP-SYSTEMS_ARCHITECT" not in workspace["working_draft_path"].read_text(encoding="utf-8")
         assert vs.load_state(workspace["state_path"]) == before_state
 
     def test_step9_rejects_nested_wd_exp_heading_in_content_file(self, workspace: dict[str, Path]) -> None:
@@ -843,6 +1076,56 @@ class TestRunStepBehavior:
         assert new_state["skipped_steps"] == [9]
         assert new_state["checkpoints"]["step-9"]["skipped"] is True
 
+    def test_handle_skip_steps_light_skips_steps_8_and_9(self, workspace: dict[str, Path]) -> None:
+        state = make_step4_state(workspace)
+        state["current_step"] = 8
+        state["completed_steps"] = [1, 2, 3, 4, 5, 6, 7]
+        state["flow_tier"] = "light"
+        state["required_artifacts"] = ["WD-CTX", "WD-SYN-LIGHT"]
+        state["produced_artifacts"] = ["WD-CTX"]
+        state["skipped_steps"] = []
+        state["gate_receipt"] = {
+            "step": 8,
+            "flow_tier": "light",
+            "state_fingerprint": "",
+            "validated_at": "2026-04-08T09:31:00",
+        }
+        state["checkpoints"]["step-4"] = {
+            "summary": "完成；flow_tier=light",
+            "solution_type": "单模块小改动",
+            "flow_tier": "light",
+            "signals": ["single-module"],
+        }
+        state["checkpoints"]["step-5"] = {
+            "summary": "完成；成员已选择",
+            "members_checked": True,
+            "selected_members": ["systems_architect"],
+            "selected_member_count": 1,
+        }
+        state["checkpoints"]["step-6"] = {
+            "summary": "完成；repowiki 不存在",
+            "repowiki_checked": True,
+            "repowiki_exists": False,
+            "repowiki_source_count": 0,
+        }
+        state["checkpoints"]["step-7"] = {"summary": "完成；写入 WD-CTX", "wd_ctx_written": True, "ctx_count": 1}
+        state["checkpoints"]["step-8"] = {"summary": "", "skipped": False, "reason": ""}
+        state["checkpoints"]["step-9"] = {"summary": "", "skipped": False, "reason": "", "wd_exp_count": 0}
+        state["can_enter_step_8"] = False
+        state["can_enter_step_9"] = False
+        state["can_enter_step_10"] = False
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+
+        code, message = run_step.handle_skip_steps(workspace["state_path"], 10, "light", "跳过；light 流程")
+
+        assert code == 0, message
+        new_state = vs.load_state(workspace["state_path"])
+        assert new_state["current_step"] == 10
+        assert new_state["skipped_steps"] == [8, 9]
+        assert new_state["checkpoints"]["step-8"]["skipped"] is True
+        assert new_state["checkpoints"]["step-9"]["skipped"] is True
+
     def test_complete_step_4_uses_in_process_flow_tier_writer(
         self,
         workspace: dict[str, Path],
@@ -935,6 +1218,22 @@ class TestRunStepBehavior:
         assert new_state["checkpoints"]["step-3"]["template_loaded"] is True
         assert workspace["working_draft_path"].exists()
         assert new_state["working_draft_path"] == ".architecture/.state/create-technical-solution/sample-solution.working.md"
+
+    def test_complete_step_3_ignores_tampered_external_working_draft_path(self, workspace: dict[str, Path]) -> None:
+        state = make_step3_state(workspace)
+        external_draft_path = workspace["repo"].parent / "tampered" / "sample-solution.working.md"
+        state["working_draft_path"] = str(external_draft_path.resolve())
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+
+        code, message = run_step.complete_step_3(workspace["state_path"], "模板读取完成")
+
+        assert code == 0, message
+        new_state = vs.load_state(workspace["state_path"])
+        assert new_state["current_step"] == 4
+        assert new_state["working_draft_path"] == ".architecture/.state/create-technical-solution/sample-solution.working.md"
+        assert workspace["working_draft_path"].exists()
+        assert not external_draft_path.exists()
 
     def test_print_status_shows_public_repair_hint_and_next_command(self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]) -> None:
         state = make_step9_state(workspace)

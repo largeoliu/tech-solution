@@ -82,139 +82,59 @@ python /path/to/run-step.py --state <状态文件路径>
 
 `run-step.py` 内部会调用 validator；若门禁失败，不应结束流程，而应先补齐缺失的 working draft 区块、修正状态字段或重建最终文档，再重新检查。
 
-若需要调试或测试内部 validator，本文件下述 JSON contract 仍然适用，但它属于内部诊断接口，不是公开执行入口。
+若需要调试或测试内部 validator，可直接运行 `validate-state.py --format json`，但这属于内部诊断接口，不是公开执行入口。
 
-### JSON 输出 contract
+### validate-state.py JSON contract（当前实现）
 
-`--format json` 返回以下顶层字段：
-- `step`
-- `flow_tier`
-- `passed`
-- `summary`
-- `repair_plan`
-- `state_snapshot`
-- `issues`
+- **失败 payload** 顶层键：`step`、`flow_tier`、`passed`、`summary`、`repair_plan`、`issues`
+- **通过 payload** 顶层键：`step`、`flow_tier`、`passed`、`summary`
+- 仅当传入 `--write-pass-receipt` 时，通过 payload 才会额外包含 `gate_receipt`
 
-其中 Agent 应优先消费：
-- `repair_plan[]`
-- `repair_plan[].depends_on_steps`
-- `repair_plan[].completion_checks`
-- `repair_plan[].retry_command`
-- `summary.recommended_repair_sequence`
+`summary`（由 `build_summary(...)` 生成）当前包含：
+- `summary.error_count`
 - `summary.recommended_rollback_step`
+- `summary.recommended_repair_sequence`
 - `summary.missing_artifacts`
 - `summary.skip_instead_of_retry`
-- `issues[*].repair_guidance`
-- `issues[*].recommended_repair_step`
 
-#### Repair contract
+`repair_plan`（由 `build_repair_plan(...)` 生成）当前每项字段：
+- `repair_plan[].step`
+- `repair_plan[].action_type`
+- `repair_plan[].script_command`
+- `repair_plan[].depends_on_steps`
+- `repair_plan[].expected_artifacts_after_fix`
+- `repair_plan[].revalidate_step`
 
-`repair_plan[]` 是校验失败后的主修复协议，建议按以下顺序消费：
-1. `action_types`：先判断本项属于生成产物、更新状态、跳步还是重跑校验
-2. `depends_on_steps`：确认前置修复项是否已闭合
-3. `state_patch_hint`：按建议更新状态字段
-4. `artifact_write_hint`：按建议落盘缺失产物
-5. `working_draft_context_hint`：仅消费允许的上游稳定区块与外部输入
-6. `completion_checks`：确认本修复项已经闭合
-7. `retry_command`：重跑校验
+`issues[*]` 继续沿用 `make_issue(...)` 产出的标准字段，并包含 `issues[*].repair_guidance`。
 
-字段速查：
-- `action_types`：动作类别；当前支持 `generate_artifact`、`update_state`、`skip_step`、`rerun_validation`、`investigate`
-- `depends_on_steps`：前置修复步骤
-- `generate_artifacts`：本项应补齐的产物名
-- `fix_fields`：本项涉及的状态字段
-- `state_patch_hint`：状态字段补丁建议；`operation` 支持 `set`、`set_non_empty`、`append_unique`、`update`
-- `artifact_write_hint`：产物落盘提示；包含 `artifact`、`target`、`block`、`write_mode`、`status_sync_field`、`status_sync_operation`、`summary`
-- `working_draft_context_hint`：生成产物时允许消费的 `required_blocks`、`external_inputs` 与禁止预支的 `forbidden_blocks`
-- `completion_checks`：修复闭合检查；`type` 支持 `field_equals`、`field_non_empty`、`artifact_present`、`artifact_prefix_present`、`custom`
-- `retry_command`：结构化重试命令；包含 `command`、`args`、`format`、`target_step`、`flow_tier`、`display`
-- `retry_validation`：是否应在修复后立即重跑校验
+Agent 收到失败 JSON 后，优先消费 `repair_plan[]` 与 `summary.recommended_repair_sequence`，再结合 `summary.recommended_rollback_step`、`summary.missing_artifacts`、`summary.skip_instead_of_retry` 与 `issues[*].repair_guidance` 做修复。
 
-示例：
+### run-step.py --emit-scaffold
 
-```json
-{
-  "step": 10,
-  "flow_tier": "full",
-  "passed": false,
-  "summary": {
-    "error_count": 2,
-    "recommended_rollback_step": 8,
-    "recommended_repair_sequence": [8, 9],
-    "missing_artifacts": ["WD-TASK", "WD-EXP-*"]
-  },
-  "repair_plan": [
-    {
-      "step": 8,
-      "action_types": ["generate_artifact", "update_state", "rerun_validation"],
-      "depends_on_steps": [],
-      "generate_artifacts": ["WD-TASK"],
-      "fix_fields": ["produced_artifacts"],
-      "state_patch_hint": [
-        {
-          "field": "produced_artifacts",
-          "operation": "append_unique",
-          "value": "WD-TASK",
-          "summary": "将 WD-TASK 追加到 produced_artifacts"
-        }
-      ],
-      "artifact_write_hint": [
-        {
-          "artifact": "WD-TASK",
-          "target": "working_draft",
-          "block": "WD-TASK",
-          "write_mode": "append_section",
-          "status_sync_field": "produced_artifacts",
-          "status_sync_operation": "append_unique",
-          "summary": "将 WD-TASK 写入 working draft，并同步到 produced_artifacts"
-        }
-      ],
-      "working_draft_context_hint": [
-        {
-          "artifact": "WD-TASK",
-          "required_blocks": ["WD-CTX"],
-          "external_inputs": ["current_template"],
-          "forbidden_blocks": ["WD-EXP-*", "WD-SYN", "WD-SYN-LIGHT"],
-          "summary": "生成 WD-TASK 时仅消费当前模板与已落盘 WD-CTX，不得预支下游收敛结论"
-        }
-      ],
-      "issues": ["missing_artifact"],
-      "guidance": ["先回到步骤 8，生成并写入 WD-TASK，再更新 produced_artifacts。"],
-      "completion_checks": [
-        {
-          "type": "artifact_present",
-          "artifact": "WD-TASK",
-          "summary": "WD-TASK 已生成"
-        },
-        {
-          "type": "field_equals",
-          "field": "can_enter_step_10",
-          "expected": true,
-          "summary": "can_enter_step_10 已为 true"
-        }
-      ],
-      "retry_command": {
-        "command": "python /path/to/run-step.py",
-        "args": ["--state", "<状态文件路径>"],
-        "format": "text",
-        "target_step": 10,
-        "flow_tier": "full",
-        "display": "python /path/to/run-step.py --state <状态文件路径>"
-      },
-      "retry_validation": true
-    }
-  ],
-  "issues": [
-    {
-      "code": "missing_artifact",
-      "message": "步骤 10 (full): 缺少 WD-TASK",
-      "missing_artifacts": ["WD-TASK"],
-      "recommended_rollback_step": 8,
-      "recommended_repair_step": 8,
-      "repair_guidance": "先回到步骤 8，生成并写入 WD-TASK，再更新 produced_artifacts。"
-    }
-  ]
-}
-```
+- `python /path/to/run-step.py --state <状态文件路径> --emit-scaffold`
+- 只读辅助入口：仅向 `stdout` 输出当前步骤 scaffold
+- 不是第二条写入路径
+- 不修改 state
+- 不修改 working draft
+- 不修改 receipt
+- `--emit-scaffold 与 --complete 不能同时使用`
+- scaffold 步骤选择遵循当前 auto-skip 语义（`light` 的 8/9/10、`moderate` 的 9/10 会映射到 step-10 scaffold）
 
-Agent 收到 JSON 失败结果后，应优先按上面的 repair contract 顺序消费 `repair_plan[]`，而不是只解析 stderr 文本；若仍需细化，再结合 `issues` 和 `summary` 补充判断。
+### runtime_doctor.py（运行时修复助手）
+
+- `runtime_doctor.py` 是运行时 repair helper，不是主执行路径；主路径仍是 `run-step.py`
+- 默认 `dry-run`，仅诊断和给出 `safe_fixes` 计划
+- 只有显式传 `--apply-safe-fixes` 才会修改文件
+- safe fixes 仅限结构性修复：规范目录创建、旧 working draft 路径/状态迁移、以及仅在语义安全时的 receipt 修复
+
+`runtime_doctor.py --format json` 当前 payload 顶层键：
+- `step`
+- `flow_tier`
+- `apply_safe_fixes`
+- `passed`
+- `summary`
+- `issues`
+- `repair_plan`
+- `safe_fixes`
+- `state_path`
+- `mutated`

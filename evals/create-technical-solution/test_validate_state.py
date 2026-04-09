@@ -524,6 +524,34 @@ class TestValidator:
         validator.step_11("moderate", errors)
         assert any(error["code"] == "invalid_gate_receipt" for error in errors)
 
+    def test_step_10_rejects_incomplete_receipt(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(workspace)
+        state["gate_receipt"] = {
+            "step": 10,
+            "flow_tier": "moderate",
+            "state_fingerprint": vs.compute_state_fingerprint(state),
+            "validated_at": "",
+        }
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_10("moderate", errors)
+        assert any(error["code"] == "invalid_gate_receipt" for error in errors)
+
+    def test_step_10_rejects_receipt_fingerprint_mismatch(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(workspace)
+        state["gate_receipt"] = {
+            "step": 10,
+            "flow_tier": "moderate",
+            "state_fingerprint": "stale-fingerprint",
+            "validated_at": "2026-04-08T09:31:00",
+        }
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_10("moderate", errors)
+        assert any(error["code"] == "invalid_gate_receipt" for error in errors)
+
     def test_step_3_allows_pre_extract_state(self, workspace: dict[str, Path]) -> None:
         state = make_state(
             workspace,
@@ -622,6 +650,14 @@ class TestValidator:
         validator.step_10("moderate", errors)
         assert any(error["code"] == "step_skipped_without_checkpoint" for error in errors)
 
+    def test_step_10_requires_can_enter_gate(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(workspace, can_enter_step_10=False)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_10("moderate", errors)
+        assert any(error["code"] == "gate_flag_false" and error["field"] == "can_enter_step_10" for error in errors)
+
     def test_step_10_blocks_on_pending_questions(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
         state = make_state(
@@ -673,6 +709,55 @@ class TestValidator:
         validator.step_10("moderate", errors)
         assert any(error["code"] == "missing_working_draft_block" for error in errors)
 
+    def test_step_10_reports_missing_wd_syn_fragments_from_shared_contract(self, workspace: dict[str, Path]) -> None:
+        wd_syn_contract = load_script("wd_syn_contract")
+        slot_block = "### 槽位：1.1 需求概述\n#### 候选方案对比\n"
+        workspace["working_draft_path"].write_text(
+            f"## WD-CTX\n\n## WD-TASK\n\n## WD-SYN\n\n{slot_block}",
+            encoding="utf-8",
+        )
+        state = make_state(workspace)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_10("moderate", errors)
+
+        issue = next(error for error in errors if error["code"] == "missing_working_draft_block")
+        expected = [
+            fragment
+            for fragment in wd_syn_contract.required_slot_fragments("1.1 需求概述")
+            if fragment not in slot_block and fragment != "- <本槽位要承载的能力或结论>"
+        ]
+        assert sorted(issue["missing_fragments"]) == sorted(expected)
+
+    def test_step_10_rejects_missing_full_shared_slot_contract_lines(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text(
+            "## WD-CTX\n\n### CTX-01\n\n来源\n\n## WD-TASK\n\n### 1.1 需求概述\n\n任务\n\n### 1.2 核心目标\n\n任务\n\n### 2.1 方案设计\n\n任务\n\n### 2.2 风险与验证\n\n任务\n\n## WD-SYN\n\n### 槽位：1.1 需求概述\n#### 目标能力\n- <本槽位要承载的能力或结论>\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 1.1 需求概述\n- 未决问题: <若无则写无>\n\n### 槽位：1.2 核心目标\n#### 目标能力\n- <本槽位要承载的能力或结论>\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 1.2 核心目标\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n\n### 槽位：2.1 方案设计\n#### 目标能力\n- <本槽位要承载的能力或结论>\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 2.1 方案设计\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n\n### 槽位：2.2 风险与验证\n#### 目标能力\n- <本槽位要承载的能力或结论>\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 2.2 风险与验证\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n",
+            encoding="utf-8",
+        )
+        state = make_state(workspace)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_10("moderate", errors)
+
+        issue = next(error for error in errors if error["code"] == "missing_working_draft_block")
+        assert issue["missing_fragments"] == ["- 模板承载缺口:"]
+
+    def test_step_10_rejects_empty_target_capability_section(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text(
+            "## WD-CTX\n\n### CTX-01\n\n来源\n\n## WD-TASK\n\n### 1.1 需求概述\n\n任务\n\n### 1.2 核心目标\n\n任务\n\n### 2.1 方案设计\n\n任务\n\n### 2.2 风险与验证\n\n任务\n\n## WD-SYN\n\n### 槽位：1.1 需求概述\n#### 目标能力\n\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 1.1 需求概述\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n\n### 槽位：1.2 核心目标\n#### 目标能力\n- 已填写目标\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 1.2 核心目标\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n\n### 槽位：2.1 方案设计\n#### 目标能力\n- 已填写目标\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 2.1 方案设计\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n\n### 槽位：2.2 风险与验证\n#### 目标能力\n- 已填写目标\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 2.2 风险与验证\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n",
+            encoding="utf-8",
+        )
+        state = make_state(workspace)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_10("moderate", errors)
+
+        issue = next(error for error in errors if error["code"] == "missing_working_draft_block")
+        assert issue["missing_fragments"] == ["#### 目标能力"]
+
     def test_step_10_requires_wd_syn_per_slot(self, workspace: dict[str, Path]) -> None:
         workspace["working_draft_path"].write_text(
             "## WD-CTX\n\n### CTX-01\n\n来源\n\n## WD-TASK\n\n### 1.1 需求概述\n\n任务\n\n### 1.2 核心目标\n\n任务\n\n### 2.1 方案设计\n\n任务\n\n### 2.2 风险与验证\n\n任务\n\n## WD-SYN\n\n### 槽位：1.1 需求概述\n\n#### 候选方案对比\n\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ❌ | CTX-01 | 不足 |\n| 改造 | ✅ | CTX-01 | 推荐 |\n| 新建 | ❌ | CTX-01 | 成本高 |\n\n#### 选定路径\n\n- **关键证据引用**：CTX-01\n",
@@ -695,6 +780,15 @@ class TestValidator:
         validator.step_11("moderate", errors)
         assert any(error["code"] == "invalid_final_document_path" for error in errors)
 
+    def test_step_11_accepts_canonical_absolute_final_document_path(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        workspace["final_document_path"].write_text(FINAL_DOC, encoding="utf-8")
+        state = make_state(workspace, current_step=11, final_document_path=str(workspace["final_document_path"]))
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_11("moderate", errors)
+        assert not any(error["code"] == "invalid_final_document_path" for error in errors)
+
     def test_step_11_requires_render_script_marker(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
         workspace["final_document_path"].write_text(FINAL_DOC, encoding="utf-8")
@@ -704,6 +798,15 @@ class TestValidator:
         errors: list[dict] = []
         validator.step_11("moderate", errors)
         assert any(error["code"] == "final_document_not_rendered_via_script" for error in errors)
+
+    def test_step_11_requires_can_enter_gate(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        workspace["final_document_path"].write_text(FINAL_DOC, encoding="utf-8")
+        state = make_state(workspace, current_step=11, can_enter_step_11=False)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_11("moderate", errors)
+        assert any(error["code"] == "gate_flag_false" and error["field"] == "can_enter_step_11" for error in errors)
 
     def test_step_11_rejects_absolute_working_draft_path(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)

@@ -65,14 +65,13 @@ from protocol_runtime import (
     require_receipt,
     refresh_receipt,
     render_run_step_command,
-    repo_root_from_state_path,
     run_step_base_command,
-    slug_from_state_path,
     working_draft_path_for_slug,
     workflow_default_block,
     workflow_step_card_path,
     workflow_step_name,
 )
+from runtime_snapshot import RuntimeSnapshot, load_runtime_snapshot
 
 
 def load_state(state_path: Path) -> dict[str, Any]:
@@ -110,11 +109,11 @@ def get_current_step(state: dict[str, Any]) -> int:
 
 
 def get_repo_root(state_path: Path) -> Path:
-    return repo_root_from_state_path(state_path)
+    return load_runtime_snapshot(state_path).repo_root
 
 
 def get_slug(state_path: Path) -> str:
-    return slug_from_state_path(state_path)
+    return load_runtime_snapshot(state_path).slug
 
 
 def get_step_name(step: int) -> str:
@@ -229,6 +228,16 @@ def load_advance_state_step_module() -> Any:
 @lru_cache(maxsize=1)
 def load_extract_template_snapshot_module() -> Any:
     spec = importlib.util.spec_from_file_location("create_technical_solution_extract_template_snapshot", SCRIPTS_DIR / "extract-template-snapshot.py")
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+@lru_cache(maxsize=1)
+def load_block_scaffolds_module() -> Any:
+    spec = importlib.util.spec_from_file_location("create_technical_solution_block_scaffolds", SCRIPTS_DIR / "block_scaffolds.py")
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -537,20 +546,22 @@ def extract_step_card_operations(step: int) -> str:
     return content
 
 
-def print_status(state_path: Path) -> int:
+def print_status(state_path: Path, snapshot: RuntimeSnapshot | None = None) -> int:
     """打印当前步骤状态和操作指引。"""
-    state = load_state(state_path)
+    snapshot = snapshot or load_runtime_snapshot(state_path)
+    assert snapshot is not None
+    state = snapshot.state
     if not state:
         print("=" * 60)
         print("状态文件不存在或为空。")
-        print(f"请先运行: {run_step_base_command(state_path)} --complete --summary \"<主题摘要>\" --slug <slug>")
+        print(f"请先运行: {run_step_base_command(snapshot.state_path)} --complete --summary \"<主题摘要>\" --slug <slug>")
         print("=" * 60)
         return 0
 
-    step = get_current_step(state)
-    flow_tier = get_flow_tier(state)
+    step = snapshot.current_step
+    flow_tier = snapshot.flow_tier
     completed = state.get("completed_steps", [])
-    slug = get_slug(state_path)
+    slug = snapshot.slug
 
     print("=" * 60)
     print(f"  当前步骤: {step} - {get_step_name(step)}")
@@ -560,7 +571,7 @@ def print_status(state_path: Path) -> int:
     print("=" * 60)
 
     # 运行 validator
-    passed, output = run_validator(state_path, step, flow_tier)
+    passed, output = run_validator(snapshot.state_path, step, flow_tier)
     if passed:
         print(f"\n✅ 步骤 {step} 验证通过。可以继续执行或推进到下一步。")
     else:
@@ -587,7 +598,7 @@ def print_status(state_path: Path) -> int:
     print(f"\n{'─' * 40}")
     print("📌 下一步命令：")
     print(f"{'─' * 40}")
-    _print_next_command(state_path, step, flow_tier, state)
+    _print_next_command(snapshot.state_path, step, flow_tier, state)
 
     return 0
 
@@ -611,8 +622,9 @@ def complete_step_1(state_path: Path, summary: str, slug: str | None, **_: Any) 
 
 
 def complete_step_2(state_path: Path, summary: str, **_: Any) -> tuple[int, str]:
-    state = load_state(state_path)
-    repo_root = get_repo_root(state_path)
+    snapshot = load_runtime_snapshot(state_path)
+    state = snapshot.state
+    repo_root = snapshot.repo_root
     # 检查前置文件（这是步骤 2 的核心操作）
     missing = []
     for field in ("members_path", "principles_path", "template_path"):
@@ -640,9 +652,10 @@ def complete_step_2(state_path: Path, summary: str, **_: Any) -> tuple[int, str]
 
 
 def complete_step_3(state_path: Path, summary: str, **_: Any) -> tuple[int, str]:
-    state = load_state(state_path)
-    slug = get_slug(state_path)
-    repo_root = get_repo_root(state_path)
+    snapshot = load_runtime_snapshot(state_path)
+    state = snapshot.state
+    slug = snapshot.slug
+    repo_root = snapshot.repo_root
     template_path = str(state.get("template_path") or ".architecture/templates/technical-solution-template.md")
     draft_path = str(working_draft_path_for_slug(repo_root=repo_root, slug=slug).relative_to(repo_root))
     code, stdout = extract_template_snapshot_in_process(
@@ -709,8 +722,9 @@ def complete_step_5(
 
 
 def complete_step_6(state_path: Path, summary: str, **_: Any) -> tuple[int, str]:
-    state = load_state(state_path)
-    repo_root = get_repo_root(state_path)
+    snapshot = load_runtime_snapshot(state_path)
+    state = snapshot.state
+    repo_root = snapshot.repo_root
     # 检测 repowiki
     repowiki_path = str(state.get("repowiki_path") or ".qoder/repowiki")
     repowiki_exists = (repo_root / repowiki_path).exists()
@@ -765,18 +779,24 @@ def _resolve_content_block(step: int, flow_tier: str, content_files: list[str]) 
 
 
 def complete_creative_step(
-    state_path: Path, summary: str, step: int, content_files: list[str], **_: Any,
+    state_path: Path,
+    summary: str,
+    step: int,
+    content_files: list[str],
+    snapshot: RuntimeSnapshot | None = None,
+    **_: Any,
 ) -> tuple[int, str]:
     """处理步骤 7/8/9/10 的创作型步骤。"""
     if not content_files:
         return 1, f"步骤 {step} 需要 --content-file 参数。请先将内容写入临时文件。"
-    state = load_state(state_path)
-    flow_tier = get_flow_tier(state)
+    snapshot = snapshot or load_runtime_snapshot(state_path)
+    assert snapshot is not None
+    state = snapshot.state
+    flow_tier = snapshot.flow_tier
     draft_path = str(state.get("working_draft_path") or "")
-    if not draft_path:
+    if not draft_path and step != 3:
         return 1, "working_draft_path 为空，请确保步骤 3 已完成。"
-    repo_root = get_repo_root(state_path)
-    abs_draft = (repo_root / draft_path).resolve() if not Path(draft_path).is_absolute() else Path(draft_path)
+    abs_draft = snapshot.working_draft_path
 
     blocks = _resolve_content_block(step, flow_tier, content_files)
     block_updates: list[tuple[str, Path]] = []
@@ -799,14 +819,14 @@ def complete_creative_step(
 
     results = [f"  ✓ {block_name} 已写入 working draft" for block_name, _content_path in block_updates]
     detail = "\n".join(results)
-    new_state = load_state(state_path)
-    new_step = get_current_step(new_state)
+    new_snapshot = load_runtime_snapshot(state_path)
+    new_step = new_snapshot.current_step
     return 0, f"✅ 步骤 {step} 完成。\n{detail}\n已推进到步骤 {new_step}。"
 
 
 def complete_step_skip(state_path: Path, step: int, flow_tier: str, reason: str, next_step: int, summary: str) -> tuple[int, str]:
     """处理跳步（light/moderate 流程）。"""
-    receipt_step = get_current_step(load_state(state_path))
+    receipt_step = load_runtime_snapshot(state_path).current_step
     code, stdout = mark_step_skipped_in_process(
         state_path=state_path,
         step=step,
@@ -820,9 +840,10 @@ def complete_step_skip(state_path: Path, step: int, flow_tier: str, reason: str,
     return 0, f"  ✓ 步骤 {step} 已显式跳过（{reason}）"
 
 
-def complete_step_11(state_path: Path, summary: str, **_: Any) -> tuple[int, str]:
-    state = load_state(state_path)
-    flow_tier = get_flow_tier(state)
+def complete_step_11(state_path: Path, summary: str, snapshot: RuntimeSnapshot | None = None, **_: Any) -> tuple[int, str]:
+    snapshot = snapshot or load_runtime_snapshot(state_path)
+    assert snapshot is not None
+    flow_tier = snapshot.flow_tier
     if flow_tier not in {"light", "moderate", "full"}:
         return 1, f"步骤 11 需要正式的 flow_tier（当前: {flow_tier}）。请确保步骤 4 已完成。"
     seed_checkpoint_summary(state_path, 11, summary)
@@ -836,9 +857,10 @@ def complete_step_11(state_path: Path, summary: str, **_: Any) -> tuple[int, str
     return 0, f"✅ 步骤 11 完成。最终文档已渲染。\n{stdout}"
 
 
-def complete_step_12(state_path: Path, summary: str, **_: Any) -> tuple[int, str]:
-    state = load_state(state_path)
-    flow_tier = get_flow_tier(state)
+def complete_step_12(state_path: Path, summary: str, snapshot: RuntimeSnapshot | None = None, **_: Any) -> tuple[int, str]:
+    snapshot = snapshot or load_runtime_snapshot(state_path)
+    assert snapshot is not None
+    flow_tier = snapshot.flow_tier
     if flow_tier not in {"light", "moderate", "full"}:
         return 1, f"步骤 12 需要正式的 flow_tier（当前: {flow_tier}）。"
     seed_checkpoint_summary(state_path, 12, summary)
@@ -852,15 +874,23 @@ def complete_step_12(state_path: Path, summary: str, **_: Any) -> tuple[int, str
     return 0, f"✅ 步骤 12 完成。working draft 与状态文件已清理。\n{stdout}"
 
 
-def handle_skip_steps(state_path: Path, step: int, flow_tier: str, summary: str) -> tuple[int, str]:
+def handle_skip_steps(
+    state_path: Path,
+    step: int,
+    flow_tier: str,
+    summary: str,
+    snapshot: RuntimeSnapshot | None = None,
+) -> tuple[int, str]:
     """处理进入某步骤前需要先跳过的步骤。"""
     skip_results = []
+    snapshot = snapshot or load_runtime_snapshot(state_path)
+    assert snapshot is not None
 
     if step == 10 and flow_tier == "light":
         # light: 跳过 8, 9
         for skip_step, next_s in [(8, 9), (9, 10)]:
-            state = load_state(state_path)
-            current = get_current_step(state)
+            state = snapshot.state
+            current = snapshot.current_step
             checkpoint = state.get("checkpoints", {}).get(f"step-{skip_step}", {})
             already_skipped = isinstance(checkpoint, dict) and checkpoint.get("skipped") is True
             if current >= skip_step and not already_skipped:
@@ -872,11 +902,13 @@ def handle_skip_steps(state_path: Path, step: int, flow_tier: str, summary: str)
                 if code != 0:
                     return code, msg
                 skip_results.append(msg)
+                snapshot = load_runtime_snapshot(state_path)
+                assert snapshot is not None
 
     elif step == 10 and flow_tier == "moderate":
         # moderate: 跳过 9
-        state = load_state(state_path)
-        current = get_current_step(state)
+        state = snapshot.state
+        current = snapshot.current_step
         checkpoint = state.get("checkpoints", {}).get("step-9", {})
         already_skipped = isinstance(checkpoint, dict) and checkpoint.get("skipped") is True
         if current >= 9 and not already_skipped:
@@ -894,6 +926,16 @@ def handle_skip_steps(state_path: Path, step: int, flow_tier: str, summary: str)
     return 0, ""
 
 
+def emit_scaffold(state_path: Path, members: list[str] | None = None) -> int:
+    snapshot = load_runtime_snapshot(state_path)
+    if not snapshot.state:
+        print("❌ 状态文件不存在。请先用 --slug 参数执行步骤 1。")
+        return 1
+    module = load_block_scaffolds_module()
+    print(module.emit_scaffold(snapshot, members=members or []))
+    return 0
+
+
 def complete_step(args: argparse.Namespace) -> int:
     """根据当前步骤分发到对应的 complete 处理函数。"""
     state_path = Path(args.state).resolve()
@@ -905,36 +947,39 @@ def complete_step(args: argparse.Namespace) -> int:
         print(msg)
         return code
 
-    state = load_state(state_path)
+    snapshot = load_runtime_snapshot(state_path)
+    state = snapshot.state
     if not state:
         print("❌ 状态文件不存在。请先用 --slug 参数执行步骤 1。")
         return 1
 
-    step = get_current_step(state)
-    flow_tier = get_flow_tier(state)
+    step = snapshot.current_step
+    flow_tier = snapshot.flow_tier
 
     # 自动跳步处理
     if step in {8, 9, 10} and flow_tier == "light":
-        code, msg = handle_skip_steps(state_path, 10, flow_tier, summary)
+        code, msg = handle_skip_steps(state_path, 10, flow_tier, summary, snapshot=snapshot)
         if code != 0:
             print(msg)
             return code
         if msg:
             print(msg)
-        state = load_state(state_path)
-        step = get_current_step(state)
-        flow_tier = get_flow_tier(state)
+        snapshot = load_runtime_snapshot(state_path)
+        state = snapshot.state
+        step = snapshot.current_step
+        flow_tier = snapshot.flow_tier
 
     if step in {9, 10} and flow_tier == "moderate":
-        code, msg = handle_skip_steps(state_path, 10, flow_tier, summary)
+        code, msg = handle_skip_steps(state_path, 10, flow_tier, summary, snapshot=snapshot)
         if code != 0:
             print(msg)
             return code
         if msg:
             print(msg)
-        state = load_state(state_path)
-        step = get_current_step(state)
-        flow_tier = get_flow_tier(state)
+        snapshot = load_runtime_snapshot(state_path)
+        state = snapshot.state
+        step = snapshot.current_step
+        flow_tier = snapshot.flow_tier
 
     dispatch = {
         1: lambda: complete_step_1(state_path, summary, args.slug),
@@ -948,12 +993,12 @@ def complete_step(args: argparse.Namespace) -> int:
         ),
         5: lambda: complete_step_5(state_path, summary, members=args.member),
         6: lambda: complete_step_6(state_path, summary),
-        7: lambda: complete_creative_step(state_path, summary, 7, args.content_file or []),
-        8: lambda: complete_creative_step(state_path, summary, 8, args.content_file or []),
-        9: lambda: complete_creative_step(state_path, summary, 9, args.content_file or []),
-        10: lambda: complete_creative_step(state_path, summary, 10, args.content_file or []),
-        11: lambda: complete_step_11(state_path, summary),
-        12: lambda: complete_step_12(state_path, summary),
+        7: lambda: complete_creative_step(state_path, summary, 7, args.content_file or [], snapshot=snapshot),
+        8: lambda: complete_creative_step(state_path, summary, 8, args.content_file or [], snapshot=snapshot),
+        9: lambda: complete_creative_step(state_path, summary, 9, args.content_file or [], snapshot=snapshot),
+        10: lambda: complete_creative_step(state_path, summary, 10, args.content_file or [], snapshot=snapshot),
+        11: lambda: complete_step_11(state_path, summary, snapshot=snapshot),
+        12: lambda: complete_step_12(state_path, summary, snapshot=snapshot),
     }
 
     handler = dispatch.get(step)
@@ -966,12 +1011,13 @@ def complete_step(args: argparse.Namespace) -> int:
 
     # 打印下一步提示
     if code == 0 and step < 12:
-        new_state = load_state(state_path)
-        new_step = get_current_step(new_state)
-        new_tier = get_flow_tier(new_state)
+        new_snapshot = load_runtime_snapshot(state_path)
+        new_state = new_snapshot.state
+        new_step = new_snapshot.current_step
+        new_tier = new_snapshot.flow_tier
         if new_step <= 12:
             print(f"\n📌 下一步（步骤 {new_step} - {get_step_name(new_step)}）：")
-            _print_next_command(state_path, new_step, new_tier, new_state)
+            _print_next_command(new_snapshot.state_path, new_step, new_tier, new_state)
 
     return code
 
@@ -983,6 +1029,7 @@ def main() -> int:
     )
     parser.add_argument("--state", required=True, help="状态文件路径")
     parser.add_argument("--complete", action="store_true", help="完成当前步骤并推进")
+    parser.add_argument("--emit-scaffold", action="store_true", help="输出当前步骤 scaffold 到 stdout")
     parser.add_argument("--summary", help="步骤完成摘要（--complete 时必需）")
 
     # 步骤特定参数
@@ -995,10 +1042,15 @@ def main() -> int:
 
     args = parser.parse_args()
 
+    if args.complete and args.emit_scaffold:
+        parser.error("--emit-scaffold 与 --complete 不能同时使用。")
+
     if args.complete:
         if not args.summary:
             parser.error("--complete 需要 --summary 参数。")
         return complete_step(args)
+    if args.emit_scaffold:
+        return emit_scaffold(Path(args.state).resolve(), members=args.member)
     else:
         return print_status(Path(args.state).resolve())
 
