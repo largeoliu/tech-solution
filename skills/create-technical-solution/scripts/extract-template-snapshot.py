@@ -18,7 +18,15 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from protocol_runtime import dump_yaml, iso_now, load_yaml, require_receipt
+from protocol_runtime import (
+    SOLUTION_ROOT,
+    dump_yaml,
+    iso_now,
+    load_yaml,
+    repo_root_from_state_path,
+    require_receipt,
+    working_draft_relative_path,
+)
 
 
 def normalize_text(value: str) -> str:
@@ -94,10 +102,20 @@ def update_state(
         expected_flow_tier=str(state.get("flow_tier") or "light"),
         allow_pending_flow_tier=True,
     )
-    repo_root = state_path.parents[3]
-    state["solution_root"] = str(working_draft.parent.parent.relative_to(repo_root))
+    slug = str(state.get("checkpoints", {}).get("step-1", {}).get("slug") or "").strip()
+    if not slug:
+        raise SystemExit("状态缺少 checkpoints.step-1.slug，无法派生 working_draft_path。")
+    repo_root = repo_root_from_state_path(state_path)
+    expected_working_draft = working_draft_relative_path(slug)
+    actual_working_draft = working_draft.relative_to(repo_root)
+    if actual_working_draft != expected_working_draft:
+        raise SystemExit(
+            "working draft 路径不符合协议："
+            f"期望 {expected_working_draft}，实际 {actual_working_draft}"
+        )
+    state["solution_root"] = str(SOLUTION_ROOT)
     state["template_path"] = str(template_path.relative_to(repo_root))
-    state["working_draft_path"] = str(working_draft.relative_to(repo_root))
+    state["working_draft_path"] = str(expected_working_draft)
     checkpoints = state.setdefault("checkpoints", {})
     if not isinstance(checkpoints, dict):
         checkpoints = {}

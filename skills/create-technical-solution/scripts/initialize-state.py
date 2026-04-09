@@ -16,7 +16,15 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from protocol_runtime import dump_yaml, iso_now, load_yaml, normalize_flow_tier, refresh_receipt
+from protocol_runtime import (
+    SOLUTION_ROOT,
+    dump_yaml,
+    final_document_relative_path,
+    iso_now,
+    load_yaml,
+    normalize_flow_tier,
+    refresh_receipt,
+)
 
 
 def load_or_create_state(path: Path) -> dict[str, Any]:
@@ -36,12 +44,9 @@ def initialize_state(
     slug: str,
     summary: str,
     next_step: int | None,
-    solution_root: str,
 ) -> dict[str, Any]:
     state = load_or_create_state(state_path)
 
-    solution_root_path = Path(solution_root.strip("/"))
-    final_document_path = solution_root_path / f"{slug}.md"
     current_flow_tier = normalize_flow_tier(state.get("flow_tier"), fallback="light")
 
     checkpoints = state.setdefault("checkpoints", {})
@@ -54,8 +59,8 @@ def initialize_state(
         "scope_ready": True,
         "completed_at": iso_now(),
     }
-    state["solution_root"] = str(solution_root_path)
-    state["final_document_path"] = str(final_document_path)
+    state["solution_root"] = str(SOLUTION_ROOT)
+    state["final_document_path"] = str(final_document_relative_path(slug))
     state["flow_tier"] = current_flow_tier
     pending_questions = state.setdefault("pending_questions", [])
     if not isinstance(pending_questions, list):
@@ -92,7 +97,6 @@ def main() -> int:
     parser.add_argument("--state", required=True, help="状态文件路径")
     parser.add_argument("--slug", required=True, help="方案 slug")
     parser.add_argument("--summary", required=True, help="写入 checkpoints.step-1.summary 的摘要")
-    parser.add_argument("--solution-root", default=".architecture/technical-solutions", help="最终文档根目录")
     parser.add_argument("--next-step", type=int, default=2, help="设置 current_step")
     parser.add_argument("--format", choices=["json", "text"], default="json", help="输出格式")
     args = parser.parse_args()
@@ -102,7 +106,6 @@ def main() -> int:
         slug=args.slug.strip(),
         summary=args.summary,
         next_step=args.next_step,
-        solution_root=args.solution_root,
     )
     if args.format == "json":
         print(json.dumps(payload, ensure_ascii=False, indent=2))

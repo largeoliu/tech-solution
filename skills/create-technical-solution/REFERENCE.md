@@ -5,7 +5,7 @@
 ## 产物 Schema 速查
 
 - 所有 `WD-*` 都是 **working draft 内的稳定区块**，不是独立文件名约定。状态文件中的 `produced_artifacts` 仅表示这些区块已经落盘到 `working_draft_path`。
-- `solution_root` 固定采用双读单写策略：兼容读取历史 `.architecture/solutions/`，但新 working draft 和最终文档统一写入 `.architecture/technical-solutions/`。
+- `solution_root` 固定采用双读单写策略：兼容读取历史 `.architecture/solutions/`，但新 working draft 统一写入 `.architecture/.state/create-technical-solution/`，最终文档统一写入 `.architecture/technical-solutions/`。
 - `state.yaml` 只保留流程控制字段、路径字段、gate flags、最小 checkpoint 与 cleanup 状态；不得承载正文。
 - `checkpoints.step-N.summary` 只能写单行流程摘要，不得复述 CTX、专家分析、收敛结论或详细设计正文。
 
@@ -74,15 +74,15 @@ FULL checkpoint.step-9 摘要示例：
 
 ## 验证脚本
 
-步骤 1-12 进入前必须调用验证脚本：
+对外使用时，步骤 1-12 都应先通过 `run-step.py` 查看当前门禁与修复建议：
 
 ```bash
-python scripts/validate-state.py --state <状态文件路径> --step <1-12> --flow-tier <light|moderate|full>
+python /path/to/run-step.py --state <状态文件路径>
 ```
 
-退出码：0=通过，2=门控检查失败（详见 stderr 输出与修复建议）。
-Agent 收到退出码 2 后，不应结束流程，而应先补齐缺失的 working draft 区块、修正状态字段或重建最终文档，再重新运行验证。
-也支持 `--format json` 输出结构化结果。
+`run-step.py` 内部会调用 validator；若门禁失败，不应结束流程，而应先补齐缺失的 working draft 区块、修正状态字段或重建最终文档，再重新检查。
+
+若需要调试或测试内部 validator，本文件下述 JSON contract 仍然适用，但它属于内部诊断接口，不是公开执行入口。
 
 ### JSON 输出 contract
 
@@ -194,12 +194,12 @@ Agent 收到退出码 2 后，不应结束流程，而应先补齐缺失的 work
         }
       ],
       "retry_command": {
-        "command": "python scripts/validate-state.py",
-        "args": ["--state", "<状态文件路径>", "--step", "10", "--flow-tier", "full", "--format", "json"],
-        "format": "json",
+        "command": "python /path/to/run-step.py",
+        "args": ["--state", "<状态文件路径>"],
+        "format": "text",
         "target_step": 10,
         "flow_tier": "full",
-        "display": "python scripts/validate-state.py --state <状态文件路径> --step 10 --flow-tier full --format json"
+        "display": "python /path/to/run-step.py --state <状态文件路径>"
       },
       "retry_validation": true
     }

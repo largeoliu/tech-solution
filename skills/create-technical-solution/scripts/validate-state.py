@@ -22,6 +22,12 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from protocol_runtime import compute_state_fingerprint, dump_yaml as dump_state, iso_now, load_yaml as load_state
+from protocol_runtime import (
+    SOLUTION_ROOT,
+    final_document_relative_path,
+    render_repair_command,
+    working_draft_relative_path,
+)
 
 
 ALLOWED_TOP_LEVEL_FIELDS = {
@@ -192,11 +198,11 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
     if code == "verbose_summary":
         return "将 checkpoints.step-N.summary 改为单行短摘要，只写流程结果、区块数量和 gate 状态。"
     if code == "missing_step1_scope":
-        return "回到步骤 1，通过 initialize-state.py 写入 slug、final_document_path 与最小 checkpoint。"
+        return "回到步骤 1，通过 run-step.py 重新完成定题并写入 slug 与最终文档路径。"
     if code == "missing_artifact":
         artifact = issue.get("missing_artifacts", ["未知产物"])[0]
         if artifact == "final_document":
-            return "回到步骤 11，通过 render-final-document.py 生成最终文档并写入 final_document_path。"
+            return "回到步骤 11，通过 run-step.py 完成成稿步骤并生成最终文档。"
         return f"回到步骤 {ARTIFACT_REPAIR_STEP.get(artifact, issue['step'])} 补齐 {artifact} 并同步 produced_artifacts。"
     if code == "missing_working_draft_block":
         artifact = issue.get("missing_artifacts", ["未知产物"])[0]
@@ -204,13 +210,13 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
     if code == "task_slots_incomplete":
         return "回到步骤 8，按当前模板真实槽位补齐 WD-TASK。"
     if code == "step_skipped_without_checkpoint":
-        return "通过 mark-step-skipped.py 留下显式 skip 记录，并从 completed_steps 移除该步骤。"
+        return "回到对应步骤流，通过 run-step.py 让跳步记录按协议自动落盘。"
     if code == "flow_tier_state_mismatch":
         return "回到步骤 4 重新判定 flow_tier，并同步 required_artifacts、skipped_steps 与 signals。"
     if code == "repowiki_not_consumed":
         return "回到步骤 7，实际读取并引用 repowiki，再把来源条目写入 WD-CTX。"
     if code == "invalid_working_draft_path":
-        return "回到步骤 3，重新生成 .architecture/technical-solutions/working-drafts/[slug].working.md。"
+        return "回到步骤 3，重新生成 .architecture/.state/create-technical-solution/[slug].working.md。"
     if code == "invalid_final_document_path":
         return "回到步骤 1 或 11，把 final_document_path 固定到 .architecture/technical-solutions/[slug].md。"
     if code == "final_document_headings_mismatch":
@@ -218,7 +224,7 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
     if code == "step_order_violation":
         return "回到步骤 10，先把 WD-SYN 落盘，再进入步骤 11。"
     if code == "cleanup_attempt_before_validation":
-        return "步骤 12 必须先通过 validator，再执行 finalize-cleanup.py。"
+        return "步骤 12 必须先通过门禁，再通过 run-step.py 完成清理步骤。"
     return "修复对应状态字段或草稿区块后重试。"
 
 
@@ -307,7 +313,13 @@ def build_summary(issues: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def build_repair_plan(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def build_repair_plan(
+    issues: list[dict[str, Any]],
+    *,
+    state_path: Optional[Path] = None,
+    flow_tier: str | None = None,
+    state: Optional[dict[str, Any]] = None,
+) -> list[dict[str, Any]]:
     plan: dict[int, dict[str, Any]] = {}
     for issue in issues:
         repair_step = issue.get("recommended_repair_step")
@@ -326,33 +338,21 @@ def build_repair_plan(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
         )
         code = issue["code"]
         if code in {"missing_artifact", "missing_working_draft_block", "draft_block_overwritten"}:
-            artifact = (issue.get("missing_artifacts") or [""])[0]
-            action_map = {
-                "WD-CTX": ("rewrite_wd_ctx_block", "python3 scripts/upsert-draft-block.py --block WD-CTX ..."),
-                "WD-TASK": ("rewrite_wd_task_block", "python3 scripts/upsert-draft-block.py --block WD-TASK ..."),
-                "WD-SYN": ("rewrite_wd_syn_block", "python3 scripts/upsert-draft-block.py --block WD-SYN ..."),
-                "WD-SYN-LIGHT": ("rewrite_wd_syn_block", "python3 scripts/upsert-draft-block.py --block WD-SYN-LIGHT ..."),
-                "final_document": ("rerun_render_final_document", "python3 scripts/render-final-document.py --state ... --flow-tier ... --summary ..."),
-            }
-            entry["action_type"], entry["script_command"] = action_map.get(
-                artifact,
-                ("rerun_sync_artifacts", "python3 scripts/sync-artifacts-from-draft.py --state ... --write ..."),
-            )
+            entry["action_type"] = "rerun_run_step"
             for missing in issue.get("missing_artifacts", []):
                 if missing not in entry["expected_artifacts_after_fix"]:
                     entry["expected_artifacts_after_fix"].append(missing)
-        elif code in {"invalid_working_draft_path", "template_changed_since_snapshot"}:
-            entry["action_type"] = "rerun_extract_template_snapshot"
-            entry["script_command"] = "python3 scripts/extract-template-snapshot.py --template ... --slug ... --working-draft ... --state ... --write"
-        elif code == "final_document_not_rendered_via_script":
-            entry["action_type"] = "rerun_render_final_document"
-            entry["script_command"] = "python3 scripts/render-final-document.py --state ... --flow-tier ... --summary ..."
-        elif repair_step == 12:
-            entry["action_type"] = "rerun_finalize_cleanup"
-            entry["script_command"] = "python3 scripts/finalize-cleanup.py --state ... --flow-tier ... --summary ..."
         else:
-            entry["action_type"] = "rerun_validate"
-            entry["script_command"] = "python3 scripts/validate-state.py --state ... --step ... --flow-tier ... --write-pass-receipt --format json"
+            entry["action_type"] = "rerun_run_step"
+        if state_path is not None and flow_tier is not None:
+            entry["script_command"] = render_repair_command(
+                state_path=state_path,
+                repair_step=repair_step,
+                flow_tier=flow_tier,
+                state=state,
+            )
+        else:
+            entry["script_command"] = "<通过当前安装位置的 run-step.py 重新执行对应步骤>"
     return [plan[key] for key in sorted(plan)]
 
 
@@ -644,7 +644,7 @@ class GateValidator:
     def check_working_draft_path_contract(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
         raw_path = str(self.state.get("working_draft_path") or "").strip()
         draft_path = self.working_draft_path()
-        solution_root = self.solution_root_path()
+        slug = str(self.checkpoint(1, errors, flow_tier).get("slug") or "").strip()
         require(
             draft_path is not None,
             errors,
@@ -656,16 +656,16 @@ class GateValidator:
             recommended_rollback_step=3,
             recommended_repair_step=3,
         )
-        if not draft_path or not solution_root:
+        if not draft_path or not slug:
             return
-        expected_root = (solution_root / "working-drafts").resolve()
-        valid = path_is_within(draft_path, expected_root) and draft_path.name.endswith(".working.md")
+        expected_relative = working_draft_relative_path(slug)
+        valid = draft_path == (self.repo_root / expected_relative).resolve() and draft_path.name.endswith(".working.md")
         valid = valid and not Path(raw_path).is_absolute()
         require(
             valid,
             errors,
             code="invalid_working_draft_path",
-            message=f"步骤 {step_num}: working_draft_path 必须位于 .architecture/technical-solutions/working-drafts/ 下",
+            message=f"步骤 {step_num}: working_draft_path 必须固定为 {expected_relative}",
             step=step_num,
             flow_tier=flow_tier,
             field="working_draft_path",
@@ -675,7 +675,7 @@ class GateValidator:
 
     def check_final_document_path_contract(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
         final_document = self.final_document_path()
-        solution_root = self.solution_root_path()
+        slug = str(self.checkpoint(1, errors, flow_tier).get("slug") or "").strip()
         require(
             final_document is not None,
             errors,
@@ -687,14 +687,15 @@ class GateValidator:
             recommended_rollback_step=1,
             recommended_repair_step=1,
         )
-        if not final_document or not solution_root:
+        if not final_document or not slug:
             return
-        valid = path_is_within(final_document, solution_root.resolve()) and "working-drafts" not in final_document.parts
+        expected_relative = final_document_relative_path(slug)
+        valid = final_document == (self.repo_root / expected_relative).resolve()
         require(
             valid,
             errors,
             code="invalid_final_document_path",
-            message=f"步骤 {step_num}: final_document_path 必须位于 .architecture/technical-solutions/ 下，不得写入 docs/ 等目录",
+            message=f"步骤 {step_num}: final_document_path 必须固定为 {expected_relative}",
             step=step_num,
             flow_tier=flow_tier,
             field="final_document_path",
@@ -704,10 +705,10 @@ class GateValidator:
 
     def check_solution_root_contract(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
         require(
-            str(self.state.get("solution_root") or "").strip() == ".architecture/technical-solutions",
+            str(self.state.get("solution_root") or "").strip() == str(SOLUTION_ROOT),
             errors,
             code="invalid_solution_root",
-            message=f"步骤 {step_num}: solution_root 必须固定为 .architecture/technical-solutions",
+            message=f"步骤 {step_num}: solution_root 必须固定为 {SOLUTION_ROOT}",
             step=step_num,
             flow_tier=flow_tier,
             field="solution_root",
@@ -1311,7 +1312,7 @@ class GateValidator:
                 checkpoint.get("rendered_via_script") is True,
                 errors,
                 code="final_document_not_rendered_via_script",
-                message="步骤 11: 最终文档必须通过 render-final-document.py 生成",
+                message="步骤 11: 最终文档必须通过 run-step.py 的步骤 11 流程生成",
                 step=11,
                 flow_tier=flow_tier,
                 field="checkpoints.step-11.rendered_via_script",
@@ -1347,7 +1348,7 @@ class GateValidator:
             step11.get("rendered_via_script") is True,
             errors,
             code="final_document_not_rendered_via_script",
-            message="步骤 12: 最终文档必须通过 render-final-document.py 生成",
+            message="步骤 12: 最终文档必须来自 run-step.py 的步骤 11 成稿流程",
             step=12,
             flow_tier=flow_tier,
             field="checkpoints.step-11.rendered_via_script",
@@ -1371,9 +1372,28 @@ class GateValidator:
 
 def format_issue(issue: dict[str, Any]) -> str:
     lines = [f"  ✗ {issue['message']}", f"    → 建议：{issue['repair_guidance']}"]
+    return "\n".join(lines)
+
+
+def format_issue_with_command(
+    issue: dict[str, Any],
+    *,
+    state_path: Path,
+    flow_tier: str,
+    state: dict[str, Any],
+) -> str:
+    lines = [f"  ✗ {issue['message']}", f"    → 建议：{issue['repair_guidance']}"]
     repair_step = issue.get("recommended_repair_step")
     if repair_step:
-        lines.append(f"    → 修复命令：python scripts/validate-state.py --state <状态文件> --step {repair_step} --flow-tier <tier> --write-pass-receipt --format json")
+        lines.append(
+            "    → 修复命令："
+            + render_repair_command(
+                state_path=state_path,
+                repair_step=repair_step,
+                flow_tier=flow_tier,
+                state=state,
+            )
+        )
     return "\n".join(lines)
 
 
@@ -1411,7 +1431,7 @@ def main() -> int:
             "flow_tier": args.flow_tier,
             "passed": False,
             "summary": build_summary(errors),
-            "repair_plan": build_repair_plan(errors),
+            "repair_plan": build_repair_plan(errors, state_path=state_path, flow_tier=args.flow_tier, state=state),
             "issues": errors,
         }
         if args.format == "json":
@@ -1419,7 +1439,7 @@ def main() -> int:
         else:
             print(f"步骤 {args.step} 门禁未通过:")
             for issue in errors:
-                print(format_issue(issue))
+                print(format_issue_with_command(issue, state_path=state_path, flow_tier=args.flow_tier, state=state))
         return 2
 
     payload = {"step": args.step, "flow_tier": args.flow_tier, "passed": True, "summary": {"error_count": 0}}

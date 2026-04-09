@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import importlib.util
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -17,6 +18,7 @@ scripts_path = Path(__file__).parent.parent.parent / "skills" / "create-technica
 
 def load_script(name: str):
     spec = importlib.util.spec_from_file_location(name.replace("-", "_"), scripts_path / f"{name}.py")
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -79,11 +81,10 @@ def workspace(tmp_path: Path) -> dict[str, Path]:
     state_dir = arch / ".state" / "create-technical-solution"
     template_dir = arch / "templates"
     solution_root = arch / "technical-solutions"
-    working_drafts = solution_root / "working-drafts"
 
     state_dir.mkdir(parents=True)
     template_dir.mkdir(parents=True)
-    working_drafts.mkdir(parents=True)
+    solution_root.mkdir(parents=True)
 
     template_path = template_dir / "technical-solution-template.md"
     template_path.write_text(TEMPLATE, encoding="utf-8")
@@ -100,7 +101,7 @@ def workspace(tmp_path: Path) -> dict[str, Path]:
         "members_path": members_path,
         "principles_path": principles_path,
         "solution_root": solution_root,
-        "working_draft_path": working_drafts / "sample-solution.working.md",
+        "working_draft_path": state_dir / "sample-solution.working.md",
         "final_document_path": solution_root / "sample-solution.md",
         "state_path": state_dir / "sample-solution.yaml",
         "content_file": repo / "final-content.md",
@@ -121,7 +122,7 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
         "members_path": ".architecture/members.yml",
         "principles_path": ".architecture/principles.md",
         "repowiki_path": ".qoder/repowiki",
-        "working_draft_path": ".architecture/technical-solutions/working-drafts/sample-solution.working.md",
+        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution.working.md",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
         "checkpoints": {
             "step-1": {"summary": "完成；slug=sample-solution；paths=1；gate: step-2 ready", "slug": "sample-solution", "scope_ready": True},
@@ -159,7 +160,7 @@ def write_state(workspace: dict[str, Path], state: dict) -> None:
     workspace["state_path"].write_text(vs.yaml.safe_dump(state, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
-def make_validator(state: dict, workspace: dict[str, Path]) -> vs.GateValidator:
+def make_validator(state: dict, workspace: dict[str, Path]):
     write_state(workspace, state)
     return vs.GateValidator(state, workspace["state_path"])
 
@@ -313,7 +314,6 @@ class TestScripts:
             slug="sample-solution",
             summary="完成；slug=sample-solution；paths=1；gate: step-2 ready",
             next_step=2,
-            solution_root=".architecture/technical-solutions",
         )
         state = vs.load_state(workspace["state_path"])
         assert payload["current_step"] == 2
@@ -327,7 +327,6 @@ class TestScripts:
             slug="sample-solution",
             summary="完成；slug=sample-solution；paths=1；gate: step-2 ready",
             next_step=2,
-            solution_root=".architecture/technical-solutions",
         )
         state = vs.load_state(workspace["state_path"])
         assert state["pending_questions"] == []
@@ -361,17 +360,14 @@ class TestScripts:
         content_file.write_text("### 1.1 需求概述\n\n任务\n", encoding="utf-8")
         payload = udb.upsert_block(
             working_draft_path=workspace["working_draft_path"],
-            state_path=workspace["state_path"],
             block_name="WD-TASK",
             content_path=content_file,
-            summary="完成；写入 WD-TASK；slots=1；gate: step-10 ready",
-            require_receipt_step=8,
         )
         updated = workspace["working_draft_path"].read_text(encoding="utf-8")
         refreshed = vs.load_state(workspace["state_path"])
         assert "## WD-CTX" in updated
         assert "## WD-TASK" in updated
-        assert payload["gate_receipt_step"] == 10
+        assert payload["blocks"] == ["WD-TASK"]
         assert refreshed["checkpoints"]["step-8"]["wd_task_written"] is True
 
     def test_upsert_draft_block_rejects_nested_block_heading(self, workspace: dict[str, Path]) -> None:
@@ -421,16 +417,55 @@ class TestScripts:
 
         payload = udb.upsert_block(
             working_draft_path=workspace["working_draft_path"],
-            state_path=workspace["state_path"],
             block_name="WD-EXP-SYSTEMS_ARCHITECT",
             content_path=content_file,
-            summary="完成；写入 WD-EXP-SYSTEMS_ARCHITECT；count=1；gate: step-10 ready",
-            require_receipt_step=9,
         )
 
         refreshed = vs.load_state(workspace["state_path"])
         updated = workspace["working_draft_path"].read_text(encoding="utf-8")
         assert "## WD-EXP-SYSTEMS_ARCHITECT" in updated
+        assert payload["blocks"] == ["WD-EXP-SYSTEMS_ARCHITECT"]
+        assert refreshed["checkpoints"]["step-9"]["wd_exp_count"] == 0
+        assert refreshed["can_enter_step_10"] is False
+
+    def test_upsert_draft_block_sync_requires_explicit_flag(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].write_text(
+            "# Working Draft: sample-solution\n\n## WD-CTX\n\n### CTX-01\n\n来源\n\n## WD-TASK\n\n### 1.1 需求概述\n\n任务\n",
+            encoding="utf-8",
+        )
+        state = make_state(
+            workspace,
+            current_step=9,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8],
+            skipped_steps=[],
+            flow_tier="full",
+            required_artifacts=["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"],
+            produced_artifacts=["WD-CTX", "WD-TASK"],
+            can_enter_step_9=True,
+            can_enter_step_10=False,
+        )
+        state["checkpoints"]["step-4"]["flow_tier"] = "full"
+        state["gate_receipt"] = {"step": 9, "flow_tier": "full", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+
+        content_file = workspace["repo"] / "wd-exp-systems-architect.md"
+        content_file.write_text(
+            "### 参与槽位\n- 2.1 方案设计\n\n### 决策类型\n- 改造\n\n### 核心理由\n- 复用不足，需要在现有资产上扩展。\n\n### 关键证据引用\n- CTX-01\n\n### 未决点\n- 无\n",
+            encoding="utf-8",
+        )
+
+        payload = udb.upsert_block(
+            working_draft_path=workspace["working_draft_path"],
+            state_path=workspace["state_path"],
+            block_name="WD-EXP-SYSTEMS_ARCHITECT",
+            content_path=content_file,
+            summary="完成；写入 WD-EXP-SYSTEMS_ARCHITECT；count=1；gate: step-10 ready",
+            require_receipt_step=9,
+            sync_state=True,
+        )
+
+        refreshed = vs.load_state(workspace["state_path"])
         assert payload["gate_receipt_step"] == 10
         assert refreshed["checkpoints"]["step-9"]["wd_exp_count"] == 1
         assert refreshed["can_enter_step_10"] is True
@@ -514,6 +549,25 @@ class TestValidator:
 
     def test_step_4_requires_working_draft_path(self, workspace: dict[str, Path]) -> None:
         state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3], working_draft_path="")
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_4("moderate", errors)
+        assert any(error["code"] == "invalid_working_draft_path" for error in errors)
+
+    def test_step_4_accepts_state_dir_working_draft_path(self, workspace: dict[str, Path]) -> None:
+        state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_4("moderate", errors)
+        assert not any(error["code"] == "invalid_working_draft_path" for error in errors)
+
+    def test_step_4_rejects_legacy_solution_root_working_draft_path(self, workspace: dict[str, Path]) -> None:
+        state = make_state(
+            workspace,
+            current_step=4,
+            completed_steps=[1, 2, 3],
+            working_draft_path=".architecture/technical-solutions/working-drafts/sample-solution.working.md",
+        )
         validator = make_validator(state, workspace)
         errors: list[dict] = []
         validator.step_4("moderate", errors)
@@ -745,3 +799,41 @@ class TestCleanup:
         assert payload["passed"] is True
         assert not workspace["working_draft_path"].exists()
         assert not workspace["state_path"].exists()
+
+
+def test_installed_copy_run_step_smoke(tmp_path: Path) -> None:
+    source_root = scripts_path.parent
+    installed_root = tmp_path / "create-technical-solution"
+    shutil.copytree(source_root, installed_root)
+    project_root = tmp_path / "sample-project"
+    state_path = project_root / ".architecture" / ".state" / "create-technical-solution" / "sample-solution.yaml"
+
+    result = subprocess.run(
+        [
+            "python3",
+            str(installed_root / "scripts" / "run-step.py"),
+            "--state",
+            str(state_path),
+            "--complete",
+            "--summary",
+            "定题完成",
+            "--slug",
+            "sample-solution",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert state_path.exists()
+
+    status = subprocess.run(
+        ["python3", str(installed_root / "scripts" / "run-step.py"), "--state", str(state_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert status.returncode == 0
+    assert str(installed_root / "scripts" / "run-step.py") in status.stdout

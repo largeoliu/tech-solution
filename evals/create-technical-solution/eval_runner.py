@@ -161,7 +161,6 @@ def cmd_setup_project(path: str | None = None) -> None:
     (arch / "templates").mkdir(exist_ok=True)
     (arch / ".state" / "create-technical-solution").mkdir(parents=True, exist_ok=True)
     (arch / "technical-solutions").mkdir(exist_ok=True)
-    (arch / "technical-solutions" / "working-drafts").mkdir(parents=True, exist_ok=True)
     (target / "src").mkdir(exist_ok=True)
 
     # members.yml

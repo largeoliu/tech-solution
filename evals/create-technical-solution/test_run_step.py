@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib.util
 from pathlib import Path
 
@@ -47,11 +48,10 @@ def workspace(tmp_path: Path) -> dict[str, Path]:
     state_dir = arch / ".state" / "create-technical-solution"
     template_dir = arch / "templates"
     solution_root = arch / "technical-solutions"
-    working_drafts = solution_root / "working-drafts"
 
     state_dir.mkdir(parents=True)
     template_dir.mkdir(parents=True)
-    working_drafts.mkdir(parents=True)
+    solution_root.mkdir(parents=True)
 
     template_path = template_dir / "technical-solution-template.md"
     template_path.write_text(
@@ -80,7 +80,7 @@ def workspace(tmp_path: Path) -> dict[str, Path]:
         "repo": repo,
         "arch": arch,
         "state_path": state_dir / "sample-solution.yaml",
-        "working_draft_path": working_drafts / "sample-solution.working.md",
+        "working_draft_path": state_dir / "sample-solution.working.md",
         "template_path": template_path,
         "members_path": members_path,
         "principles_path": principles_path,
@@ -103,7 +103,7 @@ def make_step9_state(workspace: dict[str, Path]) -> dict:
         "members_path": ".architecture/members.yml",
         "principles_path": ".architecture/principles.md",
         "repowiki_path": ".qoder/repowiki",
-        "working_draft_path": ".architecture/technical-solutions/working-drafts/sample-solution.working.md",
+        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution.working.md",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
         "checkpoints": {
             "step-1": {"summary": "完成；slug=sample-solution", "slug": "sample-solution", "scope_ready": True},
@@ -151,7 +151,7 @@ def make_step11_state(workspace: dict[str, Path]) -> dict:
         "members_path": ".architecture/members.yml",
         "principles_path": ".architecture/principles.md",
         "repowiki_path": ".qoder/repowiki",
-        "working_draft_path": ".architecture/technical-solutions/working-drafts/sample-solution.working.md",
+        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution.working.md",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
         "checkpoints": {
             "step-1": {"summary": "完成；slug=sample-solution", "slug": "sample-solution", "scope_ready": True},
@@ -227,7 +227,7 @@ def make_step4_state(workspace: dict[str, Path]) -> dict:
         "members_path": ".architecture/members.yml",
         "principles_path": ".architecture/principles.md",
         "repowiki_path": ".qoder/repowiki",
-        "working_draft_path": ".architecture/technical-solutions/working-drafts/sample-solution.working.md",
+        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution.working.md",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
         "checkpoints": {
             "step-1": {"summary": "主题已确定", "slug": "sample-solution", "scope_ready": True},
@@ -653,6 +653,72 @@ class TestRunStepBehavior:
         assert new_state["checkpoints"]["step-9"]["wd_exp_count"] == 1
         assert new_state["can_enter_step_10"] is True
 
+    def test_complete_creative_step_batch_step9_is_atomic_on_success(self, workspace: dict[str, Path]) -> None:
+        state = make_step9_state(workspace)
+        state["checkpoints"]["step-5"]["selected_members"] = ["systems_architect", "domain_expert"]
+        state["checkpoints"]["step-5"]["selected_member_count"] = 2
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        write_step9_draft(workspace)
+
+        first_file = workspace["repo"] / "wd-exp-systems_architect.md"
+        second_file = workspace["repo"] / "wd-exp-domain_expert.md"
+        first_file.write_text(
+            "### 参与槽位\n- 2.1 方案设计\n\n### 决策类型\n- 改造\n\n### 核心理由\n- 保持核心骨架。\n\n### 关键证据引用\n- CTX-01\n\n### 未决点\n- 无\n",
+            encoding="utf-8",
+        )
+        second_file.write_text(
+            "### 参与槽位\n- 2.2 风险与验证\n\n### 决策类型\n- 新建\n\n### 核心理由\n- 独立补强风险控制。\n\n### 关键证据引用\n- CTX-01\n\n### 未决点\n- 无\n",
+            encoding="utf-8",
+        )
+
+        code, message = run_step.complete_creative_step(
+            workspace["state_path"],
+            "专家分析完成",
+            9,
+            [str(first_file), str(second_file)],
+        )
+
+        assert code == 0, message
+        new_state = vs.load_state(workspace["state_path"])
+        updated_draft = workspace["working_draft_path"].read_text(encoding="utf-8")
+        assert new_state["current_step"] == 10
+        assert new_state["gate_receipt"]["step"] == 10
+        assert new_state["checkpoints"]["step-9"]["wd_exp_count"] == 2
+        assert updated_draft.count("## WD-EXP-") == 2
+        assert "## WD-EXP-SYSTEMS_ARCHITECT" in updated_draft
+        assert "## WD-EXP-DOMAIN_EXPERT" in updated_draft
+
+    def test_complete_creative_step_batch_step9_rolls_back_on_partial_failure(self, workspace: dict[str, Path]) -> None:
+        state = make_step9_state(workspace)
+        before_state = copy.deepcopy(state)
+        write_state(workspace, state)
+        write_step9_draft(workspace)
+        before_draft = workspace["working_draft_path"].read_text(encoding="utf-8")
+
+        valid_file = workspace["repo"] / "wd-exp-systems_architect.md"
+        invalid_file = workspace["repo"] / "wd-exp-domain_expert.md"
+        valid_file.write_text(
+            "### 参与槽位\n- 2.1 方案设计\n\n### 决策类型\n- 改造\n\n### 核心理由\n- 保持核心骨架。\n\n### 关键证据引用\n- CTX-01\n\n### 未决点\n- 无\n",
+            encoding="utf-8",
+        )
+        invalid_file.write_text(
+            "### 参与槽位\n- 2.2 风险与验证\n\n### 决策类型\n- 新建\n\n### 核心理由\n- 结构错误。\n\n## WD-EXP-OTHER\n\n### 关键证据引用\n- CTX-01\n\n### 未决点\n- 无\n",
+            encoding="utf-8",
+        )
+
+        code, message = run_step.complete_creative_step(
+            workspace["state_path"],
+            "专家分析完成",
+            9,
+            [str(valid_file), str(invalid_file)],
+        )
+
+        assert code != 0
+        assert "WD-EXP" in message or "嵌套" in message
+        assert workspace["working_draft_path"].read_text(encoding="utf-8") == before_draft
+        assert vs.load_state(workspace["state_path"]) == before_state
+
     def test_step9_rejects_nested_wd_exp_heading_in_content_file(self, workspace: dict[str, Path]) -> None:
         state = make_step9_state(workspace)
         write_state(workspace, state)
@@ -868,6 +934,21 @@ class TestRunStepBehavior:
         assert new_state["current_step"] == 4
         assert new_state["checkpoints"]["step-3"]["template_loaded"] is True
         assert workspace["working_draft_path"].exists()
+        assert new_state["working_draft_path"] == ".architecture/.state/create-technical-solution/sample-solution.working.md"
+
+    def test_print_status_shows_public_repair_hint_and_next_command(self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]) -> None:
+        state = make_step9_state(workspace)
+        state["working_draft_path"] = ".architecture/technical-solutions/working-drafts/sample-solution.working.md"
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+
+        exit_code = run_step.print_status(workspace["state_path"])
+
+        assert exit_code == 0
+        output = capsys.readouterr().out
+        assert "working_draft_path 必须固定为 .architecture/.state/create-technical-solution/sample-solution.working.md" in output
+        assert "回到步骤 3，重新生成 .architecture/.state/create-technical-solution/[slug].working.md" in output
+        assert "--complete --summary \"<专家分析完成>\" --content-file /tmp/wd-exp-systems_architect.md" in output
 
     def test_light_sample_flow_end_to_end(self, workspace: dict[str, Path]) -> None:
         ctx_file = write_content_file(workspace, "wd-ctx.md", WD_CTX_BODY)

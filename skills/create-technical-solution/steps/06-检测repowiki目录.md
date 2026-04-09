@@ -6,7 +6,7 @@
 
 ## 操作
 1. **【强制】前置条件自检**：
-   - 运行 `python scripts/validate-state.py --state <状态文件路径> --step 6 --flow-tier <flow_tier> --format json`
+   - 运行 `python /path/to/run-step.py --state <状态文件路径>` 查看当前门禁与修复建议
    - 确认步骤 5 已完成（selected_members 已写入且非空）
    - 若验证失败，按 `repair_plan[]` 修复后重试
    - 展示自检结果（通过/不通过 + 具体原因）

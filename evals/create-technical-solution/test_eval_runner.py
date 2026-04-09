@@ -1,6 +1,8 @@
 import importlib.util
 import json
 from pathlib import Path
+import shutil
+import subprocess
 
 import yaml
 
@@ -52,3 +54,35 @@ def test_cmd_fixture_uses_live_state_template(tmp_path, monkeypatch):
     assert state_template["pending_questions"] == []
     assert "blocked" not in state_template
     assert "block_reason" not in state_template
+
+
+def test_setup_project_uses_state_dir_layout(tmp_path):
+    runner = load_eval_runner()
+    target = tmp_path / "sample-project"
+
+    runner.cmd_setup_project(str(target))
+
+    assert (target / ".architecture" / ".state" / "create-technical-solution").exists()
+    assert (target / ".architecture" / "technical-solutions").exists()
+    assert not (target / ".architecture" / "technical-solutions" / "working-drafts").exists()
+
+
+def test_eval_runner_installed_copy_smoke(tmp_path):
+    install_root = tmp_path / "installed"
+    installed_eval_dir = install_root / "evals" / "create-technical-solution"
+    installed_skill_dir = install_root / "skills" / "create-technical-solution"
+    shutil.copytree(EVAL_RUNNER_PATH.parent, installed_eval_dir)
+    shutil.copytree(ROOT / "skills" / "create-technical-solution", installed_skill_dir)
+    copied_runner = installed_eval_dir / "eval_runner.py"
+
+    result = subprocess.run(
+        ["python3", str(copied_runner), "fixture", "电商平台"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=install_root,
+    )
+
+    assert result.returncode == 0
+    assert "Fixture 已生成" in result.stdout
+    assert any((installed_eval_dir / "fixtures").glob("*.json"))

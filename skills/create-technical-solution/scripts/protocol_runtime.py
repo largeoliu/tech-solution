@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import shlex
+import sys
 from functools import lru_cache
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +13,10 @@ import yaml
 
 VALID_FLOW_TIERS = {"light", "moderate", "full"}
 PROTOCOL_DIR = Path(__file__).resolve().parent.parent / "protocol"
+RUN_STEP_SCRIPT = Path(__file__).resolve().parent / "run-step.py"
+VALIDATE_STATE_SCRIPT = Path(__file__).resolve().parent / "validate-state.py"
+SOLUTION_ROOT = Path(".architecture/technical-solutions")
+STATE_ROOT = Path(".architecture/.state/create-technical-solution")
 
 
 def iso_now() -> str:
@@ -151,3 +157,119 @@ def workflow_default_block(step_id: int, flow_tier: str) -> str | None:
         return str(produces[0])
 
     return None
+
+
+def slug_from_state_path(state_path: Path) -> str:
+    return state_path.name.rsplit(".", 1)[0]
+
+
+def repo_root_from_state_path(state_path: Path) -> Path:
+    return state_path.resolve().parents[3]
+
+
+def state_root_from_repo_root(repo_root: Path) -> Path:
+    return (repo_root / STATE_ROOT).resolve()
+
+
+def working_draft_relative_path(slug: str) -> Path:
+    return STATE_ROOT / f"{slug}.working.md"
+
+
+def final_document_relative_path(slug: str) -> Path:
+    return SOLUTION_ROOT / f"{slug}.md"
+
+
+def working_draft_path_for_slug(*, repo_root: Path, slug: str) -> Path:
+    return (repo_root / working_draft_relative_path(slug)).resolve()
+
+
+def final_document_path_for_slug(*, repo_root: Path, slug: str) -> Path:
+    return (repo_root / final_document_relative_path(slug)).resolve()
+
+
+def run_step_base_command(state_path: Path) -> str:
+    python_bin = shlex.quote(sys.executable or "python3")
+    script_path = shlex.quote(str(RUN_STEP_SCRIPT.resolve()))
+    state_arg = shlex.quote(str(state_path.resolve()))
+    return f"{python_bin} {script_path} --state {state_arg}"
+
+
+def render_run_step_command(
+    *,
+    state_path: Path,
+    step: int,
+    flow_tier: str,
+    state: dict[str, Any] | None = None,
+    summary_placeholder: str = "<完成摘要>",
+) -> list[str]:
+    base = run_step_base_command(state_path)
+
+    if step == 1:
+        return [f'{base} --complete --summary "<主题摘要>" --slug <slug>']
+    if step in {2, 3, 6, 11, 12}:
+        return [f'{base} --complete --summary "{summary_placeholder}"']
+    if step == 4:
+        return [
+            f'{base} --complete --summary "<类型判定>" --flow-tier <light|moderate|full> '
+            '--solution-type "<方案类型>" --signal <信号>'
+        ]
+    if step == 5:
+        return [f'{base} --complete --summary "<成员选定>" --member <MEMBER_ID> [--member ...]']
+    if step == 7:
+        return [
+            "# 先将 WD-CTX 内容写入临时文件，然后：",
+            f'{base} --complete --summary "<WD-CTX 完成>" --content-file /tmp/wd-ctx.md',
+        ]
+    if step == 8:
+        return [
+            "# 先将 WD-TASK 内容写入临时文件，然后：",
+            f'{base} --complete --summary "<WD-TASK 完成>" --content-file /tmp/wd-task.md',
+        ]
+    if step == 9:
+        members: list[str] = []
+        if isinstance(state, dict):
+            checkpoints = state.get("checkpoints", {})
+            if isinstance(checkpoints, dict):
+                step5 = checkpoints.get("step-5", {})
+                if isinstance(step5, dict):
+                    raw_members = step5.get("selected_members", [])
+                    if isinstance(raw_members, list):
+                        members = [str(item) for item in raw_members if str(item).strip()]
+        if members:
+            files = " ".join(f"--content-file /tmp/wd-exp-{member}.md" for member in members)
+            return [
+                "# 为每位专家生成内容文件，然后一次性提交：",
+                f'{base} --complete --summary "<专家分析完成>" {files}',
+            ]
+        return [
+            "# 为每位专家生成内容文件，然后一次性提交：",
+            f'{base} --complete --summary "<专家分析完成>" --content-file /tmp/wd-exp-<MEMBER>.md',
+        ]
+    if step == 10:
+        block = "WD-SYN-LIGHT" if flow_tier == "light" else "WD-SYN"
+        return [
+            f"# 先将 {block} 内容写入临时文件，然后：",
+            f'{base} --complete --summary "<收敛完成>" --content-file /tmp/wd-syn.md',
+        ]
+    return [f'{base} --complete --summary "{summary_placeholder}"']
+
+
+def render_repair_command(
+    *,
+    state_path: Path,
+    repair_step: int,
+    flow_tier: str,
+    state: dict[str, Any] | None = None,
+) -> str:
+    commands = render_run_step_command(
+        state_path=state_path,
+        step=repair_step,
+        flow_tier=flow_tier,
+        state=state,
+        summary_placeholder="<修复摘要>",
+    )
+    for line in commands:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return stripped
+    return commands[-1]

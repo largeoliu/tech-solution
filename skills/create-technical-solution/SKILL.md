@@ -51,8 +51,8 @@ compatibility:
 
 使用 `run-step.py` 统一编排器，自动处理验证、receipt 刷新、参数推导和 step card 加载，Agent 只需关注创作工作。
 
-1. **查看任务**：`python scripts/run-step.py --state <状态文件>` → 输出当前步骤、验证状态、操作指引、下一步命令
-2. **执行并提交**：`python scripts/run-step.py --state <状态文件> --complete --summary "..." [--content-file /tmp/xxx.md]`
+1. **查看任务**：`python /path/to/run-step.py --state <状态文件>` → 输出当前步骤、验证状态、操作指引、下一步命令
+2. **执行并提交**：`python /path/to/run-step.py --state <状态文件> --complete --summary "..." [--content-file /tmp/xxx.md]`
 3. **重复**直到步骤 12 完成
 
 各步骤的完整命令示例：
@@ -70,31 +70,15 @@ compatibility:
 全自动步骤（2、3、6、11、12）无需额外输入，直接 `--complete` 即可。`light`/`moderate` 流程的跳步会自动处理。
 
 ## 状态文件初始化
-只能通过 `initialize-state.py` 初始化 `.architecture/.state/create-technical-solution/[slug].yaml`。该脚本负责在 state 缺失时自动创建文件、写入 step-1 最小 checkpoint、派生路径并刷新 receipt；不得再手工 `cp templates/_template.yaml` 后补 YAML。
+只能通过 `run-step.py` 完成步骤 1 初始化 `.architecture/.state/create-technical-solution/[slug].yaml`。它会在 state 缺失时自动创建文件、写入 step-1 最小 checkpoint、派生路径并刷新 receipt；不得再手工 `cp templates/_template.yaml` 后补 YAML。
 
-## 确定性脚本
-- `python3 scripts/run-step.py --state <状态文件> [--complete --summary "..." ...]`
-  - 统一步骤编排器，封装验证、receipt 刷新、参数推导和 step card 加载。推荐 Lite 模型使用此脚本替代手动调用下方各脚本
-- `python3 scripts/initialize-state.py --state <状态文件> --slug <slug> --summary "<步骤1摘要>" --next-step 2`
-  - 用于步骤 1，唯一负责创建 state、写入 slug 派生路径、最小 step-1 checkpoint 与最新 receipt
-- `python3 scripts/extract-template-snapshot.py --template <模板路径> --slug <slug> --working-draft <draft路径> --state <状态文件> --write`
-  - 用于步骤 3，唯一负责提取模板指纹、槽位数量、working draft 骨架，并原子推进到 step 4
-- `python3 scripts/upsert-draft-block.py --working-draft <draft路径> --state <状态文件> --block <WD-CTX|WD-TASK|WD-SYN|WD-SYN-LIGHT> --content-file <block临时文件> --summary "<步骤摘要>" --require-receipt-step <N>`
-  - 用于步骤 7/8/10，唯一负责块级更新 working draft，保留其他 `WD-*` 区块不被覆盖，并同步 checkpoint/produced_artifacts/gate flag
-  - `content-file` 只能包含目标 block 的区块体内容；不得再包含 `## WD-*`、`## Template Metadata`、`## Template Slots` 或 `# Working Draft`
-- `python scripts/sync-artifacts-from-draft.py --working-draft <draft路径> --state <状态文件> --write`
-  - 用于步骤 7-10，唯一负责把 working draft 中真实存在的稳定区块同步到 `produced_artifacts`
-- `python scripts/advance-state-step.py --state <状态文件> --step <N> --summary <摘要> --append-completed --next-step <N+1>`
-  - 只允许用于 step 2/5/6 这类纯流程推进；不得用于 step 10/11/12，也不得把它当成“跳过 validator 的强制推进器”
-- `python scripts/set-flow-tier.py --state <状态文件> --flow-tier <light|moderate|full> --solution-type "<方案类型>" --summary "<步骤4摘要>" --next-step 5 --append-completed`
-  - 用于步骤 4，原子写入 `flow_tier`、`checkpoints.step-4.flow_tier`、`required_artifacts` 与 `skipped_steps`
-  - 步骤 4 必须至少传一个 `--signal`；禁止无信号判级
-- `python scripts/mark-step-skipped.py --state <状态文件> --step <N> --summary "<跳过摘要>" --reason "<跳过原因>" --next-step <下一步>`
-  - 用于 `light` / `moderate` 的显式跳步；保证不会把跳过步骤写进 `completed_steps`
-- `python scripts/finalize-cleanup.py --state <状态文件> --flow-tier <flow_tier> --summary "<步骤12摘要>" --format json`
-  - 用于步骤 12 的唯一合法清理路径：先验证，再置标志、删除 working draft 与状态文件，并直接结束流程
-- `python scripts/render-final-document.py --state <状态文件> --flow-tier <flow_tier> --summary "<步骤11摘要>"`
-  - 用于步骤 11，唯一合法路径是直接从 working draft 的 `WD-SYN / WD-SYN-LIGHT` 渲染最终文档
+## 运行入口与内部脚本
+- `python /path/to/run-step.py --state <状态文件> [--complete --summary "..." ...]`
+  - 唯一受支持的对外入口。统一封装验证、receipt 刷新、参数推导、step card 加载、working draft 写入、最终文档成稿与清理
+- 其他脚本（如 `initialize-state.py`、`extract-template-snapshot.py`、`upsert-draft-block.py`、`set-flow-tier.py`、`advance-state-step.py`、`render-final-document.py`、`finalize-cleanup.py`）
+  - 仅保留给 `run-step.py`、测试与内部兼容流程使用；不再作为用户公开操作入口
+- 创作型步骤的 `content-file`
+  - 只能包含目标 block 的区块体内容；不得再包含 `## WD-*`、`## Template Metadata`、`## Template Slots` 或 `# Working Draft`
 
 ## 状态更新规则
 - 每步完成后写入 `checkpoints.step-N` 并追加 `completed_steps`
@@ -103,21 +87,21 @@ compatibility:
 - **正文只允许写入 working draft**：`WD-CTX`、`WD-TASK`、`WD-EXP-*`、`WD-SYN / WD-SYN-LIGHT`、`WD-IMPACT-*` 一律只存在于 working draft；共享上下文、专家判断、收敛结论、详细设计正文不得写进 state
 - **checkpoint 必须结构化且瘦身**：`checkpoints.step-N.summary` 只能写流程摘要，不得复述正文
 - **流程摘要只允许描述**：本步是否完成/跳过、写入了什么区块、区块数量/槽位数量、下一步 gate 是否齐备
-- **严禁手写 produced_artifacts**：必须以 `sync-artifacts-from-draft.py` 的结果为准，不得口头宣称某个 `WD-*` 已存在
+- **严禁手写 produced_artifacts**：必须以 `run-step.py` 在块写入后的同步结果为准，不得口头宣称某个 `WD-*` 已存在
 - **严禁把被跳过步骤记为已完成**：`light/moderate` 流程允许跳过的步骤必须写入 `skipped_steps` 与结构化 checkpoint，不得写入 `completed_steps`
-- **step-4 必须走专用脚本**：`flow_tier`、`required_artifacts`、`skipped_steps` 必须由 `set-flow-tier.py` 同步写入，禁止先推进再手改 YAML
-- **step-3 先验只检查前置，不检查产物**：步骤 3 的 validator 只确认 step 1/2、模板文件与路径前置条件；`template_fingerprint`、`slot_count`、`working_draft_path` 必须由 `extract-template-snapshot.py` 首次生成，禁止因为 step 3 校验失败而手改 state
-- **所有写状态脚本都要求 receipt**：先运行 `python scripts/validate-state.py --write-pass-receipt`，再调用 `initialize-state.py`、`extract-template-snapshot.py`、`set-flow-tier.py`、`advance-state-step.py`、`mark-step-skipped.py`、`sync-artifacts-from-draft.py`、`render-final-document.py`、`finalize-cleanup.py`
+- **step-4 必须通过 `run-step.py` 原子完成**：`flow_tier`、`required_artifacts`、`skipped_steps` 必须在同一次步骤提交中同步写入，禁止先推进再手改 YAML
+- **step-3 先验只检查前置，不检查产物**：步骤 3 的 validator 只确认 step 1/2、模板文件与路径前置条件；`template_fingerprint`、`slot_count`、`working_draft_path` 必须由 `run-step.py` 的 step-3 受控流程首次生成，禁止因为 step 3 校验失败而手改 state
+- **所有写状态动作都要求 receipt**：`run-step.py` 在进入当前步骤前必须先完成 validator 门禁并刷新 receipt；不得绕过该流程直接写 state、draft、final document 或 cleanup 结果
 - **receipt 必须跟随 current_step 原子刷新**：任何 mutating script 成功后都必须把 `gate_receipt.step` 刷新到最新 `current_step`；若 `receipt.step` 落后于 `current_step`，视为非法状态，必须停下修复，不能继续写 draft、render 或 cleanup
-- **working draft 只能块级写入**：step 7/8/10 只能通过 `upsert-draft-block.py` 更新各自 `WD-*` 区块，禁止整份覆盖 draft；任何覆盖导致旧 block 消失，视为流程失败
-- **block body 不能再带 block 标题**：传给 `upsert-draft-block.py` 的 `content-file` 只允许是区块体内容；如果再次包含 `## WD-*` 或 draft 容器标题，视为无效输入
-- **state 中路径必须相对化**：`solution_root` 固定为 `.architecture/technical-solutions`，`working_draft_path` 固定为 `.architecture/technical-solutions/working-drafts/[slug].working.md`；不得把绝对路径写回 state
+- **working draft 只能块级写入**：step 7/8/9/10 只能通过 `run-step.py` 的受控写入路径更新 `WD-*` 区块，禁止整份覆盖 draft；任何覆盖导致旧 block 消失，视为流程失败
+- **block body 不能再带 block 标题**：传给 `run-step.py --content-file` 的文件只允许是区块体内容；如果再次包含 `## WD-*` 或 draft 容器标题，视为无效输入
+- **state 中路径必须相对化**：`solution_root` 固定为 `.architecture/technical-solutions`，`working_draft_path` 固定为 `.architecture/.state/create-technical-solution/[slug].working.md`；不得把绝对路径写回 state
 - **最终文档目录固定**：`final_document_path` 只能位于 `.architecture/technical-solutions/`，不得写入 `docs/`、项目根目录或其他自定义目录
-- **目录策略固定为双读单写**：可以读取历史 `.architecture/solutions/`，但本次流程的新 working draft 与最终文档统一写入 `.architecture/technical-solutions/`
+- **目录策略固定为双读单写**：可以读取历史 `.architecture/solutions/`，但本次流程的新 working draft 统一写入 `.architecture/.state/create-technical-solution/`，最终文档统一写入 `.architecture/technical-solutions/`
 - **禁止外部脚本补状态**：不得用 inline Python、手工 Edit YAML、直接 `rm` 文件来伪造 receipt、fingerprint、checkpoint、cleanup 结果；一旦 gate fail，必须停在当前步修复脚本要求的最小前置
-- **禁止先写 final 再 render 追认**：step 11 只能由 `render-final-document.py` 成稿；不得先 `Write` 最终文档，再补跑 render 脚本
+- **禁止先写 final 再追认**：step 11 只能通过 `run-step.py` 的成稿流程生成最终文档；不得先 `Write` 最终文档，再补跑内部脚本追认
 - **render 不接受外部整文**：step 11 只能从 working draft 渲染；不得先拼 `/tmp/final-document.md` 再传给脚本
-- **cleanup 失败只允许脚本化 repair**：step 12 失败时只能重跑 `sync-artifacts-from-draft.py`、`upsert-draft-block.py`、`render-final-document.py`、`finalize-cleanup.py`；不得阅读 validator 源码逆向补字段
+- **cleanup 失败只允许脚本化 repair**：step 12 失败时只能回到 `run-step.py` 给出的修复步骤重跑；不得阅读 validator 源码逆向补字段
 - **禁止把现成 `docs/技术方案*.md` 当主路径**：若仓库内已有历史方案，只能当背景参考；不得先重写 `docs/` 再回头补 `.architecture` 流程
 
 ## 自动推进与过程证据
@@ -130,10 +114,10 @@ compatibility:
 - `full` 流程的 `WD-EXP-*` 必须是按成员拆分的独立稳定区块，例如 `WD-EXP-SYSTEMS_ARCHITECT`；不得用单个总块冒充多个专家产物。
 - 步骤 10 必须保留 `WD-SYN` 收敛区块，不得以最终文档替代——中间产物和最终文档职责不同，缺少 WD-SYN 会导致回退时无法追溯决策依据。
 - `moderate` 流程的 step-9 必须显式 skip，而不是“先推进 step-9 再口头说明直接做 step-10”。
-- 步骤 1-12 进入前必须运行 `python scripts/validate-state.py --write-pass-receipt` 验证门禁并写 receipt；若未通过，优先消费 `--format json` 返回的 `repair_plan[]`，并按其中 `action_types` 判断修复动作类别、按 `depends_on_steps` 指定的前置关系执行修复、按 `state_patch_hint` 更新状态字段、按 `artifact_write_hint` 落盘缺失产物、按 `working_draft_context_hint` 选择允许消费的上游稳定区块、按结构化 `completion_checks` 确认每项修复已闭合，并优先使用结构化 `retry_command` 重跑校验；其次再参考 `summary.recommended_repair_sequence`、`summary.recommended_rollback_step`、`summary.missing_artifacts` 与 `issues[*].repair_guidance` 后重试，直到通过后继续
+- 步骤 1-12 进入前必须先通过 `run-step.py` 触发 validator 门禁并写 receipt；若未通过，优先消费 `--format json` 返回的 `repair_plan[]`，并按其中 `action_types` 判断修复动作类别、按 `depends_on_steps` 指定的前置关系执行修复、按 `state_patch_hint` 更新状态字段、按 `artifact_write_hint` 落盘缺失产物、按 `working_draft_context_hint` 选择允许消费的上游稳定区块、按结构化 `completion_checks` 确认每项修复已闭合，并优先使用结构化 `retry_command` 重跑校验；其次再参考 `summary.recommended_repair_sequence`、`summary.recommended_rollback_step`、`summary.missing_artifacts` 与 `issues[*].repair_guidance` 后重试，直到通过后继续
 
 <HARD-GATE>
-步骤门控强制要求：步骤 1-12 进入前必须运行 `python scripts/validate-state.py --state <状态文件路径> --step <step_number> --flow-tier <flow_tier> --write-pass-receipt --format json` 验证门禁。验证脚本会检查：
+步骤门控强制要求：步骤 1-12 进入前必须先通过 `run-step.py` 触发对应步骤的 validator 门禁与 receipt 刷新。内部 validator 会检查：
 1. 状态文件字段完整性
 2. working draft 中 `WD-*` 区块与状态声明是否一致
 3. 门控标志位正确性
@@ -230,25 +214,25 @@ compatibility:
 
 | 问题 | 原因 | 解决 |
 |------|------|------|
-| validate-state.py 失败 | 状态文件缺少必需产物或步骤跳跃 | 运行 `python scripts/validate-state.py --format json`，消费 `repair_plan[]` 修复 |
+| validator 门禁失败 | 状态文件缺少必需产物或步骤跳跃 | 运行 `python /path/to/run-step.py --state <状态文件>` 查看 repair 指引，并按 `repair_plan[]` 修复 |
 | members.yml 不存在 | `.architecture/` 未初始化 | 先调用 `bootstrap-architecture` 技能 |
 | 模板文件不存在 | 模板未创建或路径错误 | 检查 `.architecture/templates/technical-solution-template.md`，缺失则调用 `manage-technical-solution-template` |
 | working draft 内容丢失 | slug 不一致导致多份草稿 | 终止当前流程，以正确 slug 重启 |
-| fingerprint 反复不一致 | 手动修改 YAML 导致 receipt 失效 | 不要使用 inline Python 修改 state；重新运行 `validate-state.py --write-pass-receipt` 获取最新 receipt |
+| fingerprint 反复不一致 | 手动修改 YAML 导致 receipt 失效 | 不要使用 inline Python 修改 state；重新运行 `python /path/to/run-step.py --state <状态文件>`，按当前步骤的 repair 指引重新生成合法 receipt |
 
 ## 相关技能
 - `bootstrap-architecture`：初始化 `.architecture/` 目录、成员名册、原则文档和技术方案模板。
 
 ## 常见陷阱
 - 步骤 2-3 的 `--flow-tier` 必须使用 `pending`，因为步骤 4 才正式判定流程级别；使用 `light` 会导致后续 receipt 中的 `flow_tier` 与步骤 4 判定结果不一致
-- validate-state.py 返回 exit code 2 时，必须使用 `--format json` 查看结构化 `repair_plan[]`，按 `action_types → depends_on_steps → state_patch_hint → artifact_write_hint → completion_checks → retry_command` 顺序消费修复建议
+- `python /path/to/run-step.py --state <状态文件>` 会给出面向执行的 repair 指引；对外流程只消费这里返回的修复建议，不要绕过 `run-step.py` 自己拼接修复动作
 - 参与成员必须来自 `.architecture/members.yml` 实际条目——虚构角色会导致步骤 9 专家分析加载失败，产出无效。
 - 步骤 9 不得模拟 `WD-EXP-*` 产出或直接跳到最终文档，必须实际加载对应专家的角色和视角
 - 步骤 8 不得只生成粗粒度章节任务单，必须按当前模板真实槽位逐项分配
 - 步骤 10、11 不得以最终文档替代 `WD-SYN` 收敛区块；中间产物和最终文档是两回事
 - 复制 state 模板后仍处于 step 1 初始态；若还没写 step-1 checkpoint、`final_document_path`、receipt，就不能开始写方案正文
 - 只读了 `members.yml` 不等于完成 step 5；只有 `checkpoints.step-5.selected_members` 真正落盘才算
-- 不得把最终文档写到 `docs/`；step 11 只允许通过 `render-final-document.py` 落盘到 `.architecture/technical-solutions/`
+- 不得把最终文档写到 `docs/`；step 11 只允许通过 `run-step.py` 的成稿流程落盘到 `.architecture/technical-solutions/`
 - 选择 `新建` 路径时，`关键证据引用` 必须覆盖不可复用和不可改造两方面证据，缺少任一项即为阻塞
 - `light` 流程不得生成 `WD-TASK` 和 `WD-EXP`，必须显式记录跳过并在 checkpoint 中注明原因
 - working draft 全流程只维护一份，若主题变化导致 slug 变化，必须终止当前流程并以新 slug 重启，不得并行保留多份草稿
@@ -256,6 +240,6 @@ compatibility:
 - 若现有模板槽位无法承载必要结论且必须改模板，必须阻塞并交由模板管理流程，不得擅自增删模板章节
 - **状态与模板指纹必须同源**：步骤 3 后如果模板被替换或修改，必须回退到步骤 3 重新提取模板指纹与 draft 骨架，不能继续沿用旧槽位定义。
 - step 11 若发生推理失败、写文件失败或标题顺序校验失败，必须停留在步骤 11 并先走 validator repair loop，禁止直接推进步骤 12。
-- step 12 只能通过 `finalize-cleanup.py` 完成；禁止手工先改 `absorption_check_passed=true`、再 `rm` 文件、再尝试推进状态。
+- step 12 只能通过 `run-step.py` 的清理流程完成；禁止手工先改 `absorption_check_passed=true`、再 `rm` 文件、再尝试推进状态。
 - 仓库里即使已有 `docs/技术方案*.md` 或其他分析 agent，也不能替代 `create-technical-solution` 主路径；最终产物仍必须落在 `.architecture/technical-solutions/`
 - 若某一步脚本失败，不得改成“一次性写完整 WD-CTX + WD-TASK + WD-SYN 再回填步骤”；这会让 receipt、checkpoint、produced_artifacts 脱节

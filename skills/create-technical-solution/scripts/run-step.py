@@ -10,28 +10,28 @@
 
 用法示例：
   # 查看当前状态
-  python scripts/run-step.py --state <状态文件>
+  python /path/to/run-step.py --state <状态文件>
 
   # 完成全自动步骤
-  python scripts/run-step.py --state <状态文件> --complete --summary "前置文件检查通过"
+  python /path/to/run-step.py --state <状态文件> --complete --summary "前置文件检查通过"
 
   # 完成半自动步骤（step 1）
-  python scripts/run-step.py --state <状态文件> --complete --summary "定题完成" --slug my-feature
+  python /path/to/run-step.py --state <状态文件> --complete --summary "定题完成" --slug my-feature
 
   # 完成半自动步骤（step 4）
-  python scripts/run-step.py --state <状态文件> --complete --summary "类型判定" \\
+  python /path/to/run-step.py --state <状态文件> --complete --summary "类型判定" \\
     --flow-tier full --solution-type "新功能方案" --signal introduces-core-capability
 
   # 完成半自动步骤（step 5）
-  python scripts/run-step.py --state <状态文件> --complete --summary "成员选定" \\
+  python /path/to/run-step.py --state <状态文件> --complete --summary "成员选定" \\
     --member SYSTEMS_ARCHITECT --member DOMAIN_EXPERT
 
   # 完成创作型步骤（step 7/8/10）
-  python scripts/run-step.py --state <状态文件> --complete --summary "WD-CTX 完成" \\
+  python /path/to/run-step.py --state <状态文件> --complete --summary "WD-CTX 完成" \\
     --content-file /tmp/wd-ctx.md
 
   # 完成创作型步骤（step 9，多文件）
-  python scripts/run-step.py --state <状态文件> --complete --summary "专家分析完成" \\
+  python /path/to/run-step.py --state <状态文件> --complete --summary "专家分析完成" \\
     --content-file /tmp/wd-exp-SYSTEMS_ARCHITECT.md \\
     --content-file /tmp/wd-exp-DOMAIN_EXPERT.md
 """
@@ -59,7 +59,20 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from protocol_runtime import refresh_receipt, workflow_default_block, workflow_step_card_path, workflow_step_name
+from protocol_runtime import (
+    dump_yaml,
+    iso_now,
+    require_receipt,
+    refresh_receipt,
+    render_run_step_command,
+    repo_root_from_state_path,
+    run_step_base_command,
+    slug_from_state_path,
+    working_draft_path_for_slug,
+    workflow_default_block,
+    workflow_step_card_path,
+    workflow_step_name,
+)
 
 
 def load_state(state_path: Path) -> dict[str, Any]:
@@ -97,11 +110,11 @@ def get_current_step(state: dict[str, Any]) -> int:
 
 
 def get_repo_root(state_path: Path) -> Path:
-    return state_path.parent.parent.parent.parent
+    return repo_root_from_state_path(state_path)
 
 
 def get_slug(state_path: Path) -> str:
-    return state_path.stem.replace(".yaml", "").replace(".yml", "")
+    return slug_from_state_path(state_path)
 
 
 def get_step_name(step: int) -> str:
@@ -237,7 +250,7 @@ def run_validator(state_path: Path, step: int, flow_tier: str, write_receipt: bo
             "flow_tier": flow_tier,
             "passed": False,
             "summary": module.build_summary(errors),
-            "repair_plan": module.build_repair_plan(errors),
+            "repair_plan": module.build_repair_plan(errors, state_path=state_path, flow_tier=flow_tier, state=state),
             "issues": errors,
         }
         return False, json.dumps(payload, ensure_ascii=False, indent=2)
@@ -274,6 +287,77 @@ def upsert_block_in_process(
     except SystemExit as exc:
         return 1, str(exc)
     return 0, json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def upsert_blocks_in_process(
+    state_path: Path,
+    working_draft_path: Path,
+    summary: str,
+    block_updates: list[tuple[str, str]],
+    *,
+    validate_step: int | None = None,
+    validate_flow_tier: str | None = None,
+) -> tuple[int, str]:
+    module = load_upsert_draft_block_module()
+    original_state_text = state_path.read_text(encoding="utf-8")
+    original_draft_text = working_draft_path.read_text(encoding="utf-8")
+    state = load_state(state_path)
+    try:
+        if validate_step is not None:
+            require_receipt(
+                state,
+                expected_step=validate_step,
+                expected_flow_tier=validate_flow_tier,
+                allow_pending_flow_tier=validate_flow_tier == "pending",
+            )
+        updated_markdown = module.render_updated_markdown(
+            working_draft_path=working_draft_path,
+            block_updates=block_updates,
+        )
+        module.apply_block_updates_to_state(state, block_updates, summary)
+        refresh_receipt(state)
+        working_draft_path.write_text(updated_markdown, encoding="utf-8")
+        dump_yaml(state_path, state)
+        if validate_step is not None and validate_flow_tier is not None:
+            passed, validator_output = run_validator(
+                state_path,
+                validate_step,
+                validate_flow_tier,
+                write_receipt=False,
+            )
+            if not passed:
+                raise RuntimeError(f"步骤 {validate_step} 验证失败:\n{validator_output}")
+    except SystemExit as exc:
+        try:
+            working_draft_path.write_text(original_draft_text, encoding="utf-8")
+        except Exception:
+            pass
+        try:
+            state_path.write_text(original_state_text, encoding="utf-8")
+        except Exception:
+            pass
+        return 1, str(exc)
+    except Exception as exc:
+        try:
+            working_draft_path.write_text(original_draft_text, encoding="utf-8")
+        except Exception:
+            pass
+        try:
+            state_path.write_text(original_state_text, encoding="utf-8")
+        except Exception:
+            pass
+        exit_code = 2 if isinstance(exc, RuntimeError) and str(exc).startswith("步骤 ") else 1
+        return exit_code, f"批量写入失败，已回滚: {exc}"
+    return 0, json.dumps(
+        {
+            "working_draft_path": str(working_draft_path),
+            "blocks": [name for name, _content in block_updates],
+            "current_step": state.get("current_step"),
+            "gate_receipt_step": state.get("gate_receipt", {}).get("step"),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 def render_final_document_in_process(state_path: Path, flow_tier: str, summary: str) -> tuple[int, str]:
@@ -388,7 +472,6 @@ def initialize_state_in_process(state_path: Path, slug: str, summary: str) -> tu
             slug=slug,
             summary=summary,
             next_step=2,
-            solution_root=".architecture/technical-solutions",
         )
     except SystemExit as exc:
         return 1, str(exc)
@@ -460,7 +543,7 @@ def print_status(state_path: Path) -> int:
     if not state:
         print("=" * 60)
         print("状态文件不存在或为空。")
-        print(f"请先运行: python scripts/run-step.py --state {state_path} --complete --summary \"<主题摘要>\" --slug <slug>")
+        print(f"请先运行: {run_step_base_command(state_path)} --complete --summary \"<主题摘要>\" --slug <slug>")
         print("=" * 60)
         return 0
 
@@ -511,38 +594,8 @@ def print_status(state_path: Path) -> int:
 
 def _print_next_command(state_path: Path, step: int, flow_tier: str, state: dict[str, Any]) -> None:
     """根据步骤类型输出推荐的 complete 命令。"""
-    base = f"python scripts/run-step.py --state {state_path}"
-
-    if step == 1:
-        print(f'{base} --complete --summary "<主题摘要>" --slug <slug>')
-    elif step in {2, 3, 6}:
-        print(f'{base} --complete --summary "<完成摘要>"')
-    elif step == 4:
-        print(f'{base} --complete --summary "<类型判定>" --flow-tier <light|moderate|full> --solution-type "<方案类型>" --signal <信号>')
-    elif step == 5:
-        print(f'{base} --complete --summary "<成员选定>" --member <MEMBER_ID> [--member ...]')
-    elif step == 7:
-        print(f"# 先将 WD-CTX 内容写入临时文件，然后：")
-        print(f'{base} --complete --summary "<WD-CTX 完成>" --content-file /tmp/wd-ctx.md')
-    elif step == 8:
-        print(f"# 先将 WD-TASK 内容写入临时文件，然后：")
-        print(f'{base} --complete --summary "<WD-TASK 完成>" --content-file /tmp/wd-task.md')
-    elif step == 9:
-        members = state.get("checkpoints", {}).get("step-5", {}).get("selected_members", [])
-        if members:
-            files = " ".join(f"--content-file /tmp/wd-exp-{m}.md" for m in members)
-            print(f"# 为每位专家生成内容文件，然后：")
-            print(f'{base} --complete --summary "<专家分析完成>" {files}')
-        else:
-            print(f'{base} --complete --summary "<专家分析完成>" --content-file /tmp/wd-exp-<MEMBER>.md')
-    elif step == 10:
-        block = "WD-SYN-LIGHT" if flow_tier == "light" else "WD-SYN"
-        print(f"# 先将 {block} 内容写入临时文件，然后：")
-        print(f'{base} --complete --summary "<收敛完成>" --content-file /tmp/wd-syn.md')
-    elif step == 11:
-        print(f'{base} --complete --summary "<成稿完成>"')
-    elif step == 12:
-        print(f'{base} --complete --summary "<清理完成>"')
+    for line in render_run_step_command(state_path=state_path, step=step, flow_tier=flow_tier, state=state):
+        print(line)
 
 
 # ── complete 模式：各步骤的实现 ──────────────────────────────
@@ -591,7 +644,7 @@ def complete_step_3(state_path: Path, summary: str, **_: Any) -> tuple[int, str]
     slug = get_slug(state_path)
     repo_root = get_repo_root(state_path)
     template_path = str(state.get("template_path") or ".architecture/templates/technical-solution-template.md")
-    draft_path = f".architecture/technical-solutions/working-drafts/{slug}.working.md"
+    draft_path = str(working_draft_path_for_slug(repo_root=repo_root, slug=slug).relative_to(repo_root))
     code, stdout = extract_template_snapshot_in_process(
         state_path=state_path,
         template_path=template_path,
@@ -726,66 +779,29 @@ def complete_creative_step(
     abs_draft = (repo_root / draft_path).resolve() if not Path(draft_path).is_absolute() else Path(draft_path)
 
     blocks = _resolve_content_block(step, flow_tier, content_files)
-    results = []
-
+    block_updates: list[tuple[str, Path]] = []
     for block_name, content_path in blocks:
         if not content_path.exists():
             return 1, f"内容文件不存在: {content_path}"
-        # 先验证并写 receipt
-        passed, output = run_validator(state_path, step, flow_tier, write_receipt=True)
-        if not passed:
-            # 尝试重新加载 state（可能已部分推进）
-            state = load_state(state_path)
-            flow_tier = get_flow_tier(state)
-            current = get_current_step(state)
-            if current != step:
-                passed, output = run_validator(state_path, current, flow_tier, write_receipt=True)
-                if not passed:
-                    return 2, f"步骤 {step} 验证失败:\n{output}"
-                step = current
+        block_updates.append((block_name, content_path))
 
-        receipt_step = get_current_step(load_state(state_path))
-        code, output = upsert_block_in_process(
-            state_path,
-            abs_draft,
-            block_name,
-            content_path,
-            summary,
-            receipt_step,
-        )
-        if code != 0:
-            return code, f"upsert-draft-block.py 失败 ({block_name}):\n{output}"
-        results.append(f"  ✓ {block_name} 已写入 working draft")
+    normalized_updates = [(block_name, content_path.read_text(encoding="utf-8").strip()) for block_name, content_path in block_updates]
+    code, output = upsert_blocks_in_process(
+        state_path,
+        abs_draft,
+        summary,
+        normalized_updates,
+        validate_step=step,
+        validate_flow_tier=flow_tier,
+    )
+    if code != 0:
+        return code, f"upsert-draft-block.py 失败:\n{output}"
 
+    results = [f"  ✓ {block_name} 已写入 working draft" for block_name, _content_path in block_updates]
     detail = "\n".join(results)
     new_state = load_state(state_path)
     new_step = get_current_step(new_state)
     return 0, f"✅ 步骤 {step} 完成。\n{detail}\n已推进到步骤 {new_step}。"
-
-
-def _refresh_receipt_inline(state: dict[str, Any]) -> None:
-    """内联刷新 receipt，避免额外 import。"""
-    import hashlib
-    flow_tier = str(state.get("flow_tier") or "").strip() or "pending"
-    step = int(state.get("current_step") or 0) or 1
-    state["gate_receipt"] = {
-        "step": step,
-        "flow_tier": flow_tier,
-        "state_fingerprint": "",
-        "validated_at": "",
-    }
-    scrubbed = dict(state)
-    scrubbed["gate_receipt"] = {
-        "step": step,
-        "flow_tier": flow_tier,
-        "state_fingerprint": "",
-        "validated_at": "",
-    }
-    payload = yaml.safe_dump(scrubbed, allow_unicode=True, sort_keys=True)
-    fp = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    from datetime import datetime, timezone
-    state["gate_receipt"]["state_fingerprint"] = fp
-    state["gate_receipt"]["validated_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def complete_step_skip(state_path: Path, step: int, flow_tier: str, reason: str, next_step: int, summary: str) -> tuple[int, str]:

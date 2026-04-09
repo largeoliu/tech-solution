@@ -79,9 +79,8 @@ def advance_state_step(
     if step >= 10:
         raise SystemExit(
             f"advance-state-step.py 不允许用于 step-{step}。"
-            " step-10 只能用 upsert-draft-block.py；"
-            " step-11 只能用 render-final-document.py；"
-            " step-12 只能用 finalize-cleanup.py。"
+            " 对外请改用 run-step.py --state <状态文件> --complete 完成 step-10/11/12；"
+            " 本脚本只保留给早期步骤和内部兼容流程使用。"
         )
 
     state = load_yaml(

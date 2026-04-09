@@ -2,7 +2,7 @@
 # requires-python = ">=3.9"
 # dependencies = ["pyyaml>=6.0"]
 # ///
-"""按 block 安全更新 working draft，并同步对应步骤状态。"""
+"""按 block 安全更新 working draft；状态同步仅用于内部兼容场景。"""
 
 from __future__ import annotations
 
@@ -110,6 +110,62 @@ def block_step(block_name: str) -> int | None:
     return STEP_FOR_BLOCK.get(block_name)
 
 
+def read_block_body(content_path: Path) -> str:
+    block_content = content_path.read_text(encoding="utf-8").strip()
+    return block_content
+
+
+def upsert_blocks_into_markdown(markdown: str, updates: list[tuple[str, str]]) -> str:
+    title_lines, blocks = extract_blocks(markdown)
+    for block_name, block_content in updates:
+        if block_step(block_name) is None:
+            raise SystemExit(f"不支持的 block: {block_name}")
+        validate_block_body(block_name, block_content)
+        blocks[block_name] = block_content
+    return compose_markdown(title_lines, blocks)
+
+
+def render_updated_markdown(
+    *,
+    working_draft_path: Path,
+    block_updates: list[tuple[str, str]],
+) -> str:
+    if not working_draft_path.exists():
+        raise SystemExit(f"working draft 不存在: {working_draft_path}")
+    return upsert_blocks_into_markdown(
+        working_draft_path.read_text(encoding="utf-8"),
+        block_updates,
+    )
+
+
+def write_blocks(
+    *,
+    working_draft_path: Path,
+    block_updates: list[tuple[str, str]],
+) -> dict[str, Any]:
+    updated_markdown = render_updated_markdown(
+        working_draft_path=working_draft_path,
+        block_updates=block_updates,
+    )
+    working_draft_path.write_text(updated_markdown, encoding="utf-8")
+    return {
+        "working_draft_path": str(working_draft_path),
+        "blocks": [name for name, _content in block_updates],
+    }
+
+
+def write_block(
+    *,
+    working_draft_path: Path,
+    block_name: str,
+    content_path: Path,
+) -> dict[str, Any]:
+    return write_blocks(
+        working_draft_path=working_draft_path,
+        block_updates=[(block_name, read_block_body(content_path))],
+    )
+
+
 def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -> None:
     checkpoints = state.setdefault("checkpoints", {})
     if not isinstance(checkpoints, dict):
@@ -198,58 +254,95 @@ def update_counts(state: dict[str, Any], block_name: str, content: str) -> None:
         checkpoints["step-10"]["syn_slot_count"] = count_slot_sections(content)
 
 
-def upsert_block(
+def sync_state_for_blocks(state: dict[str, Any], block_updates: list[tuple[str, str]], summary: str) -> None:
+    for block_name, _content in block_updates:
+        sync_state_for_block(state, block_name, summary)
+    for block_name, content in block_updates:
+        update_counts(state, block_name, content)
+
+
+def apply_block_updates_to_state(state: dict[str, Any], block_updates: list[tuple[str, str]], summary: str) -> None:
+    sync_state_for_blocks(state, block_updates, summary)
+
+
+def upsert_blocks_with_sync(
     *,
     working_draft_path: Path,
     state_path: Path,
-    block_name: str,
-    content_path: Path,
+    block_updates: list[tuple[str, Path]],
     summary: str,
     require_receipt_step: int,
 ) -> dict[str, Any]:
     state = load_yaml(state_path)
     require_receipt(state, expected_step=require_receipt_step)
-    if block_step(block_name) is None:
-        raise SystemExit(f"不支持的 block: {block_name}")
-    if not working_draft_path.exists():
-        raise SystemExit(f"working draft 不存在: {working_draft_path}")
+    normalized_updates: list[tuple[str, str]] = []
+    for block_name, content_path in block_updates:
+        if block_step(block_name) is None:
+            raise SystemExit(f"不支持的 block: {block_name}")
+        normalized_updates.append((block_name, read_block_body(content_path)))
 
-    title_lines, blocks = extract_blocks(working_draft_path.read_text(encoding="utf-8"))
-    block_content = content_path.read_text(encoding="utf-8").strip()
-    validate_block_body(block_name, block_content)
-    blocks[block_name] = block_content
-    working_draft_path.write_text(compose_markdown(title_lines, blocks), encoding="utf-8")
-
-    sync_state_for_block(state, block_name, summary)
-    update_counts(state, block_name, block_content)
+    write_payload = write_blocks(
+        working_draft_path=working_draft_path,
+        block_updates=normalized_updates,
+    )
+    sync_state_for_blocks(state, normalized_updates, summary)
     refresh_receipt(state)
     dump_yaml(state_path, state)
     return {
-        "working_draft_path": str(working_draft_path),
-        "block": block_name,
+        **write_payload,
+        "block": normalized_updates[0][0] if len(normalized_updates) == 1 else None,
         "current_step": state.get("current_step"),
         "gate_receipt_step": state["gate_receipt"]["step"],
     }
 
 
+def upsert_block(
+    *,
+    working_draft_path: Path,
+    block_name: str,
+    content_path: Path,
+    state_path: Path | None = None,
+    summary: str | None = None,
+    require_receipt_step: int | None = None,
+    sync_state: bool = False,
+) -> dict[str, Any]:
+    if not sync_state:
+        return write_block(
+            working_draft_path=working_draft_path,
+            block_name=block_name,
+            content_path=content_path,
+        )
+    if state_path is None or summary is None or require_receipt_step is None:
+        raise SystemExit("sync_state=true 时必须提供 --state、--summary、--require-receipt-step。")
+    return upsert_blocks_with_sync(
+        working_draft_path=working_draft_path,
+        state_path=state_path,
+        block_updates=[(block_name, content_path)],
+        summary=summary,
+        require_receipt_step=require_receipt_step,
+    )
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="按 block 安全更新 working draft，并同步步骤状态")
+    parser = argparse.ArgumentParser(description="按 block 安全更新 working draft")
     parser.add_argument("--working-draft", required=True, help="working draft 路径")
-    parser.add_argument("--state", required=True, help="状态文件路径")
+    parser.add_argument("--state", help="状态文件路径；仅 --sync-state 时需要")
     parser.add_argument("--block", required=True, help="待更新的 WD block")
     parser.add_argument("--content-file", required=True, help="block 内容文件")
-    parser.add_argument("--summary", required=True, help="对应步骤摘要")
-    parser.add_argument("--require-receipt-step", type=int, required=True, help="要求 gate_receipt.step 与该值一致")
+    parser.add_argument("--summary", help="对应步骤摘要；仅 --sync-state 时需要")
+    parser.add_argument("--require-receipt-step", type=int, help="要求 gate_receipt.step 与该值一致；仅 --sync-state 时需要")
+    parser.add_argument("--sync-state", action="store_true", help="内部兼容模式：同时同步状态")
     parser.add_argument("--format", choices=["json", "text"], default="json")
     args = parser.parse_args()
 
     payload = upsert_block(
         working_draft_path=Path(args.working_draft).resolve(),
-        state_path=Path(args.state).resolve(),
         block_name=args.block,
         content_path=Path(args.content_file).resolve(),
         summary=args.summary,
         require_receipt_step=args.require_receipt_step,
+        state_path=Path(args.state).resolve() if args.state else None,
+        sync_state=args.sync_state,
     )
     if args.format == "json":
         print(json.dumps(payload, ensure_ascii=False, indent=2))
