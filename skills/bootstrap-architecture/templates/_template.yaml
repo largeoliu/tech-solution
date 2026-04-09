@@ -1,10 +1,19 @@
 skill: bootstrap-architecture
 slug: ""
 current_step: 1
+final_step: 4
 step_status: pending
 started_at: ""
 updated_at: ""
 completed_steps: []
+required_artifacts:
+  - .architecture/members.yml
+  - .architecture/principles.md
+  - .architecture/templates/technical-solution-template.md
+produced_artifacts: []
+template_mode: default
+cleanup_allowed: false
+pending_questions: []
 blocked: false
 block_reason: null
 checkpoints: {}

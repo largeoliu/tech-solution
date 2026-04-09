@@ -16,6 +16,7 @@
 7. 将最终成员集合写入 `.architecture/members.yml`，严格遵循模板字段边界
 8. 将 `expert_coverage` 记录到状态文件 `checkpoints.step-2`，至少包含 `template_roles`、`custom_roles`、`signal_coverage`；每个角色条目记录其覆盖的 signals 和依据
 9. 记录汇总：模板 N 个角色中 M 个生成/X 个跳过，新增 Y 个项目特有专家，覆盖 K 个 `project_signals`
+10. `signal_coverage` 只能引用 signal 编号（如 `S1`），不能引用 `context_items` 编号（如 `C1`）；如果某个角色只能由原始上下文支撑而没有对应 signal，先回到步骤 1 补齐 signal，再继续步骤 2
 
 ### 核心原则
 - 信号驱动：成员选择必须显式响应步骤 1 的 `project_signals`
@@ -28,6 +29,7 @@
 - members.yml 严格遵循模板格式，只包含模板定义的字段：id, name, title, specialties, disciplines, skillsets, domains, perspective
 - 不包含"依据"、"sources"等模板之外的字段
 - 依据信息记录在状态文件中，不写入 members.yml
+- `signal_coverage` 只允许使用 signal 编号，不允许混入 `context_items` 编号
 
 ## 完成标准
 - .architecture/members.yml 存在

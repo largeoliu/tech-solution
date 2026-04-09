@@ -1,25 +1,29 @@
-# 步骤 4：确认技术方案模板处理并完成
+# 步骤 4：写入默认技术方案模板并完成初始化
 
 ## 输入
-- 用户关于技术方案模板定制的明确答复
+- 前三步已生成的成员、原则与状态文件
+- `templates/technical-solution-template.md`
 
 ## 操作
-1. 必须询问用户"是否要自定义技术方案模板？"
-2. 如果不要自定义：创建 .architecture/templates/ 目录并写入默认模板
-3. 如果要自定义：调用 manage-technical-solution-template 技能
-4. 展示上下文依据汇总
+1. 创建 `.architecture/templates/` 目录
+2. 写入默认模板到 `.architecture/templates/technical-solution-template.md`
+3. 在状态中记录 `template_mode: default`，并将模板文件追加到 `produced_artifacts`
+4. 写入 `checkpoints.step-4.yaml`
+5. 只有在全部 required_artifacts 已存在时，才将 `step_status` 标记为 `completed` 并设置 `cleanup_allowed: true`
+6. 展示初始化摘要，并说明如需替换默认模板，请在初始化完成后显式调用 `manage-technical-solution-template`
 
 ## 完成标准
-- 模板状态明确声明为"默认模板"或"自定义模板"
+- 默认模板已写入 `.architecture/templates/technical-solution-template.md`
+- 模板状态明确声明为 `default`
 - 上下文依据汇总已展示
-- 用户已明确回答
+- 不要求在初始化流程中额外询问用户
 
 ## 输出
-- 更新状态文件 checkpoints.step-4
-- 标记 step_status: completed
+- 更新状态文件 `checkpoints.step-4.yaml`
+- 仅在 required_artifacts 全部落盘后标记 `step_status: completed`
 
 ## 门控
-用户尚未明确回答是否自定义模板时返回 STOP_AND_ASK
+默认模板文件无法写入时返回 STOP_AND_ASK
 
 ## 回退信号
 无（最终步骤）

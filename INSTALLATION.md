@@ -38,36 +38,49 @@ Stage 1 必须先识别当前 AI 助手运行时，再将结果标准化为 `ass
 
 ### Stage 2: 安装 skills 到目标目录
 
-Stage 2 必须将仓库 `skills/` 目录下当前存在的全部一级 skill 目录完整复制到目标目录。
+Stage 2 必须将仓库 `skills/` 目录下当前存在的全部一级 skill 目录完整复制到目标目录；这些目录共同构成当前 canonical skills 集合。
 
 不要只复制后续将要执行的某一个 skill。
+
+Stage 2 不保留安装备份。
+
+Stage 2 仅替换仓库当前 canonical skills 的同名目录，不对目标目录中的额外 skill 做全量同步。
+
+若目标目录中存在与 canonical skills 同名的目录，必须先删除整个旧目录，再复制新目录，避免旧文件残留。
+
+目标目录中额外残留的旧 skill 目录不会删除；若发现这类目录，必须显式报告，供后续人工清理或单独同步。
 
 执行以下指令：
 
 ```bash
 mkdir -p "$TARGET"
-git clone https://github.com/largeoliu/tech-solution.git ./tech-solution-tmp
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "$tmp_root"' EXIT
+git clone https://github.com/largeoliu/tech-solution.git "$tmp_root/tech-solution"
 
-for skill_dir in ./tech-solution-tmp/skills/*; do
+canonical_skills=""
+
+for skill_dir in "$tmp_root"/tech-solution/skills/*; do
   [ -d "$skill_dir" ] || continue
   skill_name="$(basename "$skill_dir")"
-  if [ -d "$TARGET/$skill_name" ]; then
-    backup_dir="$TARGET/.skill-backups/$(date +%Y%m%d-%H%M%S)"
-    mkdir -p "$backup_dir"
-    mv "$TARGET/$skill_name" "$backup_dir/$skill_name"
-    echo "已备份旧 skill: $skill_name -> $backup_dir/$skill_name"
-  fi
+  canonical_skills="$canonical_skills $skill_name"
+  rm -rf "$TARGET/$skill_name"
   cp -r "$skill_dir" "$TARGET/"
-  echo "已安装/更新 skill: $skill_name"
-done
-
-for skill_dir in ./tech-solution-tmp/skills/*; do
-  [ -d "$skill_dir" ] || continue
-  skill_name="$(basename "$skill_dir")"
   [ -f "$TARGET/$skill_name/SKILL.md" ] || (echo "Missing $skill_name/SKILL.md" && exit 1)
+  echo "已替换 canonical skill: $skill_name"
 done
 
-rm -rf ./tech-solution-tmp
+for existing_dir in "$TARGET"/*; do
+  [ -d "$existing_dir" ] || continue
+  skill_name="$(basename "$existing_dir")"
+  case " $canonical_skills " in
+    *" $skill_name "*) continue ;;
+  esac
+  echo "发现额外 skill（保留未删除）: $skill_name"
+done
+
+trap - EXIT
+rm -rf "$tmp_root"
 ```
 
 ### Stage 3: 在同一次流程内转入项目初始化
@@ -86,4 +99,6 @@ rm -rf ./tech-solution-tmp
 
 - 生成 `.architecture/members.yml`，且成员集合反映当前项目所需的关键专家覆盖；当默认模板不足时，结果中包含新增的项目特有专家
 - 生成 `.architecture/principles.md`
-- 生成 `.architecture/templates/technical-solution-template.md`，在初始化结束前确认该文件最终保留默认模板还是被用户提供的完整 Markdown 整体替换
+- 自动创建 `.architecture/templates/` 并将默认模板写入 `.architecture/templates/technical-solution-template.md`
+- 仅当以上三个产物都已落盘时，初始化才算完成
+- 如需替换默认模板，在初始化完成后显式调用 `manage-technical-solution-template`；安装入口本身不在中途询问用户是否定制模板

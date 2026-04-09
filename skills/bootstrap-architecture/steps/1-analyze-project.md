@@ -8,9 +8,10 @@
 2. 形成项目上下文清单（带上下文编号）
 3. 每项结论标注来源类型（代码结构/目录语义/现有文档）和具体依据
 4. 基于项目上下文提取结构化 `project_signals`，只表达会影响后续成员或原则定制的项目事实和关键信号，不提前下成员角色结论
-5. `project_signals` 仅使用固定类别：`platform`（如 `web` / `mobile` / `backend` / `cli`）、`capability`（如 `frontend` / `data` / `ai` / `infra` / `security` / `performance` / `compliance`）、`constraint`（如 `real_time` / `high_scale` / `complex_integration`）
+5. `project_signals` 仅使用固定类别：`platform`（如 `web` / `mobile` / `backend` / `cli`）、`capability`（如 `frontend` / `data` / `ai` / `infra` / `security` / `performance` / `compliance`）、`domain`（如 `payments` / `ugc` / `workflow` / `multi_tenant`）、`constraint`（如 `real_time` / `high_scale` / `complex_integration`）
 6. 每条 signal 必须包含 signal 编号、类别、取值、依据编号；必要时补充简短说明，解释该 signal 为什么会影响后续成员或原则定制
-7. 标注哪些原则章节有依据/无依据
+7. 如果某个业务事实会影响后续成员或原则，但还停留在 `context_items`，必须先在本步骤将其提升为 `project_signals`，不能把 `context_items` 编号直接带到后续步骤中充当 signal
+8. 标注哪些原则章节有依据/无依据
 
 ## 完成标准
 - 项目上下文清单完整
