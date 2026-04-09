@@ -222,8 +222,6 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
         return "回到步骤 8，按当前模板真实槽位补齐 WD-TASK。"
     if code == "step_skipped_without_checkpoint":
         return "回到对应步骤流，通过 run-step.py 让跳步记录按协议自动落盘。"
-    if code == "flow_tier_state_mismatch":
-        return "flow_tier 已从协议中移除，无需此检查。"  # deprecated
     if code == "repowiki_not_consumed":
         return "回到步骤 7，实际读取并引用 repowiki，再把来源条目写入 WD-CTX。"
     if code == "invalid_working_draft_path":
@@ -1287,7 +1285,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="验证 create-technical-solution 状态文件")
     parser.add_argument("--state", required=True, help="状态文件路径")
     parser.add_argument("--step", type=int, required=True, help="要校验的步骤号")
-    parser.add_argument("--flow-tier", required=False, choices=["light", "moderate", "full", "pending"], help="当前流程级别（已废弃，flow_tier 已从协议中移除）")
     parser.add_argument("--format", choices=["json", "text"], default="text", help="输出格式")
     parser.add_argument("--write-pass-receipt", action="store_true", help="校验通过后写入 gate_receipt")
     args = parser.parse_args()
