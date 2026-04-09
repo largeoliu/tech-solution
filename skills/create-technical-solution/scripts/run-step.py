@@ -191,16 +191,6 @@ def load_finalize_cleanup_module() -> Any:
 
 
 @lru_cache(maxsize=1)
-def load_mark_step_skipped_module() -> Any:
-    spec = importlib.util.spec_from_file_location("create_technical_solution_mark_step_skipped", SCRIPTS_DIR / "mark-step-skipped.py")
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
-
-
-@lru_cache(maxsize=1)
 def load_advance_state_step_module() -> Any:
     spec = importlib.util.spec_from_file_location("create_technical_solution_advance_state_step", SCRIPTS_DIR / "advance-state-step.py")
     assert spec is not None
@@ -365,29 +355,6 @@ def finalize_cleanup_in_process(state_path: Path, summary: str) -> tuple[int, st
     except SystemExit as exc:
         return 1, str(exc)
     return exit_code, json.dumps(payload, ensure_ascii=False, indent=2)
-
-
-def mark_step_skipped_in_process(
-    state_path: Path,
-    step: int,
-    summary: str,
-    reason: str,
-    next_step: int,
-    require_receipt_step: int | None,
-) -> tuple[int, str]:
-    module = load_mark_step_skipped_module()
-    try:
-        payload = module.mark_step_skipped(
-            state_path=state_path,
-            step=step,
-            summary=summary,
-            reason=reason,
-            next_step=next_step,
-            require_receipt_step=require_receipt_step,
-        )
-    except SystemExit as exc:
-        return 1, str(exc)
-    return 0, json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def advance_state_step_in_process(
