@@ -62,13 +62,13 @@ compatibility:
 |------|------|
 | 1 | `--complete --summary "..." --slug <slug>` |
 | 2, 3, 6 | `--complete --summary "..."` |
-| 4 | `--complete --summary "..." --flow-tier <tier> --solution-type "..." --signal <signal>` |
+| 4 | `--complete --summary "..." --solution-type "..."` |
 | 5 | `--complete --summary "..." --member <ID> [--member ...]` |
 | 7, 8, 10 | `--complete --summary "..." --content-file /tmp/<block>.md` |
 | 9 | `--complete --summary "..." --content-file /tmp/wd-exp-<MEMBER>.md [--content-file ...]` |
 | 11, 12 | `--complete --summary "..."` |
 
-全自动步骤（2、3、6、11、12）无需额外输入，直接 `--complete` 即可。`light`/`moderate` 流程的跳步会自动处理。
+全自动步骤（2、3、6、11、12）无需额外输入，直接 `--complete` 即可。
 
 ## 状态文件初始化
 只能通过 `run-step.py` 完成步骤 1 初始化 `.architecture/.state/create-technical-solution/[slug].yaml`。它会在 state 缺失时自动创建文件、写入 step-1 最小 checkpoint、派生路径并刷新 receipt；不得再手工 `cp templates/_template.yaml` 后补 YAML。
@@ -78,9 +78,9 @@ compatibility:
   - 唯一受支持的对外入口。统一封装验证、receipt 刷新、参数推导、step card 加载、working draft 写入、最终文档成稿与清理
 - `python /path/to/run-step.py --state <状态文件> --emit-scaffold`
   - 同一入口下的只读辅助模式；仅输出 scaffold 到 `stdout`，不是第二条写入路径，也不会替代 `--complete`
-- `python /path/to/runtime_doctor.py --state <状态文件> [--step N] [--flow-tier <tier>] [--apply-safe-fixes]`
+- `python /path/to/runtime_doctor.py --state <状态文件> [--step N] [--apply-safe-fixes]`
   - 运行时 repair helper，不是主执行路径；默认 `dry-run`，只有 `--apply-safe-fixes` 才允许做结构性安全修复（规范目录、旧 draft 路径/状态迁移、语义安全的 receipt 修复）
-- 其他脚本（如 `initialize-state.py`、`extract-template-snapshot.py`、`upsert-draft-block.py`、`set-flow-tier.py`、`advance-state-step.py`、`render-final-document.py`、`finalize-cleanup.py`）
+- 其他脚本（如 `initialize-state.py`、`extract-template-snapshot.py`、`upsert-draft-block.py`、`advance-state-step.py`、`render-final-document.py`、`finalize-cleanup.py`）
   - 仅保留给 `run-step.py`、测试与内部兼容流程使用；不再作为用户公开操作入口
 - 创作型步骤的 `content-file`
   - 只能包含目标 block 的区块体内容；不得再包含 `## WD-*`、`## Template Metadata`、`## Template Slots` 或 `# Working Draft`
@@ -88,13 +88,13 @@ compatibility:
 ## 状态更新规则
 - 每步完成后写入 `checkpoints.step-N` 并追加 `completed_steps`
 - 回退时从 `completed_steps` 移除受影响步骤，重置 `current_step`
-- **state / draft 职责固定**：state 只保留 `current_step`、`completed_steps`、`skipped_steps`、`flow_tier`、`required_artifacts`、`produced_artifacts`、gate flags、路径字段、最小 checkpoint、cleanup 状态
-- **正文只允许写入 working draft**：`WD-CTX`、`WD-TASK`、`WD-EXP-*`、`WD-SYN / WD-SYN-LIGHT`、`WD-IMPACT-*` 一律只存在于 working draft；共享上下文、专家判断、收敛结论、详细设计正文不得写进 state
+- **state / draft 职责固定**：state 只保留 `current_step`、`completed_steps`、`required_artifacts`、`produced_artifacts`、gate flags、路径字段，最小 checkpoint、cleanup 状态
+- **正文只允许写入 working draft**：`WD-CTX`、`WD-TASK`、`WD-EXP-*`、`WD-SYN`、`WD-IMPACT-*` 一律只存在于 working draft；共享上下文、专家判断、收敛结论、详细设计正文不得写进 state
 - **checkpoint 必须结构化且瘦身**：`checkpoints.step-N.summary` 只能写流程摘要，不得复述正文
 - **流程摘要只允许描述**：本步是否完成/跳过、写入了什么区块、区块数量/槽位数量、下一步 gate 是否齐备
 - **严禁手写 produced_artifacts**：必须以 `run-step.py` 在块写入后的同步结果为准，不得口头宣称某个 `WD-*` 已存在
-- **严禁把被跳过步骤记为已完成**：`light/moderate` 流程允许跳过的步骤必须写入 `skipped_steps` 与结构化 checkpoint，不得写入 `completed_steps`
-- **step-4 必须通过 `run-step.py` 原子完成**：`flow_tier`、`required_artifacts`、`skipped_steps` 必须在同一次步骤提交中同步写入，禁止先推进再手改 YAML
+
+- **step-4 必须通过 `run-step.py` 原子完成**：`required_artifacts` 必须在同一次步骤提交中同步写入，禁止先推进再手改 YAML
 - **step-3 先验只检查前置，不检查产物**：步骤 3 的 validator 只确认 step 1/2、模板文件与路径前置条件；`template_fingerprint`、`slot_count`、`working_draft_path` 必须由 `run-step.py` 的 step-3 受控流程首次生成，禁止因为 step 3 校验失败而手改 state
 - **所有写状态动作都要求 receipt**：`run-step.py` 在进入当前步骤前必须先完成 validator 门禁并刷新 receipt；不得绕过该流程直接写 state、draft、final document 或 cleanup 结果
 - **receipt 必须跟随 current_step 原子刷新**：任何 mutating script 成功后都必须把 `gate_receipt.step` 刷新到最新 `current_step`；若 `receipt.step` 落后于 `current_step`，视为非法状态，必须停下修复，不能继续写 draft、render 或 cleanup
@@ -116,7 +116,7 @@ compatibility:
 - 不得仅以”已完成””已读取””已写入””已删除”等口头表述推进步骤，必须给出本步结果摘要
 - 参与成员必须来自 `.architecture/members.yml` 的实际条目——虚构角色会导致后续专家分析步骤加载不到真实视角，产出无效。
 - 步骤 9 必须实际加载对应专家的角色和视角，不得模拟 `WD-EXP-*` 产出——跳过专家分析等于跳过多视角验证，方案会遗漏关键风险。
-- `full` 流程的 `WD-EXP-*` 必须是按成员拆分的独立稳定区块，例如 `WD-EXP-SYSTEMS_ARCHITECT`；不得用单个总块冒充多个专家产物。
+- `WD-EXP-*` 必须是按成员拆分的独立稳定区块，例如 `WD-EXP-SYSTEMS_ARCHITECT`；不得用单个总块冒充多个专家产物。
 - 步骤 10 必须保留 `WD-SYN` 收敛区块，不得以最终文档替代——中间产物和最终文档职责不同，缺少 WD-SYN 会导致回退时无法追溯决策依据。
 - `moderate` 流程的 step-9 必须显式 skip，而不是“先推进 step-9 再口头说明直接做 step-10”。
 - 步骤 1-12 进入前必须先通过 `run-step.py` 触发 validator 门禁并写 receipt；若未通过，优先消费 `--format json` 返回的 `repair_plan[]`，按 `repair_plan[].step` 与 `repair_plan[].depends_on_steps` 安排修复顺序，按 `repair_plan[].action_type` 判断是否需要重跑对应步骤，并用 `repair_plan[].script_command` 作为首选重试命令；产物闭合以 `repair_plan[].expected_artifacts_after_fix` 为准，再结合 `summary.recommended_repair_sequence`、`summary.recommended_rollback_step`、`summary.missing_artifacts`、`summary.skip_instead_of_retry` 与 `issues[*].repair_guidance` 补充判断，直到通过后继续
@@ -128,25 +128,21 @@ compatibility:
 3. 门控标志位正确性
 4. 当前模板快照是否仍与 `.architecture/templates/technical-solution-template.md` 一致
 5. `WD-TASK` 是否覆盖当前模板全部槽位
-6. `full` 流程是否存在逐专家 `WD-EXP-*` 独立区块
+6. 存在逐专家 `WD-EXP-*` 独立区块
 7. step-12 前最终文档与模板槽位顺序是否一致
 8. `working_draft_path` / `final_document_path` 是否仍位于白名单目录
 
 若未通过，优先消费 `--format json` 返回的 `repair_plan[]` 修复后重试；重点看 `repair_plan[].step`、`repair_plan[].action_type`、`repair_plan[].depends_on_steps`、`repair_plan[].expected_artifacts_after_fix` 与 `repair_plan[].script_command`，并结合 `summary.*` 和 `issues[*].repair_guidance`。严禁跳过验证直接进入下一步；严禁把“我认为门控已通过”当成通过依据。
 </HARD-GATE>
 
-## 复杂度评估与流程裁剪
-- 步骤 4 必须产出 `flow_tier`，并据此决定本次流程需要的最小中间产物集合
-- `light`：适用于单模块小改动、无新建核心能力、无职责迁移、无高风险兼容性问题；最小产物为 `WD-CTX`、`WD-SYN-LIGHT`
-- `moderate`：适用于多模块协调或现有资产改造，但不涉及新建核心能力、拆分/迁移/平行建设、多系统集成或高风险兼容性改造；最小产物为 `WD-CTX`、`WD-TASK`、`WD-SYN`
-- `full`：适用于新建核心能力、拆分、迁移、平行建设、职责转移、多系统集成或高风险兼容性改造；最小产物为 `WD-CTX`、`WD-TASK`、`WD-EXP-*`、`WD-SYN`
-- 明确反例：在现有抽检系统上新增“按比例抽审能力 / 新抽样方式 / 新审核治理维度 / 新判定模式”属于 `introduces-core-capability`，必须判为 `full`
-- 任一流程级别都不得跳过本级别要求的最小产物；缺失时必须阻塞，不得成稿或清理
-- `full` 流程中的步骤 9 必须按槽位组织专家判断，不得要求每位专家完整覆盖所有槽位；步骤 10 必须支持按槽位增量收敛并落盘，避免全量中间产物滚雪球
-- step 8 必须按当前模板的真实槽位逐项生成任务单，不得只按“背景/总体设计/详细设计/测试/上线”这类粗粒度章节分配
-- `WD-TASK` 必须与模板槽位一一对应且顺序一致，不得多写 `SLOT-20`、不得把 `CTX-*` 混入任务单
-- `WD-SYN` 必须按模板槽位逐项收敛，不接受用一段“总体结论”替代逐槽位收敛
-- step 4 必须原子写入 `flow_tier`、`checkpoints.step-4.flow_tier`、`required_artifacts` 与 `skipped_steps`；不得先推进到下一步再手改 tier
+## 流程级别
+所有流程统一为 full 级别，中间产物固定为 `WD-CTX`、`WD-TASK`、`WD-EXP-*`、`WD-SYN`。
+
+明确反例：在现有抽检系统上新增"按比例抽审能力 / 新抽样方式 / 新审核治理维度 / 新判定模式"属于 `introduces-core-capability"，必须执行完整流程。
+
+step 8 必须按当前模板的真实槽位逐项生成任务单，不得只按"背景/总体设计/详细设计/测试/上线"这类粗粒度章节分配。
+`WD-TASK` 必须与模板槽位一一对应且顺序一致，不得多写 `SLOT-20`、不得把 `CTX-*` 混入任务单。
+`WD-SYN` 必须按模板槽位逐项收敛，不接受用一段"总体结论"替代逐槽位收敛。
 
 ## 中间产物文档完整性
 - 一次流程只维护一份 working draft；其 slug 必须与最终技术方案文件一致。若主题变化导致 slug 变化，必须终止当前流程并以新 slug 重启，不得并行保留多份草稿
@@ -155,7 +151,7 @@ compatibility:
 - working draft 只保存稳定、可复用、可回退的结论，不保存 scratchpad、原始推理片段或临时口径
 - 回退或重进时，必须先写 `WD-IMPACT-[n]`；已失效内容必须显式标注作废范围，无可复用内容时 `保持有效内容` 写 `无`
 - 状态文件中的 `required_artifacts` 与 `produced_artifacts` 是流程推进的唯一产物依据；不得以口头描述替代产物存在性
-- 凡 `required_artifacts` 未齐、`pending_questions` 未清空、`absorption_check_passed = false`、存在未解决阻塞槽位，或存在未经 `flow_tier` 明确允许的跳步时，禁止清理 working draft 和状态文件
+- 凡 `required_artifacts` 未齐、`pending_questions` 未清空、`absorption_check_passed = false`、或存在未解决阻塞槽位时，禁止清理 working draft 和状态文件
 
 ## 回退规则
 收到用户变更后先写 `WD-IMPACT-[n]`，再回到最早受影响步骤：
@@ -174,7 +170,7 @@ compatibility:
 
 <HARD-GATE>
 最终成稿门控：步骤 11 完成前不得生成最终文档。必须满足以下全部条件才可进入步骤 11：
-1. 所有非阻塞槽位均已写入 WD-SYN 或 WD-SYN-LIGHT 收敛产物
+1. 所有非阻塞槽位均已写入 WD-SYN 收敛产物
 2. 所有新建结论的关键证据引用已覆盖不可复用、不可改造与新建必要性说明
 3. 不存在未解决的模板承载缺口
 4. validate-state.py 步骤 11 门控检查通过（退出码 0）
@@ -229,7 +225,7 @@ compatibility:
 - `bootstrap-architecture`：初始化 `.architecture/` 目录、成员名册、原则文档和技术方案模板。
 
 ## 常见陷阱
-- 步骤 2-3 的 `--flow-tier` 必须使用 `pending`，因为步骤 4 才正式判定流程级别；使用 `light` 会导致后续 receipt 中的 `flow_tier` 与步骤 4 判定结果不一致
+
 - `python /path/to/run-step.py --state <状态文件>` 会给出面向执行的 repair 指引；对外流程只消费这里返回的修复建议，不要绕过 `run-step.py` 自己拼接修复动作
 - 参与成员必须来自 `.architecture/members.yml` 实际条目——虚构角色会导致步骤 9 专家分析加载失败，产出无效。
 - 步骤 9 不得模拟 `WD-EXP-*` 产出或直接跳到最终文档，必须实际加载对应专家的角色和视角
@@ -239,7 +235,7 @@ compatibility:
 - 只读了 `members.yml` 不等于完成 step 5；只有 `checkpoints.step-5.selected_members` 真正落盘才算
 - 不得把最终文档写到 `docs/`；step 11 只允许通过 `run-step.py` 的成稿流程落盘到 `.architecture/technical-solutions/`
 - 选择 `新建` 路径时，`关键证据引用` 必须覆盖不可复用和不可改造两方面证据，缺少任一项即为阻塞
-- `light` 流程不得生成 `WD-TASK` 和 `WD-EXP`，必须显式记录跳过并在 checkpoint 中注明原因
+
 - working draft 全流程只维护一份，若主题变化导致 slug 变化，必须终止当前流程并以新 slug 重启，不得并行保留多份草稿
 - 不得以"更清晰""更优雅"等空泛表述替代代码证据——这些主观判断无法验证，且容易跳过实际的代码搜索，导致方案建立在假设而非事实上。
 - 若现有模板槽位无法承载必要结论且必须改模板，必须阻塞并交由模板管理流程，不得擅自增删模板章节

@@ -75,7 +75,7 @@ def extract_syn_sections(block: str) -> dict[str, str]:
     return sections
 
 
-def render_from_draft(state_path: Path, flow_tier: str) -> str:
+def render_from_draft(state_path: Path) -> str:
     state = load_yaml(state_path)
     draft_value = str(state.get("working_draft_path") or "").strip()
     if not draft_value:
@@ -95,7 +95,7 @@ def render_from_draft(state_path: Path, flow_tier: str) -> str:
         raise SystemExit(f"模板不存在: {template_path}")
 
     draft_content = draft_path.read_text(encoding="utf-8")
-    syn_block_name = "WD-SYN-LIGHT" if flow_tier == "light" else "WD-SYN"
+    syn_block_name = "WD-SYN"
     syn_block = extract_named_block(draft_content, syn_block_name)
     if not syn_block:
         raise SystemExit(f"{syn_block_name} 区块不存在，无法渲染最终文档。")
@@ -122,12 +122,11 @@ def render_from_draft(state_path: Path, flow_tier: str) -> str:
 def render_final_document(
     *,
     state_path: Path,
-    flow_tier: str,
     content_path: Path | None,
     summary: str,
 ) -> dict[str, Any]:
     state = load_yaml(state_path)
-    require_receipt(state, expected_step=11, expected_flow_tier=flow_tier)
+    require_receipt(state, expected_step=11)
     final_document_value = str(state.get("final_document_path") or "").strip()
     if not final_document_value:
         raise SystemExit("final_document_path 为空，必须先在步骤 1 生成最终文档路径。")
@@ -141,7 +140,7 @@ def render_final_document(
     if content_path is not None:
         content = content_path.read_text(encoding="utf-8")
     else:
-        content = render_from_draft(state_path, flow_tier)
+        content = render_from_draft(state_path)
     final_document_path.parent.mkdir(parents=True, exist_ok=True)
     final_document_path.write_text(content, encoding="utf-8")
 
@@ -165,7 +164,7 @@ def render_final_document(
         completed.append(11)
         completed.sort()
     state["current_step"] = 12
-    refresh_receipt(state, flow_tier=flow_tier, default_step=12, default_flow_tier=flow_tier)
+    refresh_receipt(state, default_step=12)
     dump_yaml(state_path, state)
     return {
         "final_document_path": str(final_document_path),
@@ -178,14 +177,12 @@ def render_final_document(
 def main() -> int:
     parser = argparse.ArgumentParser(description="步骤 11 的唯一合法成稿路径")
     parser.add_argument("--state", required=True, help="状态文件路径")
-    parser.add_argument("--flow-tier", choices=["light", "moderate", "full"], required=True, help="流程级别")
     parser.add_argument("--summary", required=True, help="写入 checkpoints.step-11.summary 的摘要")
     parser.add_argument("--format", choices=["json", "text"], default="json", help="输出格式")
     args = parser.parse_args()
 
     payload = render_final_document(
         state_path=Path(args.state).resolve(),
-        flow_tier=args.flow_tier,
         content_path=None,
         summary=args.summary,
     )

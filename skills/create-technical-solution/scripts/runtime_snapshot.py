@@ -22,7 +22,6 @@ from protocol_runtime import (
 )
 
 
-VALID_RUNTIME_FLOW_TIERS = {"light", "moderate", "full", "pending"}
 DEFAULT_TEMPLATE_PATH = Path(".architecture/templates/technical-solution-template.md")
 
 
@@ -33,15 +32,9 @@ class RuntimeSnapshot:
     slug: str
     state: dict[str, Any]
     current_step: int
-    flow_tier: str
     working_draft_path: Path
     template_path: Path
     final_document_path: Path
-
-
-def runtime_flow_tier(state: dict[str, Any]) -> str:
-    tier = str(state.get("flow_tier") or "").strip()
-    return tier if tier in VALID_RUNTIME_FLOW_TIERS else "pending"
 
 
 def load_runtime_snapshot(state_path: Path) -> RuntimeSnapshot:
@@ -76,7 +69,6 @@ def load_runtime_snapshot(state_path: Path) -> RuntimeSnapshot:
         slug=slug,
         state=state,
         current_step=int(state.get("current_step") or 1),
-        flow_tier=runtime_flow_tier(state),
         working_draft_path=working_draft_path,
         template_path=template_path,
         final_document_path=final_document_path,

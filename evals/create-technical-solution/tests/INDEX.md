@@ -2,14 +2,14 @@
 
 ## 正向用例 (T01-T06)
 
-| ID | 文件 | 描述 | flow_tier |
-|----|------|------|-----------|
-| T01 | T01-full-新增订单支付模块.md | 完整流程：新增订单支付模块 | full |
-| T02 | T02-light-单模块小改动.md | 单模块小改动：用户模块加邮箱字段 | light |
-| T03 | T03-moderate-鉴权重构.md | 多模块协调：Session 鉴权重构为 JWT | moderate |
-| T04 | T04-full-repowiki-多租户数据隔离.md | full + repowiki 存在：多租户数据隔离 | full |
-| T05 | T05-moderate-repowiki-不存在-缓存层.md | moderate + repowiki 不存在：新增缓存层 | moderate |
-| T06 | T06-full-服务拆分.md | 拆分服务：通知服务拆为消息网关+推送 | full |
+| ID | 文件 | 描述 |
+|----|------|------|
+| T01 | T01-full-新增订单支付模块.md | 完整流程：新增订单支付模块 |
+| T02 | T02-light-单模块小改动.md | 单模块小改动：用户模块加邮箱字段 |
+| T03 | T03-moderate-鉴权重构.md | 多模块协调：Session 鉴权重构为 JWT |
+| T04 | T04-full-repowiki-多租户数据隔离.md | full + repowiki 存在：多租户数据隔离 |
+| T05 | T05-moderate-repowiki-不存在-缓存层.md | moderate + repowiki 不存在：新增缓存层 |
+| T06 | T06-full-服务拆分.md | 拆分服务：通知服务拆为消息网关+推送 |
 
 ## 边缘用例 (E01-E06)
 

@@ -17,20 +17,9 @@
 - A04.2: repowiki 不替代 CTX
 - A06.2: 新建路径双重否定（不可复用+不可改造）
 
-### 2. Flow Tier 判定 (4 条)
-- A01.6: full/moderate/light 三级判定正确
-- A02.1: light 判定正确
-- A03.1: moderate 判定正确
-- A01.4: required_artifacts 与 tier 匹配
-
-### 3. 中间产物完整性 (8 条)
+### 2. 中间产物完整性 (8 条)
 - A01.19: 全流程仅维护 1 份 working draft
 - A01.20: checkpoint 只保留流程摘要（区块名、数量、gate），不承载正文
-- A02.2: light 不生成 WD-TASK
-- A02.3: light 不执行步骤 8/9
-- A03.2: moderate 不生成 WD-EXP
-- A03.4: moderate 不执行步骤 9
-- A03.5: moderate 生成 WD-SYN（非 WD-SYN-LIGHT）
 - A04.3: WD-EXP 数量匹配成员数
 
 ### 3.1 State / Draft 边界 (4 条)
@@ -39,12 +28,10 @@
 - A07.3: step-7~12 summary 必须为单行短摘要
 - A07.4: 正文证据仅存在于 working draft / final document
 
-### 4. Validation Gate 执行 (6 条)
+### 3. Validation Gate 执行 (6 条)
 - A01.11: validate-state.py 门禁被执行
-- A02.6: light 门禁正确处理（不因 step 8 缺失报错）
 - A04.5: 按槽位增量收敛
 - A05.1: repowiki 不存在正确报告
-- A05.2: moderate 产物正确
 - A06.3: completed_steps 无跳号
 
 ### 5. 模板约束 (3 条)
@@ -67,7 +54,7 @@
 
 | Pattern | 适用场景 |
 |---------|----------|
-| 阈值守恒 | flow_tier 判定、产物数量 |
+| 阈值守恒 | 产物数量 |
 | 增量收敛 | checkpoint 数据量增长 |
 | 因果链 | 前置文件→步骤2→步骤3 |
 | 反面验证 | 负向用例不触发 |

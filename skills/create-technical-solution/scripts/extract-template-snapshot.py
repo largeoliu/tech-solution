@@ -99,8 +99,6 @@ def update_state(
     require_receipt(
         state,
         expected_step=3,
-        expected_flow_tier=str(state.get("flow_tier") or "light"),
-        allow_pending_flow_tier=True,
     )
     slug = str(state.get("checkpoints", {}).get("step-1", {}).get("slug") or "").strip()
     if not slug:
@@ -137,7 +135,7 @@ def update_state(
     state["current_step"] = 4
     from protocol_runtime import refresh_receipt
 
-    refresh_receipt(state, default_step=4, default_flow_tier=str(state.get("flow_tier") or "light"))
+    refresh_receipt(state, step=4)
     dump_yaml(state_path, state, ensure_parent=True)
 
 

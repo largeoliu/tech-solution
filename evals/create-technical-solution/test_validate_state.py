@@ -27,8 +27,6 @@ def load_script(name: str):
 
 vs = load_script("validate-state")
 fc = load_script("finalize-cleanup")
-sft = load_script("set-flow-tier")
-mss = load_script("mark-step-skipped")
 iss = load_script("initialize-state")
 rfd = load_script("render-final-document")
 udb = load_script("upsert-draft-block")
@@ -112,11 +110,10 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
     state = {
         "current_step": 10,
         "completed_steps": [1, 2, 3, 4, 5, 6, 7, 8],
-        "skipped_steps": [9],
-        "flow_tier": "moderate",
-        "required_artifacts": ["WD-CTX", "WD-TASK", "WD-SYN"],
+        "skipped_steps": [],
+        "required_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"],
         "produced_artifacts": ["WD-CTX", "WD-TASK", "WD-SYN"],
-        "gate_receipt": {"step": 10, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"},
+        "gate_receipt": {"step": 10, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"},
         "solution_root": ".architecture/technical-solutions",
         "template_path": ".architecture/templates/technical-solution-template.md",
         "members_path": ".architecture/members.yml",
@@ -128,19 +125,19 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
             "step-1": {"summary": "完成；slug=sample-solution；paths=1；gate: step-2 ready", "slug": "sample-solution", "scope_ready": True},
             "step-2": {"summary": "完成；检查前置文件；files=3；gate: step-3 ready", "prerequisites_checked": True},
             "step-3": {"summary": "完成；写入 draft 骨架；slots=4；gate: step-4 ready", "template_loaded": True, "template_fingerprint": "", "slot_count": 4},
-            "step-4": {"summary": "完成；flow_tier=moderate；signals=1；gate: step-5 ready", "solution_type": "现有资产改造", "flow_tier": "moderate", "signals": ["existing-asset-refactor"]},
+            "step-4": {"summary": "完成；类型已判定", "solution_type": "现有资产改造"},
             "step-5": {"summary": "完成；成员已选择；count=1；gate: step-6 ready", "members_checked": True, "selected_members": ["systems_architect"], "selected_member_count": 1},
             "step-6": {"summary": "完成；repowiki 不存在；sources=0；gate: step-7 ready", "repowiki_checked": True, "repowiki_exists": False, "repowiki_source_count": 0},
             "step-7": {"summary": "完成；写入 WD-CTX；CTX=4；gate: step-8 ready", "wd_ctx_written": True, "ctx_count": 4},
-            "step-8": {"summary": "完成；写入 WD-TASK；slots=4；gate: step-10 ready", "wd_task_written": True, "task_slot_count": 4},
-            "step-9": {"summary": "跳过；WD-EXP=0；reason=moderate；gate: step-10 ready", "skipped": True, "reason": "moderate 无需 WD-EXP-*", "wd_exp_count": 0},
+            "step-8": {"summary": "完成；写入 WD-TASK；slots=4；gate: step-9 ready", "wd_task_written": True, "task_slot_count": 4},
+            "step-9": {"summary": "进行中", "skipped": False, "reason": "", "wd_exp_count": 0},
             "step-10": {"summary": "完成；写入 WD-SYN；slots=4；gate: step-11 ready", "wd_syn_written": True, "syn_slot_count": 4},
             "step-11": {"summary": "完成；final_document=1；absorbed_slots=4；gate: step-12 ready", "final_document_written": True, "absorbed_slot_count": 4, "rendered_via_script": True},
             "step-12": {"summary": "完成；validator_passed=true；deleted=0", "validator_passed": False, "working_draft_deleted": False, "state_file_deleted": False},
         },
         "can_enter_step_8": True,
-        "can_enter_step_9": False,
-        "can_enter_step_10": True,
+        "can_enter_step_9": True,
+        "can_enter_step_10": False,
         "can_enter_step_11": True,
         "can_enter_step_12": True,
         "absorption_check_passed": False,
@@ -239,7 +236,7 @@ class TestStateBoundary:
         state = make_state(workspace, slug="sample-solution")
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_10("moderate", errors)
+        validator.step_10(errors)
         assert any(error["code"] == "forbidden_state_field" for error in errors)
 
     def test_validator_rejects_verbose_summary(self, workspace: dict[str, Path]) -> None:
@@ -247,7 +244,7 @@ class TestStateBoundary:
         state["checkpoints"]["step-7"]["summary"] = "完成；写入 WD-CTX；CTX-01: 这是共享上下文正文"
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_7("moderate", errors)
+        validator.step_7(errors)
         assert any(error["code"] == "verbose_summary" for error in errors)
 
     def test_step_2_requires_step_1_scope(self, workspace: dict[str, Path]) -> None:
@@ -255,58 +252,13 @@ class TestStateBoundary:
         state["checkpoints"].pop("step-1")
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_2("light", errors)
+        validator.step_2(errors)
         assert any(error["code"] == "missing_step1_scope" for error in errors)
 
 
 class TestScripts:
-    def test_set_flow_tier_enforces_signal_contract(self, workspace: dict[str, Path]) -> None:
-        state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3], flow_tier="moderate")
-        state["gate_receipt"] = {"step": 4, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": ""}
-        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
-        write_state(workspace, state)
-        with pytest.raises(SystemExit):
-            sft.set_flow_tier(
-                state_path=workspace["state_path"],
-                flow_tier="moderate",
-                solution_type="新增能力",
-                summary="完成；flow_tier=moderate；signals=1；gate: step-5 ready",
-                next_step=5,
-                append_completed=True,
-                signals=["introduces-core-capability"],
-                require_receipt_step=4,
-            )
 
-    def test_set_flow_tier_requires_signal(self, workspace: dict[str, Path]) -> None:
-        state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3], flow_tier="light")
-        state["gate_receipt"] = {"step": 4, "flow_tier": "light", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
-        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
-        write_state(workspace, state)
-        with pytest.raises(SystemExit):
-            sft.set_flow_tier(
-                state_path=workspace["state_path"],
-                flow_tier="light",
-                solution_type="单模块改动",
-                summary="完成；flow_tier=light；signals=0；gate: step-5 ready",
-                next_step=5,
-                append_completed=True,
-                signals=[],
-                require_receipt_step=4,
-            )
 
-    def test_mark_step_skipped_requires_receipt(self, workspace: dict[str, Path]) -> None:
-        state = make_state(workspace, current_step=9, completed_steps=[1, 2, 3, 4, 5, 6, 7, 8], skipped_steps=[])
-        state["gate_receipt"] = {"step": 8, "flow_tier": "moderate", "state_fingerprint": "bad", "validated_at": ""}
-        write_state(workspace, state)
-        with pytest.raises(SystemExit):
-            mss.mark_step_skipped(
-                state_path=workspace["state_path"],
-                step=9,
-                summary="跳过；WD-EXP=0；reason=moderate；gate: step-10 ready",
-                reason="moderate 无需 WD-EXP-*",
-                next_step=10,
-                require_receipt_step=9,
-            )
 
     def test_initialize_state_bootstraps_missing_state(self, workspace: dict[str, Path]) -> None:
         payload = iss.initialize_state(
@@ -319,7 +271,6 @@ class TestScripts:
         assert payload["current_step"] == 2
         assert state["checkpoints"]["step-1"]["scope_ready"] is True
         assert state["gate_receipt"]["step"] == 2
-        assert state["gate_receipt"]["flow_tier"] == "light"
 
     def test_initialize_state_starts_with_empty_question_queue(self, workspace: dict[str, Path]) -> None:
         iss.initialize_state(
@@ -336,14 +287,13 @@ class TestScripts:
         workspace["content_file"].write_text(FINAL_DOC, encoding="utf-8")
         state = make_state(workspace, current_step=11)
         state["final_document_path"] = "docs/sample-solution.md"
-        state["gate_receipt"] = {"step": 11, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": ""}
+        state["gate_receipt"] = {"step": 11, "state_fingerprint": "", "validated_at": ""}
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
         write_state(workspace, state)
         with pytest.raises(SystemExit):
             rfd.render_final_document(
-                state_path=workspace["state_path"],
-                flow_tier="moderate",
-                content_path=workspace["content_file"],
+            state_path=workspace["state_path"],
+            content_path=workspace["content_file"],
                 summary="完成；final_document=1；absorbed_slots=4；gate: step-12 ready",
             )
 
@@ -353,7 +303,7 @@ class TestScripts:
             encoding="utf-8",
         )
         state = make_state(workspace, current_step=8, completed_steps=[1, 2, 3, 4, 5, 6, 7])
-        state["gate_receipt"] = {"step": 8, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"] = {"step": 8, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
         write_state(workspace, state)
         content_file = workspace["repo"] / "wd-task.md"
@@ -373,7 +323,7 @@ class TestScripts:
     def test_upsert_draft_block_rejects_nested_block_heading(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
         state = make_state(workspace, current_step=10)
-        state["gate_receipt"] = {"step": 10, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"] = {"step": 10, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
         write_state(workspace, state)
         content_file = workspace["repo"] / "wd-syn-invalid.md"
@@ -398,14 +348,12 @@ class TestScripts:
             current_step=9,
             completed_steps=[1, 2, 3, 4, 5, 6, 7, 8],
             skipped_steps=[],
-            flow_tier="full",
             required_artifacts=["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"],
             produced_artifacts=["WD-CTX", "WD-TASK"],
             can_enter_step_9=True,
             can_enter_step_10=False,
         )
-        state["checkpoints"]["step-4"]["flow_tier"] = "full"
-        state["gate_receipt"] = {"step": 9, "flow_tier": "full", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"] = {"step": 9, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
         write_state(workspace, state)
 
@@ -438,14 +386,12 @@ class TestScripts:
             current_step=9,
             completed_steps=[1, 2, 3, 4, 5, 6, 7, 8],
             skipped_steps=[],
-            flow_tier="full",
             required_artifacts=["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"],
             produced_artifacts=["WD-CTX", "WD-TASK"],
             can_enter_step_9=True,
             can_enter_step_10=False,
         )
-        state["checkpoints"]["step-4"]["flow_tier"] = "full"
-        state["gate_receipt"] = {"step": 9, "flow_tier": "full", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"] = {"step": 9, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
         write_state(workspace, state)
 
@@ -499,8 +445,6 @@ class TestScripts:
                 str(scripts_path / "render-final-document.py"),
                 "--state",
                 str(workspace["state_path"]),
-                "--flow-tier",
-                "moderate",
                 "--content-file",
                 str(workspace["content_file"]),
                 "--summary",
@@ -517,11 +461,11 @@ class TestScripts:
 class TestValidator:
     def test_validator_rejects_receipt_lagging_current_step(self, workspace: dict[str, Path]) -> None:
         state = make_state(workspace, current_step=11)
-        state["gate_receipt"] = {"step": 5, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"] = {"step": 5, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_11("moderate", errors)
+        validator.step_11(errors)
         assert any(error["code"] == "invalid_gate_receipt" for error in errors)
 
     def test_step_10_rejects_incomplete_receipt(self, workspace: dict[str, Path]) -> None:
@@ -529,13 +473,12 @@ class TestValidator:
         state = make_state(workspace)
         state["gate_receipt"] = {
             "step": 10,
-            "flow_tier": "moderate",
             "state_fingerprint": vs.compute_state_fingerprint(state),
             "validated_at": "",
         }
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_10("moderate", errors)
+        validator.step_10(errors)
         assert any(error["code"] == "invalid_gate_receipt" for error in errors)
 
     def test_step_10_rejects_receipt_fingerprint_mismatch(self, workspace: dict[str, Path]) -> None:
@@ -543,13 +486,12 @@ class TestValidator:
         state = make_state(workspace)
         state["gate_receipt"] = {
             "step": 10,
-            "flow_tier": "moderate",
             "state_fingerprint": "stale-fingerprint",
             "validated_at": "2026-04-08T09:31:00",
         }
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_10("moderate", errors)
+        validator.step_10(errors)
         assert any(error["code"] == "invalid_gate_receipt" for error in errors)
 
     def test_step_3_allows_pre_extract_state(self, workspace: dict[str, Path]) -> None:
@@ -560,33 +502,33 @@ class TestValidator:
             working_draft_path="",
         )
         state["checkpoints"]["step-3"] = {"summary": "准备提取模板；前置已就绪；gate: extract pending"}
-        state["gate_receipt"] = {"step": 3, "flow_tier": "light", "state_fingerprint": "", "validated_at": ""}
+        state["gate_receipt"] = {"step": 3, "state_fingerprint": "", "validated_at": ""}
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_3("light", errors)
+        validator.step_3(errors)
         assert not any(error["code"] in {"template_not_loaded", "missing_template_snapshot", "invalid_working_draft_path"} for error in errors)
 
     def test_step_4_rejects_incomplete_receipt(self, workspace: dict[str, Path]) -> None:
         state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
-        state["gate_receipt"] = {"step": 4, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": ""}
+        state["gate_receipt"] = {"step": 4, "state_fingerprint": "", "validated_at": ""}
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_4("moderate", errors)
+        validator.step_4(errors)
         assert any(error["code"] == "invalid_gate_receipt" for error in errors)
 
     def test_step_4_requires_working_draft_path(self, workspace: dict[str, Path]) -> None:
         state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3], working_draft_path="")
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_4("moderate", errors)
+        validator.step_4(errors)
         assert any(error["code"] == "invalid_working_draft_path" for error in errors)
 
     def test_step_4_accepts_state_dir_working_draft_path(self, workspace: dict[str, Path]) -> None:
         state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_4("moderate", errors)
+        validator.step_4(errors)
         assert not any(error["code"] == "invalid_working_draft_path" for error in errors)
 
     def test_step_4_rejects_legacy_solution_root_working_draft_path(self, workspace: dict[str, Path]) -> None:
@@ -598,36 +540,17 @@ class TestValidator:
         )
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_4("moderate", errors)
+        validator.step_4(errors)
         assert any(error["code"] == "invalid_working_draft_path" for error in errors)
-
-    def test_step_4_rejects_unregistered_signals(self, workspace: dict[str, Path]) -> None:
-        state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
-        state["checkpoints"]["step-4"]["signals"] = ["existing_system_enhancement", "frontend_form_change"]
-        validator = make_validator(state, workspace)
-        errors: list[dict] = []
-        validator.step_4("moderate", errors)
-        assert any(error["code"] == "invalid_step4_signals" for error in errors)
-
-    def test_step_4_requires_non_empty_signals(self, workspace: dict[str, Path]) -> None:
-        state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
-        state["checkpoints"]["step-4"]["signals"] = []
-        validator = make_validator(state, workspace)
-        errors: list[dict] = []
-        validator.step_4("moderate", errors)
-        assert any(error["code"] == "invalid_step4_signals" for error in errors)
 
     def test_step_8_detects_missing_task_slots(self, workspace: dict[str, Path]) -> None:
         workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n### 一、背景\n\n粗粒度任务\n", encoding="utf-8")
-        state = make_state(workspace, current_step=8, completed_steps=[1, 2, 3, 4, 5, 6, 7], flow_tier="full", can_enter_step_8=True)
-        state["checkpoints"]["step-4"]["flow_tier"] = "full"
-        state["flow_tier"] = "full"
+        state = make_state(workspace, current_step=8, completed_steps=[1, 2, 3, 4, 5, 6, 7], can_enter_step_8=True)
         state["required_artifacts"] = ["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"]
-        state["gate_receipt"]["flow_tier"] = "full"
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_8("full", errors)
+        validator.step_8(errors)
         assert any(error["code"] == "task_slots_incomplete" for error in errors)
 
     def test_step_8_rejects_ctx_mixed_into_task_block(self, workspace: dict[str, Path]) -> None:
@@ -635,27 +558,18 @@ class TestValidator:
             "## WD-CTX\n\n### CTX-01\n\n来源\n\n## WD-TASK\n\n### SLOT-01: 1.1 需求概述\n\n任务\n\n### CTX-02\n\n错误位置\n",
             encoding="utf-8",
         )
-        state = make_state(workspace, current_step=8, completed_steps=[1, 2, 3, 4, 5, 6, 7], flow_tier="moderate", can_enter_step_8=True)
+        state = make_state(workspace, current_step=8, completed_steps=[1, 2, 3, 4, 5, 6, 7], can_enter_step_8=True)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_8("moderate", errors)
+        validator.step_8(errors)
         assert any(error["code"] == "task_block_structure_invalid" for error in errors)
-
-    def test_step_10_requires_explicit_skip_record(self, workspace: dict[str, Path]) -> None:
-        write_good_draft(workspace)
-        state = make_state(workspace, skipped_steps=[], completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9])
-        state["checkpoints"].pop("step-9")
-        validator = make_validator(state, workspace)
-        errors: list[dict] = []
-        validator.step_10("moderate", errors)
-        assert any(error["code"] == "step_skipped_without_checkpoint" for error in errors)
 
     def test_step_10_requires_can_enter_gate(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
         state = make_state(workspace, can_enter_step_10=False)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_10("moderate", errors)
+        validator.step_10(errors)
         assert any(error["code"] == "gate_flag_false" and error["field"] == "can_enter_step_10" for error in errors)
 
     def test_step_10_blocks_on_pending_questions(self, workspace: dict[str, Path]) -> None:
@@ -672,7 +586,7 @@ class TestValidator:
         )
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_10("moderate", errors)
+        validator.step_10(errors)
         assert any(error["code"] == "pending_questions_blocking_progress" for error in errors)
 
     def test_step_10_rejects_draft_state_desync(self, workspace: dict[str, Path]) -> None:
@@ -688,7 +602,7 @@ class TestValidator:
         state["checkpoints"]["step-10"]["wd_syn_written"] = False
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_10("moderate", errors)
+        validator.step_10(errors)
         assert any(error["code"] == "artifact_state_desync" for error in errors)
 
     def test_step_7_requires_repowiki_consumption_when_exists(self, workspace: dict[str, Path]) -> None:
@@ -698,7 +612,7 @@ class TestValidator:
         state["checkpoints"]["step-6"]["repowiki_source_count"] = 0
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_7("moderate", errors)
+        validator.step_7(errors)
         assert any(error["code"] == "repowiki_not_consumed" for error in errors)
 
     def test_step_10_requires_wd_syn_quality(self, workspace: dict[str, Path]) -> None:
@@ -706,7 +620,7 @@ class TestValidator:
         state = make_state(workspace)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_10("moderate", errors)
+        validator.step_10(errors)
         assert any(error["code"] == "missing_working_draft_block" for error in errors)
 
     def test_step_10_reports_missing_wd_syn_fragments_from_shared_contract(self, workspace: dict[str, Path]) -> None:
@@ -720,7 +634,7 @@ class TestValidator:
         validator = make_validator(state, workspace)
         errors: list[dict] = []
 
-        validator.step_10("moderate", errors)
+        validator.step_10(errors)
 
         issue = next(error for error in errors if error["code"] == "missing_working_draft_block")
         expected = [
@@ -739,7 +653,7 @@ class TestValidator:
         validator = make_validator(state, workspace)
         errors: list[dict] = []
 
-        validator.step_10("moderate", errors)
+        validator.step_10(errors)
 
         issue = next(error for error in errors if error["code"] == "missing_working_draft_block")
         assert issue["missing_fragments"] == ["- 模板承载缺口:"]
@@ -753,7 +667,7 @@ class TestValidator:
         validator = make_validator(state, workspace)
         errors: list[dict] = []
 
-        validator.step_10("moderate", errors)
+        validator.step_10(errors)
 
         issue = next(error for error in errors if error["code"] == "missing_working_draft_block")
         assert issue["missing_fragments"] == ["#### 目标能力"]
@@ -766,7 +680,7 @@ class TestValidator:
         state = make_state(workspace)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_10("moderate", errors)
+        validator.step_10(errors)
         assert any(error["code"] == "wd_syn_slots_incomplete" for error in errors)
 
     def test_step_11_rejects_docs_final_document_path(self, workspace: dict[str, Path]) -> None:
@@ -777,7 +691,7 @@ class TestValidator:
         state = make_state(workspace, current_step=11, final_document_path="docs/sample-solution.md")
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_11("moderate", errors)
+        validator.step_11(errors)
         assert any(error["code"] == "invalid_final_document_path" for error in errors)
 
     def test_step_11_accepts_canonical_absolute_final_document_path(self, workspace: dict[str, Path]) -> None:
@@ -786,7 +700,7 @@ class TestValidator:
         state = make_state(workspace, current_step=11, final_document_path=str(workspace["final_document_path"]))
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_11("moderate", errors)
+        validator.step_11(errors)
         assert not any(error["code"] == "invalid_final_document_path" for error in errors)
 
     def test_step_11_requires_render_script_marker(self, workspace: dict[str, Path]) -> None:
@@ -796,7 +710,7 @@ class TestValidator:
         state["checkpoints"]["step-11"]["rendered_via_script"] = False
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_11("moderate", errors)
+        validator.step_11(errors)
         assert any(error["code"] == "final_document_not_rendered_via_script" for error in errors)
 
     def test_step_11_requires_can_enter_gate(self, workspace: dict[str, Path]) -> None:
@@ -805,7 +719,7 @@ class TestValidator:
         state = make_state(workspace, current_step=11, can_enter_step_11=False)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_11("moderate", errors)
+        validator.step_11(errors)
         assert any(error["code"] == "gate_flag_false" and error["field"] == "can_enter_step_11" for error in errors)
 
     def test_step_11_rejects_absolute_working_draft_path(self, workspace: dict[str, Path]) -> None:
@@ -815,7 +729,7 @@ class TestValidator:
         state["working_draft_path"] = str(workspace["working_draft_path"])
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_11("moderate", errors)
+        validator.step_11(errors)
         assert any(error["code"] == "invalid_working_draft_path" for error in errors)
 
     def test_step_11_rejects_invalid_solution_root(self, workspace: dict[str, Path]) -> None:
@@ -824,7 +738,7 @@ class TestValidator:
         state = make_state(workspace, current_step=11, solution_root=".architecture")
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_11("moderate", errors)
+        validator.step_11(errors)
         assert any(error["code"] == "invalid_solution_root" for error in errors)
 
     def test_step_11_detects_overwritten_wd_ctx(self, workspace: dict[str, Path]) -> None:
@@ -832,7 +746,7 @@ class TestValidator:
         state = make_state(workspace, current_step=11)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_11("moderate", errors)
+        validator.step_11(errors)
         assert any(error["code"] == "draft_block_overwritten" for error in errors)
 
     def test_step_12_rejects_wrong_final_document_order(self, workspace: dict[str, Path]) -> None:
@@ -844,7 +758,7 @@ class TestValidator:
         state = make_state(workspace, current_step=12, completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 10, 11])
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_12("moderate", errors)
+        validator.step_12(errors)
         assert any(error["code"] == "final_document_headings_mismatch" for error in errors)
 
     def test_step_11_detects_document_built_before_step_10(self, workspace: dict[str, Path]) -> None:
@@ -854,7 +768,7 @@ class TestValidator:
         state["checkpoints"]["step-10"]["completed_at"] = "2100-01-01T00:00:00+00:00"
         validator = make_validator(state, workspace)
         errors: list[dict] = []
-        validator.step_11("moderate", errors)
+        validator.step_11(errors)
         assert any(error["code"] == "step_order_violation" for error in errors)
 
 
@@ -862,12 +776,11 @@ class TestCleanup:
     def test_render_final_document_refreshes_receipt(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
         state = make_state(workspace, current_step=11)
-        state["gate_receipt"] = {"step": 11, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"] = {"step": 11, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
         write_state(workspace, state)
         payload = rfd.render_final_document(
             state_path=workspace["state_path"],
-            flow_tier="moderate",
             content_path=None,
             summary="完成；final_document=1；absorbed_slots=4；gate: step-12 ready",
         )
@@ -881,10 +794,10 @@ class TestCleanup:
         workspace["final_document_path"].write_text(FINAL_DOC, encoding="utf-8")
         state = make_state(workspace, current_step=12, completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 10, 11], produced_artifacts=["WD-TASK"])
         state["checkpoints"]["step-7"]["wd_ctx_written"] = True
-        state["gate_receipt"] = {"step": 12, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"] = {"step": 12, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
         write_state(workspace, state)
-        exit_code, payload = fc.run_cleanup(workspace["state_path"], "moderate", "完成；validator_passed=true；deleted=2")
+        exit_code, payload = fc.run_cleanup(workspace["state_path"], "完成；validator_passed=true；deleted=2")
         assert exit_code == 2
         assert payload["passed"] is False
         assert workspace["working_draft_path"].exists()
@@ -893,11 +806,11 @@ class TestCleanup:
     def test_finalize_cleanup_success(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
         workspace["final_document_path"].write_text(FINAL_DOC, encoding="utf-8")
-        state = make_state(workspace, current_step=12, completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 10, 11])
-        state["gate_receipt"] = {"step": 12, "flow_tier": "moderate", "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state = make_state(workspace, current_step=12, completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+        state["gate_receipt"] = {"step": 12, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
         write_state(workspace, state)
-        exit_code, payload = fc.run_cleanup(workspace["state_path"], "moderate", "完成；validator_passed=true；deleted=2")
+        exit_code, payload = fc.run_cleanup(workspace["state_path"], "完成；validator_passed=true；deleted=2")
         assert exit_code == 0
         assert payload["passed"] is True
         assert not workspace["working_draft_path"].exists()

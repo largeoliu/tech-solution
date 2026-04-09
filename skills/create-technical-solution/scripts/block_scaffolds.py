@@ -133,41 +133,17 @@ def build_wd_exp_scaffold(snapshot: RuntimeSnapshot, members: list[str] | None =
 
 
 def build_wd_syn_scaffold(snapshot: RuntimeSnapshot) -> str:
-    block_name = workflow_default_block(10, snapshot.flow_tier) or "WD-SYN"
+    block_name = workflow_default_block(10) or "WD-SYN"
     lines = [f"## {block_name}", ""]
     for title in template_slot_titles(snapshot):
-        if block_name == "WD-SYN-LIGHT":
-            lines.extend(
-                [
-                    f"### 槽位：{title}",
-                    "- 目标能力: <要达成什么>",
-                    "- 候选路径对比: 复用 / 改造 / 新建",
-                    "- 选定路径: <最终选择>",
-                    "- 关键证据: CTX-01",
-                    f"- 建议落位槽位: {title}",
-                    "- 未决问题或阻塞: <若无则写无>",
-                    "",
-                ]
-            )
-            continue
         lines.extend(
             render_slot_lines(title) + [""]
         )
     return "\n".join(lines).rstrip()
 
 
-def effective_scaffold_step(snapshot: RuntimeSnapshot) -> int:
-    step = snapshot.current_step
-    flow_tier = snapshot.flow_tier
-    if flow_tier == "light" and step in {8, 9, 10}:
-        return 10
-    if flow_tier == "moderate" and step in {9, 10}:
-        return 10
-    return step
-
-
 def emit_scaffold(snapshot: RuntimeSnapshot, members: list[str] | None = None) -> str:
-    step = effective_scaffold_step(snapshot)
+    step = snapshot.current_step
     if step == 7:
         return build_wd_ctx_scaffold(snapshot)
     if step == 8:

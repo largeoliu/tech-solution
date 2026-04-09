@@ -12,9 +12,8 @@
 - **共享上下文（WD-CTX）**：默认只保留 `上下文编号`、`来源`、`结论或约束`、`适用槽位`、`可信度或缺口`（必填）；仅当涉及新增、拆分、迁移、平行建设或职责转移时，才补充 `资产类型`、`资产标识`、`位置`、`当前职责`、`当前能力`、`可扩展点`、`已知限制`、`调用方/依赖方`、`相关证据路径`；若结论为"未发现候选"，还必须补 `搜索范围`、`搜索关键词`、`已排除目录或对象`、`未发现结论`
 - **模板任务单（WD-TASK）**：只保留 `槽位标识`、`必须消费的共享上下文`、`参与专家`、`每位专家必答问题`、`建议落位槽位`、`落位表达要求`、`缺口或阻塞项`（必填）；不重复抄写 CTX 事实详情，统一通过 CTX 编号引用
 - **专家分析（WD-EXP-*）**：默认只保留 `参与槽位`、`决策类型`、`核心理由`、`关键证据引用`、`未决点`（必填）；仅 `新建` 时强制补充不可复用 / 不可改造证据说明
-- **协作收敛（WD-SYN / WD-SYN-LIGHT）**：
-  - `light`：`目标能力`、`候选路径对比`、`选定路径`、`关键证据`、`建议落位槽位`、`未决问题或阻塞`
-  - `moderate` / `full`：`目标能力`、`候选方案对比`、`选定路径`、`选定写法`、`关键证据引用`、`建议落位槽位`、`模板承载缺口`、`未决问题`
+- **协作收敛（WD-SYN）**：
+  `目标能力`、`候选方案对比`、`选定路径`、`选定写法`、`关键证据引用`、`建议落位槽位`、`模板承载缺口`、`未决问题`
 - **变更影响（WD-IMPACT）**：`触发变更`、`受影响内容`、`受影响阶段边界`、`保持有效内容`、`作废内容或标记`、`下一步动作`（必填）
 
 ## WD-SYN示例
@@ -50,14 +49,14 @@
 ## 最小执行示例
 
 ```text
-LIGHT checkpoint.step-10 摘要示例：
-`完成；写入 WD-SYN-LIGHT；slots=3；gate: step-11 ready`
-
-MODERATE checkpoint.step-8 摘要示例：
-`完成；写入 WD-TASK；slots=5；gate: step-10 ready`
+FULL checkpoint.step-8 摘要示例：
+`完成；写入 WD-TASK；slots=5；gate: step-9 ready`
 
 FULL checkpoint.step-9 摘要示例：
 `完成；写入 WD-EXP-*；blocks=2；gate: step-10 ready`
+
+FULL checkpoint.step-10 摘要示例：
+`完成；写入 WD-SYN；slots=3；gate: step-11 ready`
 ```
 
 ## 结果汇报格式
@@ -65,9 +64,8 @@ FULL checkpoint.step-9 摘要示例：
 ```text
 技术方案已创建或更新：[标题]
 位置：.architecture/technical-solutions/[文件名].md
-流程级别：[light|moderate|full]
 参与成员：[参与成员]
-过程可见产物：working draft 1 份；模板槽位数 [n]；CTX 条目数 [n]；WD-TASK 条目数 [n/如跳过写 0]；WD-EXP 数量 [n/如跳过写 0]；WD-SYN 或 WD-SYN-LIGHT 数量 [n]
+过程可见产物：working draft 1 份；模板槽位数 [n]；CTX 条目数 [n]；WD-TASK 条目数 [n]；WD-EXP 数量 [n]；WD-SYN 数量 [n]
 关键点：[3-5 个核心槽位结论]
 吸收检查：[通过|未通过]；仅在通过后删除 working draft 和状态文件。
 ```
@@ -86,8 +84,8 @@ python /path/to/run-step.py --state <状态文件路径>
 
 ### validate-state.py JSON contract（当前实现）
 
-- **失败 payload** 顶层键：`step`、`flow_tier`、`passed`、`summary`、`repair_plan`、`issues`
-- **通过 payload** 顶层键：`step`、`flow_tier`、`passed`、`summary`
+- **失败 payload** 顶层键：`step`、`passed`、`summary`、`repair_plan`、`issues`
+- **通过 payload** 顶层键：`step`、`passed`、`summary`
 - 仅当传入 `--write-pass-receipt` 时，通过 payload 才会额外包含 `gate_receipt`
 
 `summary`（由 `build_summary(...)` 生成）当前包含：
@@ -129,7 +127,6 @@ Agent 收到失败 JSON 后，优先消费 `repair_plan[]` 与 `summary.recommen
 
 `runtime_doctor.py --format json` 当前 payload 顶层键：
 - `step`
-- `flow_tier`
 - `apply_safe_fixes`
 - `passed`
 - `summary`

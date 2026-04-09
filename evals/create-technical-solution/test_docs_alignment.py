@@ -115,7 +115,6 @@ def test_docs_cover_runtime_doctor_contract() -> None:
     assert "--apply-safe-fixes" in ref_text
     assert "结构性" in ref_text
     assert "step" in ref_text
-    assert "flow_tier" in ref_text
     assert "apply_safe_fixes" in ref_text
     assert "passed" in ref_text
     assert "summary" in ref_text

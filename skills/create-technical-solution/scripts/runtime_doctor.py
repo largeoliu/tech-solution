@@ -38,15 +38,13 @@ def validate_runtime_state(
     *,
     state_path: Path,
     step: int,
-    flow_tier: str,
 ) -> dict[str, Any]:
     validator = load_validate_state_module().GateValidator(state, state_path)
     issues: list[dict[str, Any]] = []
-    getattr(validator, f"step_{step}")(flow_tier, issues)
+    getattr(validator, f"step_{step}")(issues)
     passed = not issues
     payload = {
         "step": step,
-        "flow_tier": flow_tier,
         "passed": passed,
         "summary": {"error_count": 0} if passed else load_validate_state_module().build_summary(issues),
         "issues": issues,
@@ -55,7 +53,6 @@ def validate_runtime_state(
         else load_validate_state_module().build_repair_plan(
             issues,
             state_path=state_path,
-            flow_tier=flow_tier,
             state=state,
         ),
     }
@@ -113,10 +110,10 @@ def legacy_working_draft_fix(
     }
 
 
-def receipt_fix_entry(*, step: int, flow_tier: str) -> dict[str, Any]:
+def receipt_fix_entry(*, step: int) -> dict[str, Any]:
     return {
         "code": "refresh_gate_receipt",
-        "description": f"write a valid gate receipt for step {step} ({flow_tier})",
+        "description": f"write a valid gate receipt for step {step}",
         "applied": False,
         "eligible": True,
     }
@@ -126,7 +123,6 @@ def run_doctor(
     state_path: Path,
     *,
     step: int | None = None,
-    flow_tier: str | None = None,
     apply_safe_fixes: bool = False,
     output_format: str = "text",
 ) -> tuple[int, dict[str, Any]]:
@@ -134,7 +130,6 @@ def run_doctor(
     resolved_state_path = snapshot.state_path
     state = load_yaml(resolved_state_path, missing_ok=True)
     resolved_step = int(step or snapshot.current_step or state.get("current_step") or 1)
-    resolved_flow_tier = str(flow_tier or snapshot.flow_tier or state.get("flow_tier") or "pending")
     canonical_draft_path = working_draft_path_for_slug(repo_root=snapshot.repo_root, slug=snapshot.slug)
     canonical_final_path = final_document_path_for_slug(repo_root=snapshot.repo_root, slug=snapshot.slug)
 
@@ -176,14 +171,13 @@ def run_doctor(
         state,
         state_path=resolved_state_path,
         step=resolved_step,
-        flow_tier=resolved_flow_tier,
     )
 
     if receipt_needs_repair(state, validation):
-        receipt_fix = receipt_fix_entry(step=resolved_step, flow_tier=resolved_flow_tier)
+        receipt_fix = receipt_fix_entry(step=resolved_step)
         safe_fixes.append(receipt_fix)
         if apply_safe_fixes:
-            refresh_receipt(state, step=resolved_step, flow_tier=resolved_flow_tier)
+            refresh_receipt(state, step=resolved_step)
             dump_yaml(resolved_state_path, state)
             receipt_fix["applied"] = True
             mutated = True
@@ -191,12 +185,10 @@ def run_doctor(
                 state,
                 state_path=resolved_state_path,
                 step=resolved_step,
-                flow_tier=resolved_flow_tier,
             )
 
     payload = {
         "step": resolved_step,
-        "flow_tier": resolved_flow_tier,
         "apply_safe_fixes": apply_safe_fixes,
         "passed": validation["passed"],
         "summary": validation["summary"],
@@ -214,7 +206,7 @@ def run_doctor(
 
 def format_text(payload: dict[str, Any]) -> str:
     lines = [
-        f"runtime doctor: step={payload['step']} flow_tier={payload['flow_tier']}",
+        f"runtime doctor: step={payload['step']}",
         "status: PASS" if payload["passed"] else "status: FAIL",
     ]
     for fix in payload["safe_fixes"]:
@@ -231,7 +223,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Diagnose create-technical-solution runtime state safely")
     parser.add_argument("--state", required=True, help="state file path")
     parser.add_argument("--step", type=int, help="override current step")
-    parser.add_argument("--flow-tier", choices=["light", "moderate", "full", "pending"], help="override flow tier")
     parser.add_argument("--apply-safe-fixes", action="store_true", help="apply structural safe fixes")
     parser.add_argument("--format", choices=["json", "text"], default="text", help="output format")
     args = parser.parse_args()
@@ -239,7 +230,6 @@ def main() -> int:
     exit_code, payload = run_doctor(
         Path(args.state),
         step=args.step,
-        flow_tier=args.flow_tier,
         apply_safe_fixes=args.apply_safe_fixes,
         output_format=args.format,
     )

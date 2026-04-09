@@ -36,7 +36,6 @@ ALLOWED_TOP_LEVEL_FIELDS = {
     "current_step",
     "completed_steps",
     "skipped_steps",
-    "flow_tier",
     "required_artifacts",
     "produced_artifacts",
     "pending_questions",
@@ -73,7 +72,6 @@ ARTIFACT_REPAIR_STEP = {
     "WD-TASK": 8,
     "WD-EXP-*": 9,
     "WD-SYN": 10,
-    "WD-SYN-LIGHT": 10,
     "final_document": 11,
 }
 
@@ -225,7 +223,7 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
     if code == "step_skipped_without_checkpoint":
         return "回到对应步骤流，通过 run-step.py 让跳步记录按协议自动落盘。"
     if code == "flow_tier_state_mismatch":
-        return "回到步骤 4 重新判定 flow_tier，并同步 required_artifacts、skipped_steps 与 signals。"
+        return "flow_tier 已从协议中移除，无需此检查。"  # deprecated
     if code == "repowiki_not_consumed":
         return "回到步骤 7，实际读取并引用 repowiki，再把来源条目写入 WD-CTX。"
     if code == "invalid_working_draft_path":
@@ -246,7 +244,6 @@ def make_issue(
     code: str,
     message: str,
     step: int,
-    flow_tier: str,
     field: Optional[str] = None,
     missing_artifacts: Optional[list[str]] = None,
     recommended_rollback_step: Optional[int] = None,
@@ -258,7 +255,6 @@ def make_issue(
         "code": code,
         "message": message,
         "step": step,
-        "flow_tier": flow_tier,
         "field": field,
         "missing_artifacts": missing_artifacts or [],
         "recommended_rollback_step": recommended_rollback_step,
@@ -282,7 +278,6 @@ def require(
     code: str,
     message: str,
     step: int,
-    flow_tier: str,
     field: Optional[str] = None,
     missing_artifacts: Optional[list[str]] = None,
     recommended_rollback_step: Optional[int] = None,
@@ -298,7 +293,6 @@ def require(
             code=code,
             message=message,
             step=step,
-            flow_tier=flow_tier,
             field=field,
             missing_artifacts=missing_artifacts,
             recommended_rollback_step=recommended_rollback_step,
@@ -330,7 +324,6 @@ def build_repair_plan(
     issues: list[dict[str, Any]],
     *,
     state_path: Optional[Path] = None,
-    flow_tier: str | None = None,
     state: Optional[dict[str, Any]] = None,
 ) -> list[dict[str, Any]]:
     plan: dict[int, dict[str, Any]] = {}
@@ -357,11 +350,10 @@ def build_repair_plan(
                     entry["expected_artifacts_after_fix"].append(missing)
         else:
             entry["action_type"] = "rerun_run_step"
-        if state_path is not None and flow_tier is not None:
+        if state_path is not None:
             entry["script_command"] = render_repair_command(
                 state_path=state_path,
                 repair_step=repair_step,
-                flow_tier=flow_tier,
                 state=state,
             )
         else:
@@ -377,7 +369,7 @@ class GateValidator:
         self.arch_root = self.state_dir.parents[1] if len(self.state_dir.parents) >= 2 else self.state_dir
         self.repo_root = self.arch_root.parent if self.arch_root.name == ".architecture" else self.state_dir.parent
 
-    def checkpoint(self, step_num: int, errors: list[dict[str, Any]], flow_tier: str) -> dict[str, Any]:
+    def checkpoint(self, step_num: int, errors: list[dict[str, Any]]) -> dict[str, Any]:
         checkpoints = self.state.get("checkpoints", {})
         if not isinstance(checkpoints, dict):
             add_issue(
@@ -386,7 +378,6 @@ class GateValidator:
                     code="schema_mismatch",
                     message="checkpoints 必须为对象",
                     step=step_num,
-                    flow_tier=flow_tier,
                     field="checkpoints",
                     recommended_rollback_step=step_num,
                     recommended_repair_step=step_num,
@@ -403,7 +394,6 @@ class GateValidator:
                     code="schema_mismatch",
                     message=f"checkpoints.step-{step_num} 必须为对象",
                     step=step_num,
-                    flow_tier=flow_tier,
                     field=f"checkpoints.step-{step_num}",
                     recommended_rollback_step=step_num,
                     recommended_repair_step=step_num,
@@ -458,21 +448,20 @@ class GateValidator:
             return []
         return [item for item in raw if isinstance(item, dict)]
 
-    def check_pending_questions(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+    def check_pending_questions(self, errors: list[dict[str, Any]], step_num: int) -> None:
         require(
             not self.pending_questions(),
             errors,
             code="pending_questions_blocking_progress",
             message=f"步骤 {step_num}: 存在待回答问题，必须先清空 pending_questions",
             step=step_num,
-            flow_tier=flow_tier,
-            field="pending_questions",
+                        field="pending_questions",
             skip_instead_of_retry=True,
             recommended_rollback_step=step_num,
             recommended_repair_step=step_num,
         )
 
-    def check_state_shape(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+    def check_state_shape(self, errors: list[dict[str, Any]], step_num: int) -> None:
         for key in self.state:
             if key not in ALLOWED_TOP_LEVEL_FIELDS:
                 add_issue(
@@ -481,14 +470,13 @@ class GateValidator:
                         code="forbidden_state_field",
                         message=f"步骤 {step_num}: state 不应包含 {key}",
                         step=step_num,
-                        flow_tier=flow_tier,
-                        field=key,
+                                                field=key,
                         recommended_rollback_step=step_num,
                         recommended_repair_step=step_num,
                     ),
                 )
 
-    def check_receipt_integrity(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+    def check_receipt_integrity(self, errors: list[dict[str, Any]], step_num: int) -> None:
         receipt = self.state.get("gate_receipt")
         if not isinstance(receipt, dict):
             return
@@ -501,8 +489,7 @@ class GateValidator:
                     code="invalid_gate_receipt",
                     message=f"步骤 {step_num}: gate_receipt.step={receipt_step} 与 current_step={current_step} 不一致",
                     step=step_num,
-                    flow_tier=flow_tier,
-                    field="gate_receipt.step",
+                                        field="gate_receipt.step",
                     recommended_rollback_step=min(step_num, current_step),
                     recommended_repair_step=min(step_num, current_step),
                 ),
@@ -513,16 +500,14 @@ class GateValidator:
             return
         fingerprint = str(receipt.get("state_fingerprint") or "").strip()
         validated_at = str(receipt.get("validated_at") or "").strip()
-        receipt_tier = str(receipt.get("flow_tier") or "").strip()
-        if not fingerprint or not validated_at or not receipt_tier:
+        if not fingerprint or not validated_at:
             add_issue(
                 errors,
                 make_issue(
                     code="invalid_gate_receipt",
                     message=f"步骤 {step_num}: gate_receipt 不完整，禁止手工伪造 receipt",
                     step=step_num,
-                    flow_tier=flow_tier,
-                    field="gate_receipt",
+                                        field="gate_receipt",
                     recommended_rollback_step=min(step_num, receipt_step),
                     recommended_repair_step=min(step_num, receipt_step),
                 ),
@@ -535,14 +520,13 @@ class GateValidator:
                     code="invalid_gate_receipt",
                     message=f"步骤 {step_num}: gate_receipt.state_fingerprint 与当前状态不一致",
                     step=step_num,
-                    flow_tier=flow_tier,
-                    field="gate_receipt.state_fingerprint",
+                                        field="gate_receipt.state_fingerprint",
                     recommended_rollback_step=min(step_num, receipt_step),
                     recommended_repair_step=min(step_num, receipt_step),
                 ),
             )
 
-    def check_summary(self, checkpoint: dict[str, Any], step_num: int, errors: list[dict[str, Any]], flow_tier: str) -> None:
+    def check_summary(self, checkpoint: dict[str, Any], step_num: int, errors: list[dict[str, Any]]) -> None:
         summary = str(checkpoint.get("summary") or "")
         require(
             bool(summary.strip()),
@@ -550,8 +534,7 @@ class GateValidator:
             code="missing_step_summary",
             message=f"步骤 {step_num}: checkpoints.step-{step_num}.summary 不能为空",
             step=step_num,
-            flow_tier=flow_tier,
-            field=f"checkpoints.step-{step_num}.summary",
+                        field=f"checkpoints.step-{step_num}.summary",
             recommended_rollback_step=step_num,
             recommended_repair_step=step_num,
         )
@@ -564,14 +547,13 @@ class GateValidator:
                     code="verbose_summary",
                     message=f"步骤 {step_num}: summary 必须为单行流程摘要，不得承载正文",
                     step=step_num,
-                    flow_tier=flow_tier,
-                    field=f"checkpoints.step-{step_num}.summary",
+                                        field=f"checkpoints.step-{step_num}.summary",
                     recommended_rollback_step=step_num,
                     recommended_repair_step=step_num,
                 ),
             )
 
-    def check_completed_steps(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+    def check_completed_steps(self, errors: list[dict[str, Any]], step_num: int) -> None:
         completed = self.state.get("completed_steps", [])
         skipped = self.state.get("skipped_steps", [])
         require(
@@ -580,8 +562,7 @@ class GateValidator:
             code="schema_mismatch",
             message="completed_steps 必须为数组",
             step=step_num,
-            flow_tier=flow_tier,
-            field="completed_steps",
+                        field="completed_steps",
             recommended_rollback_step=step_num,
             recommended_repair_step=step_num,
         )
@@ -599,8 +580,7 @@ class GateValidator:
                         code="completed_steps_invalid",
                         message=f"步骤 {step_num}: completed_steps 必须按未跳过步骤连续，当前位置期望 {expected} 实际为 {item}",
                         step=step_num,
-                        flow_tier=flow_tier,
-                        field="completed_steps",
+                                                field="completed_steps",
                         recommended_rollback_step=step_num,
                         recommended_repair_step=step_num,
                     ),
@@ -613,29 +593,27 @@ class GateValidator:
                         code="completed_steps_invalid",
                         message=f"步骤 {step_num}: completed_steps 中存在超过 current_step 的步骤 {item}",
                         step=step_num,
-                        flow_tier=flow_tier,
-                        field="completed_steps",
+                                                field="completed_steps",
                         recommended_rollback_step=step_num,
                         recommended_repair_step=step_num,
                     ),
                 )
                 break
 
-    def check_step1_ready(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
-        step1 = self.checkpoint(1, errors, flow_tier)
+    def check_step1_ready(self, errors: list[dict[str, Any]], step_num: int) -> None:
+        step1 = self.checkpoint(1, errors)
         require(
             step1.get("scope_ready") is True and bool(str(step1.get("slug") or "").strip()),
             errors,
             code="missing_step1_scope",
             message=f"步骤 {step_num}: 步骤 1 尚未完成最小定题与 slug 初始化",
             step=step_num,
-            flow_tier=flow_tier,
-            field="checkpoints.step-1.scope_ready",
+                        field="checkpoints.step-1.scope_ready",
             recommended_rollback_step=1,
             recommended_repair_step=1,
         )
 
-    def check_prerequisite_files(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+    def check_prerequisite_files(self, errors: list[dict[str, Any]], step_num: int) -> None:
         for field, resolver in {
             "members_path": self.members_path,
             "principles_path": self.principles_path,
@@ -648,24 +626,22 @@ class GateValidator:
                 code="missing_prerequisite_file",
                 message=f"步骤 {step_num}: {field} 不存在或不可读",
                 step=step_num,
-                flow_tier=flow_tier,
-                field=field,
+                                field=field,
                 recommended_rollback_step=2,
                 recommended_repair_step=2,
             )
 
-    def check_working_draft_path_contract(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+    def check_working_draft_path_contract(self, errors: list[dict[str, Any]], step_num: int) -> None:
         raw_path = str(self.state.get("working_draft_path") or "").strip()
         draft_path = self.working_draft_path()
-        slug = str(self.checkpoint(1, errors, flow_tier).get("slug") or "").strip()
+        slug = str(self.checkpoint(1, errors).get("slug") or "").strip()
         require(
             draft_path is not None,
             errors,
             code="invalid_working_draft_path",
             message=f"步骤 {step_num}: working_draft_path 不能为空",
             step=step_num,
-            flow_tier=flow_tier,
-            field="working_draft_path",
+                        field="working_draft_path",
             recommended_rollback_step=3,
             recommended_repair_step=3,
         )
@@ -680,23 +656,21 @@ class GateValidator:
             code="invalid_working_draft_path",
             message=f"步骤 {step_num}: working_draft_path 必须固定为 {expected_relative}",
             step=step_num,
-            flow_tier=flow_tier,
-            field="working_draft_path",
+                        field="working_draft_path",
             recommended_rollback_step=3,
             recommended_repair_step=3,
         )
 
-    def check_final_document_path_contract(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+    def check_final_document_path_contract(self, errors: list[dict[str, Any]], step_num: int) -> None:
         final_document = self.final_document_path()
-        slug = str(self.checkpoint(1, errors, flow_tier).get("slug") or "").strip()
+        slug = str(self.checkpoint(1, errors).get("slug") or "").strip()
         require(
             final_document is not None,
             errors,
             code="invalid_final_document_path",
             message=f"步骤 {step_num}: final_document_path 不能为空",
             step=step_num,
-            flow_tier=flow_tier,
-            field="final_document_path",
+                        field="final_document_path",
             recommended_rollback_step=1,
             recommended_repair_step=1,
         )
@@ -710,27 +684,25 @@ class GateValidator:
             code="invalid_final_document_path",
             message=f"步骤 {step_num}: final_document_path 必须固定为 {expected_relative}",
             step=step_num,
-            flow_tier=flow_tier,
-            field="final_document_path",
+                        field="final_document_path",
             recommended_rollback_step=1 if step_num < 11 else 11,
             recommended_repair_step=1 if step_num < 11 else 11,
         )
 
-    def check_solution_root_contract(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+    def check_solution_root_contract(self, errors: list[dict[str, Any]], step_num: int) -> None:
         require(
             str(self.state.get("solution_root") or "").strip() == str(SOLUTION_ROOT),
             errors,
             code="invalid_solution_root",
             message=f"步骤 {step_num}: solution_root 必须固定为 {SOLUTION_ROOT}",
             step=step_num,
-            flow_tier=flow_tier,
-            field="solution_root",
+                        field="solution_root",
             recommended_rollback_step=1 if step_num < 3 else 3,
             recommended_repair_step=1 if step_num < 3 else 3,
         )
 
-    def check_template_loaded(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
-        checkpoint = self.checkpoint(3, errors, flow_tier)
+    def check_template_loaded(self, errors: list[dict[str, Any]], step_num: int) -> None:
+        checkpoint = self.checkpoint(3, errors)
         current_headings = self.template_headings()
         require(
             checkpoint.get("template_loaded") is True,
@@ -738,8 +710,7 @@ class GateValidator:
             code="template_not_loaded",
             message="步骤 3: 模板未加载",
             step=step_num,
-            flow_tier=flow_tier,
-            field="checkpoints.step-3.template_loaded",
+                        field="checkpoints.step-3.template_loaded",
             recommended_rollback_step=3,
             recommended_repair_step=3,
         )
@@ -749,12 +720,11 @@ class GateValidator:
             code="missing_template_snapshot",
             message=f"步骤 {step_num}: 当前模板未提取到槽位",
             step=step_num,
-            flow_tier=flow_tier,
-            field="template_path",
+                        field="template_path",
             recommended_rollback_step=3,
             recommended_repair_step=3,
         )
-        self.check_working_draft_path_contract(errors, step_num, flow_tier)
+        self.check_working_draft_path_contract(errors, step_num)
         if current_headings:
             require(
                 checkpoint.get("slot_count") == len(current_headings),
@@ -762,8 +732,7 @@ class GateValidator:
                 code="template_changed_since_snapshot",
                 message=f"步骤 {step_num}: slot_count 与当前模板不一致",
                 step=step_num,
-                flow_tier=flow_tier,
-                field="checkpoints.step-3.slot_count",
+                                field="checkpoints.step-3.slot_count",
                 recommended_rollback_step=3,
                 recommended_repair_step=3,
             )
@@ -773,13 +742,12 @@ class GateValidator:
                 code="template_changed_since_snapshot",
                 message=f"步骤 {step_num}: template_fingerprint 与当前模板不一致",
                 step=step_num,
-                flow_tier=flow_tier,
-                field="checkpoints.step-3.template_fingerprint",
+                                field="checkpoints.step-3.template_fingerprint",
                 recommended_rollback_step=3,
                 recommended_repair_step=3,
             )
 
-    def check_working_draft_block(self, artifact: str, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+    def check_working_draft_block(self, artifact: str, errors: list[dict[str, Any]], step_num: int) -> None:
         draft_path = self.working_draft_path()
         require(
             draft_path is not None and draft_path.exists(),
@@ -787,8 +755,7 @@ class GateValidator:
             code="missing_working_draft_path",
             message=f"步骤 {step_num}: working draft 不存在",
             step=step_num,
-            flow_tier=flow_tier,
-            field="working_draft_path",
+                        field="working_draft_path",
             recommended_rollback_step=3,
             recommended_repair_step=3,
         )
@@ -801,7 +768,7 @@ class GateValidator:
             present = re.search(rf"^\s*#{{2,6}}\s+{re.escape(artifact)}\b", content, re.MULTILINE) is not None
         if not present:
             checkpoint_step = ARTIFACT_REPAIR_STEP.get(artifact, step_num)
-            prior_checkpoint = self.checkpoint(checkpoint_step, errors, flow_tier)
+            prior_checkpoint = self.checkpoint(checkpoint_step, errors)
             overwritten = False
             if artifact == "WD-CTX":
                 overwritten = prior_checkpoint.get("wd_ctx_written") is True
@@ -816,15 +783,14 @@ class GateValidator:
                     code=code,
                     message=f"步骤 {step_num}: working draft 缺少 {artifact} 区块",
                     step=step_num,
-                    flow_tier=flow_tier,
-                    field="produced_artifacts",
+                                        field="produced_artifacts",
                     missing_artifacts=[artifact],
                     recommended_rollback_step=ARTIFACT_REPAIR_STEP.get(artifact, step_num),
                     recommended_repair_step=ARTIFACT_REPAIR_STEP.get(artifact, step_num),
                 ),
             )
 
-    def check_block_state_sync(self, artifact: str, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+    def check_block_state_sync(self, artifact: str, errors: list[dict[str, Any]], step_num: int) -> None:
         draft_path = self.working_draft_path()
         if not draft_path or not draft_path.exists():
             return
@@ -837,7 +803,7 @@ class GateValidator:
             return
 
         checkpoint_step = ARTIFACT_REPAIR_STEP.get(artifact, step_num)
-        checkpoint = self.checkpoint(checkpoint_step, errors, flow_tier)
+        checkpoint = self.checkpoint(checkpoint_step, errors)
         expected_field = {
             "WD-CTX": "wd_ctx_written",
             "WD-TASK": "wd_task_written",
@@ -853,15 +819,14 @@ class GateValidator:
                     code="artifact_state_desync",
                     message=f"步骤 {step_num}: {artifact} 已写入 draft，但 state 未同步",
                     step=step_num,
-                    flow_tier=flow_tier,
-                    field="produced_artifacts",
+                                        field="produced_artifacts",
                     missing_artifacts=[artifact],
                     recommended_rollback_step=checkpoint_step,
                     recommended_repair_step=checkpoint_step,
                 ),
             )
 
-    def check_task_slots_cover_template(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+    def check_task_slots_cover_template(self, errors: list[dict[str, Any]], step_num: int) -> None:
         draft_path = self.working_draft_path()
         if not draft_path or not draft_path.exists():
             return
@@ -878,8 +843,7 @@ class GateValidator:
                     code="task_block_structure_invalid",
                     message=f"步骤 {step_num}: WD-TASK 不得混入 CTX 条目",
                     step=step_num,
-                    flow_tier=flow_tier,
-                    field="working_draft_path",
+                                        field="working_draft_path",
                     recommended_rollback_step=8,
                     recommended_repair_step=8,
                 ),
@@ -891,18 +855,17 @@ class GateValidator:
                     code="task_slots_incomplete",
                     message=f"步骤 {step_num}: WD-TASK 必须与模板槽位一一对应且顺序一致",
                     step=step_num,
-                    flow_tier=flow_tier,
-                    field="working_draft_path",
+                                        field="working_draft_path",
                     recommended_rollback_step=8,
                     recommended_repair_step=8,
                     details={"expected_slots": headings, "actual_slots": actual_headings},
                 ),
             )
 
-    def check_skip_record(self, skipped_step: int, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+    def check_skip_record(self, skipped_step: int, errors: list[dict[str, Any]], step_num: int) -> None:
         skipped_steps = self.state.get("skipped_steps", [])
         completed_steps = self.state.get("completed_steps", [])
-        checkpoint = self.checkpoint(skipped_step, errors, flow_tier)
+        checkpoint = self.checkpoint(skipped_step, errors)
         has_skip = checkpoint.get("skipped") is True and bool(str(checkpoint.get("reason") or "").strip())
         if (
             not isinstance(skipped_steps, list)
@@ -916,15 +879,14 @@ class GateValidator:
                     code="step_skipped_without_checkpoint",
                     message=f"步骤 {step_num}: step-{skipped_step} 跳过时必须显式记录，且不得写入 completed_steps",
                     step=step_num,
-                    flow_tier=flow_tier,
-                    field="skipped_steps",
+                                        field="skipped_steps",
                     recommended_rollback_step=skipped_step,
                     recommended_repair_step=skipped_step,
                 ),
             )
 
-    def check_repowiki_consumed(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
-        checkpoint6 = self.checkpoint(6, errors, flow_tier)
+    def check_repowiki_consumed(self, errors: list[dict[str, Any]], step_num: int) -> None:
+        checkpoint6 = self.checkpoint(6, errors)
         if checkpoint6.get("repowiki_exists") is True and int(checkpoint6.get("repowiki_source_count") or 0) <= 0:
             add_issue(
                 errors,
@@ -932,20 +894,17 @@ class GateValidator:
                     code="repowiki_not_consumed",
                     message=f"步骤 {step_num}: repowiki 已存在但未记录实际消费来源",
                     step=step_num,
-                    flow_tier=flow_tier,
-                    field="checkpoints.step-6.repowiki_source_count",
+                                        field="checkpoints.step-6.repowiki_source_count",
                     recommended_rollback_step=7,
                     recommended_repair_step=7,
                 ),
             )
 
-    def check_wd_syn_quality(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
+    def check_wd_syn_quality(self, errors: list[dict[str, Any]], step_num: int) -> None:
         draft_path = self.working_draft_path()
         if not draft_path or not draft_path.exists():
             return
         content = read_markdown(draft_path)
-        if flow_tier == "light":
-            return
         if "## WD-SYN" not in content:
             return
         block = extract_named_block(content, "WD-SYN")
@@ -958,8 +917,7 @@ class GateValidator:
                     code="wd_syn_slots_incomplete",
                     message=f"步骤 {step_num}: WD-SYN 必须按模板槽位逐项收敛",
                     step=step_num,
-                    flow_tier=flow_tier,
-                    field="working_draft_path",
+                                        field="working_draft_path",
                     missing_artifacts=["WD-SYN"],
                     recommended_rollback_step=10,
                     recommended_repair_step=10,
@@ -984,8 +942,7 @@ class GateValidator:
                     code="missing_working_draft_block",
                     message=f"步骤 {step_num}: WD-SYN 缺少最小收敛结构",
                     step=step_num,
-                    flow_tier=flow_tier,
-                    field="working_draft_path",
+                                        field="working_draft_path",
                     missing_artifacts=["WD-SYN"],
                     recommended_rollback_step=10,
                     recommended_repair_step=10,
@@ -993,8 +950,8 @@ class GateValidator:
                 ),
             )
 
-    def check_final_document(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
-        self.check_final_document_path_contract(errors, step_num, flow_tier)
+    def check_final_document(self, errors: list[dict[str, Any]], step_num: int) -> None:
+        self.check_final_document_path_contract(errors, step_num)
         final_document = self.final_document_path()
         require(
             final_document is not None and final_document.exists(),
@@ -1002,8 +959,7 @@ class GateValidator:
             code="missing_artifact",
             message=f"步骤 {step_num}: 最终文档不存在",
             step=step_num,
-            flow_tier=flow_tier,
-            field="final_document_path",
+                        field="final_document_path",
             missing_artifacts=["final_document"],
             recommended_rollback_step=11,
             recommended_repair_step=11,
@@ -1024,20 +980,19 @@ class GateValidator:
                     code="final_document_headings_mismatch",
                     message=f"步骤 {step_num}: 最终文档槽位顺序与模板不一致",
                     step=step_num,
-                    flow_tier=flow_tier,
-                    field="final_document_path",
+                                        field="final_document_path",
                     recommended_rollback_step=11,
                     recommended_repair_step=11,
                     details={"expected_headings": expected_titles, "actual_headings": actual_titles},
                 ),
             )
 
-    def check_final_document_not_premature(self, errors: list[dict[str, Any]], step_num: int, flow_tier: str) -> None:
-        self.check_final_document_path_contract(errors, step_num, flow_tier)
+    def check_final_document_not_premature(self, errors: list[dict[str, Any]], step_num: int) -> None:
+        self.check_final_document_path_contract(errors, step_num)
         final_document = self.final_document_path()
         if not final_document or not final_document.exists():
             return
-        step10 = self.checkpoint(10, errors, flow_tier)
+        step10 = self.checkpoint(10, errors)
         completed_at = parse_iso_datetime(step10.get("completed_at"))
         if not completed_at:
             return
@@ -1049,285 +1004,194 @@ class GateValidator:
                     code="step_order_violation",
                     message="步骤 11: 最终文档生成时间早于 step-10 完成时间",
                     step=step_num,
-                    flow_tier=flow_tier,
-                    field="final_document_path",
+                                        field="final_document_path",
                     recommended_rollback_step=10,
                     recommended_repair_step=10,
                 ),
             )
 
-    def common(self, step_num: int, flow_tier: str, errors: list[dict[str, Any]]) -> None:
-        self.check_state_shape(errors, step_num, flow_tier)
-        self.check_receipt_integrity(errors, step_num, flow_tier)
-        self.check_completed_steps(errors, step_num, flow_tier)
-        checkpoint = self.checkpoint(step_num, errors, flow_tier)
+    def common(self, step_num: int, errors: list[dict[str, Any]]) -> None:
+        self.check_state_shape(errors, step_num)
+        self.check_receipt_integrity(errors, step_num)
+        self.check_completed_steps(errors, step_num)
+        checkpoint = self.checkpoint(step_num, errors)
         if checkpoint:
-            self.check_summary(checkpoint, step_num, errors, flow_tier)
+            self.check_summary(checkpoint, step_num, errors)
         if step_num >= 2:
-            self.check_step1_ready(errors, step_num, flow_tier)
-            self.check_solution_root_contract(errors, step_num, flow_tier)
-            self.check_final_document_path_contract(errors, step_num, flow_tier)
+            self.check_step1_ready(errors, step_num)
+            self.check_solution_root_contract(errors, step_num)
+            self.check_final_document_path_contract(errors, step_num)
         if step_num >= 3:
-            self.check_prerequisite_files(errors, step_num, flow_tier)
+            self.check_prerequisite_files(errors, step_num)
         if step_num >= 4:
-            self.check_template_loaded(errors, step_num, flow_tier)
+            self.check_template_loaded(errors, step_num)
         if step_num >= 7:
-            self.check_block_state_sync("WD-CTX", errors, step_num, flow_tier)
-        if step_num >= 8 and flow_tier != "light":
-            self.check_block_state_sync("WD-TASK", errors, step_num, flow_tier)
+            self.check_block_state_sync("WD-CTX", errors, step_num)
+        if step_num >= 8:
+            self.check_block_state_sync("WD-TASK", errors, step_num)
         if step_num >= 10:
-            self.check_block_state_sync("WD-SYN-LIGHT" if flow_tier == "light" else "WD-SYN", errors, step_num, flow_tier)
+            self.check_block_state_sync("WD-SYN", errors, step_num)
 
-    def step_1(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
-        self.check_state_shape(errors, 1, flow_tier)
-        self.check_completed_steps(errors, 1, flow_tier)
+    def step_1(self, errors: list[dict[str, Any]]) -> None:
+        self.check_state_shape(errors, 1)
+        self.check_completed_steps(errors, 1)
 
-    def step_2(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
-        self.common(2, flow_tier, errors)
-        checkpoint = self.checkpoint(2, errors, flow_tier)
+    def step_2(self, errors: list[dict[str, Any]]) -> None:
+        self.common(2, errors)
+        checkpoint = self.checkpoint(2, errors)
         require(
             checkpoint.get("prerequisites_checked") is True,
             errors,
             code="prerequisites_not_checked",
             message="步骤 2: 前置文件检查未完成",
             step=2,
-            flow_tier=flow_tier,
-            field="checkpoints.step-2.prerequisites_checked",
+                        field="checkpoints.step-2.prerequisites_checked",
             recommended_rollback_step=2,
             recommended_repair_step=2,
         )
 
-    def step_3(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
-        self.common(3, flow_tier, errors)
-        self.check_prerequisite_files(errors, 3, flow_tier)
+    def step_3(self, errors: list[dict[str, Any]]) -> None:
+        self.common(3, errors)
+        self.check_prerequisite_files(errors, 3)
 
-    def step_4(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
-        self.common(4, flow_tier, errors)
-        checkpoint = self.checkpoint(4, errors, flow_tier)
-        signals = checkpoint.get("signals") if isinstance(checkpoint.get("signals"), list) else []
+    def step_4(self, errors: list[dict[str, Any]]) -> None:
+        self.common(4, errors)
+        checkpoint = self.checkpoint(4, errors)
         require(
-            self.state.get("flow_tier") in {"light", "moderate", "full"},
+            checkpoint.get("summary") is not None and str(checkpoint.get("summary") or "").strip() != "",
             errors,
-            code="invalid_flow_tier",
-            message="步骤 4: flow_tier 必须为 light/moderate/full",
+            code="missing_step_summary",
+            message="步骤 4: checkpoints.step-4.summary 不能为空",
             step=4,
-            flow_tier=flow_tier,
-            field="flow_tier",
+            field="checkpoints.step-4.summary",
             recommended_rollback_step=4,
             recommended_repair_step=4,
         )
-        require(
-            checkpoint.get("flow_tier") == self.state.get("flow_tier"),
-            errors,
-            code="flow_tier_state_mismatch",
-            message="步骤 4: checkpoint flow_tier 与顶层 flow_tier 不一致",
-            step=4,
-            flow_tier=flow_tier,
-            field="checkpoints.step-4.flow_tier",
-            recommended_rollback_step=4,
-            recommended_repair_step=4,
-        )
-        require(
-            bool(signals),
-            errors,
-            code="invalid_step4_signals",
-            message="步骤 4: signals 不能为空，必须显式声明分类信号",
-            step=4,
-            flow_tier=flow_tier,
-            field="checkpoints.step-4.signals",
-            recommended_rollback_step=4,
-            recommended_repair_step=4,
-        )
-        if isinstance(signals, list) and any(str(signal) not in VALID_STEP4_SIGNALS for signal in signals):
-            add_issue(
-                errors,
-                make_issue(
-                    code="invalid_step4_signals",
-                    message="步骤 4: signals 只能使用受支持的分类信号",
-                    step=4,
-                    flow_tier=flow_tier,
-                    field="checkpoints.step-4.signals",
-                    recommended_rollback_step=4,
-                    recommended_repair_step=4,
-                    details={"signals": signals},
-                ),
-            )
 
-    def step_5(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
-        self.common(5, flow_tier, errors)
-        checkpoint = self.checkpoint(5, errors, flow_tier)
+    def step_5(self, errors: list[dict[str, Any]]) -> None:
+        self.common(5, errors)
+        checkpoint = self.checkpoint(5, errors)
         require(
             checkpoint.get("members_checked") is True and bool(self.selected_members()),
             errors,
             code="missing_selected_members",
             message="步骤 5: 未记录 selected_members",
             step=5,
-            flow_tier=flow_tier,
-            field="checkpoints.step-5.selected_members",
+                        field="checkpoints.step-5.selected_members",
             recommended_rollback_step=5,
             recommended_repair_step=5,
         )
 
-    def step_6(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
-        self.common(6, flow_tier, errors)
-        checkpoint = self.checkpoint(6, errors, flow_tier)
+    def step_6(self, errors: list[dict[str, Any]]) -> None:
+        self.common(6, errors)
+        checkpoint = self.checkpoint(6, errors)
         require(
             checkpoint.get("repowiki_checked") is True,
             errors,
             code="repowiki_not_checked",
             message="步骤 6: repowiki 检测未完成",
             step=6,
-            flow_tier=flow_tier,
-            field="checkpoints.step-6.repowiki_checked",
+                        field="checkpoints.step-6.repowiki_checked",
             recommended_rollback_step=6,
             recommended_repair_step=6,
         )
 
-    def step_7(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
-        self.common(7, flow_tier, errors)
-        self.check_repowiki_consumed(errors, 7, flow_tier)
+    def step_7(self, errors: list[dict[str, Any]]) -> None:
+        self.common(7, errors)
+        self.check_repowiki_consumed(errors, 7)
         require(
             "WD-CTX" in self.state.get("produced_artifacts", []),
             errors,
             code="missing_artifact",
             message="步骤 7: produced_artifacts 缺少 WD-CTX",
             step=7,
-            flow_tier=flow_tier,
-            field="produced_artifacts",
+                        field="produced_artifacts",
             missing_artifacts=["WD-CTX"],
             recommended_rollback_step=7,
             recommended_repair_step=7,
         )
-        gate_field = "can_enter_step_10" if flow_tier == "light" else "can_enter_step_8"
         require(
-            self.state.get(gate_field) is True,
+            self.state.get("can_enter_step_8") is True,
             errors,
             code="gate_flag_false",
-            message=f"步骤 7: {gate_field} 为 false",
+            message="步骤 7: can_enter_step_8 为 false",
             step=7,
-            flow_tier=flow_tier,
-            field=gate_field,
-            recommended_rollback_step=GATE_REPAIR_STEP[gate_field],
-            recommended_repair_step=GATE_REPAIR_STEP[gate_field],
+            field="can_enter_step_8",
+            recommended_rollback_step=7,
+            recommended_repair_step=7,
         )
-        self.check_working_draft_block("WD-CTX", errors, 7, flow_tier)
+        self.check_working_draft_block("WD-CTX", errors, 7)
 
-    def step_8(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
-        self.common(8, flow_tier, errors)
-        if flow_tier == "light":
-            add_issue(
-                errors,
-                make_issue(
-                    code="invalid_step_for_tier",
-                    message="步骤 8: light 流程不应进入此步骤",
-                    step=8,
-                    flow_tier=flow_tier,
-                    skip_instead_of_retry=True,
-                    recommended_rollback_step=8,
-                    recommended_repair_step=8,
-                ),
-            )
-            return
+    def step_8(self, errors: list[dict[str, Any]]) -> None:
+        self.common(8, errors)
         require(
             self.state.get("can_enter_step_8") is True,
             errors,
             code="gate_flag_false",
             message="步骤 8: can_enter_step_8 为 false",
             step=8,
-            flow_tier=flow_tier,
-            field="can_enter_step_8",
+                        field="can_enter_step_8",
             recommended_rollback_step=7,
             recommended_repair_step=7,
         )
-        self.check_working_draft_block("WD-CTX", errors, 8, flow_tier)
-        self.check_working_draft_block("WD-TASK", errors, 8, flow_tier)
-        self.check_task_slots_cover_template(errors, 8, flow_tier)
+        self.check_working_draft_block("WD-CTX", errors, 8)
+        self.check_working_draft_block("WD-TASK", errors, 8)
+        self.check_task_slots_cover_template(errors, 8)
 
-    def step_9(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
-        self.common(9, flow_tier, errors)
-        if flow_tier in {"light", "moderate"}:
-            add_issue(
-                errors,
-                make_issue(
-                    code="invalid_step_for_tier",
-                    message=f"步骤 9: {flow_tier} 流程不应进入此步骤",
-                    step=9,
-                    flow_tier=flow_tier,
-                    skip_instead_of_retry=True,
-                    recommended_rollback_step=9,
-                    recommended_repair_step=9,
-                ),
-            )
-            return
+    def step_9(self, errors: list[dict[str, Any]]) -> None:
+        self.common(9, errors)
         require(
             self.state.get("can_enter_step_9") is True,
             errors,
             code="gate_flag_false",
             message="步骤 9: can_enter_step_9 为 false",
             step=9,
-            flow_tier=flow_tier,
-            field="can_enter_step_9",
+                        field="can_enter_step_9",
             recommended_rollback_step=8,
             recommended_repair_step=8,
         )
-        self.check_working_draft_block("WD-CTX", errors, 9, flow_tier)
-        self.check_working_draft_block("WD-TASK", errors, 9, flow_tier)
+        self.check_working_draft_block("WD-CTX", errors, 9)
+        self.check_working_draft_block("WD-TASK", errors, 9)
         for member in self.selected_members():
-            self.check_working_draft_block(f"WD-EXP-{member.upper()}", errors, 9, flow_tier)
+            self.check_working_draft_block(f"WD-EXP-{member.upper()}", errors, 9)
 
-    def step_10(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
-        self.common(10, flow_tier, errors)
-        self.check_pending_questions(errors, 10, flow_tier)
-        if flow_tier == "light":
-            self.check_skip_record(8, errors, 10, flow_tier)
-            self.check_skip_record(9, errors, 10, flow_tier)
-        elif flow_tier == "moderate":
-            self.check_skip_record(9, errors, 10, flow_tier)
+    def step_10(self, errors: list[dict[str, Any]]) -> None:
+        self.common(10, errors)
+        self.check_pending_questions(errors, 10)
         require(
             self.state.get("can_enter_step_10") is True,
             errors,
             code="gate_flag_false",
             message="步骤 10: can_enter_step_10 为 false",
             step=10,
-            flow_tier=flow_tier,
-            field="can_enter_step_10",
+                        field="can_enter_step_10",
             recommended_rollback_step=8,
             recommended_repair_step=8,
         )
-        self.check_working_draft_block("WD-CTX", errors, 10, flow_tier)
-        if flow_tier != "light":
-            self.check_working_draft_block("WD-TASK", errors, 10, flow_tier)
-            self.check_working_draft_block("WD-SYN", errors, 10, flow_tier)
-            self.check_wd_syn_quality(errors, 10, flow_tier)
+        self.check_working_draft_block("WD-CTX", errors, 10)
+        self.check_working_draft_block("WD-TASK", errors, 10)
+        self.check_working_draft_block("WD-SYN", errors, 10)
+        self.check_wd_syn_quality(errors, 10)
 
-    def step_11(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
-        self.common(11, flow_tier, errors)
-        self.check_pending_questions(errors, 11, flow_tier)
-        if flow_tier == "light":
-            self.check_skip_record(8, errors, 11, flow_tier)
-            self.check_skip_record(9, errors, 11, flow_tier)
-        elif flow_tier == "moderate":
-            self.check_skip_record(9, errors, 11, flow_tier)
+    def step_11(self, errors: list[dict[str, Any]]) -> None:
+        self.common(11, errors)
+        self.check_pending_questions(errors, 11)
         require(
             self.state.get("can_enter_step_11") is True,
             errors,
             code="gate_flag_false",
             message="步骤 11: can_enter_step_11 为 false",
             step=11,
-            flow_tier=flow_tier,
-            field="can_enter_step_11",
+                        field="can_enter_step_11",
             recommended_rollback_step=10,
             recommended_repair_step=10,
         )
-        self.check_working_draft_block("WD-CTX", errors, 11, flow_tier)
-        if flow_tier == "light":
-            self.check_working_draft_block("WD-SYN-LIGHT", errors, 11, flow_tier)
-        else:
-            self.check_working_draft_block("WD-TASK", errors, 11, flow_tier)
-            self.check_working_draft_block("WD-SYN", errors, 11, flow_tier)
-            self.check_wd_syn_quality(errors, 11, flow_tier)
-        self.check_final_document_not_premature(errors, 11, flow_tier)
-        checkpoint = self.checkpoint(11, errors, flow_tier)
+        self.check_working_draft_block("WD-CTX", errors, 11)
+        self.check_working_draft_block("WD-TASK", errors, 11)
+        self.check_working_draft_block("WD-SYN", errors, 11)
+        self.check_wd_syn_quality(errors, 11)
+        self.check_final_document_not_premature(errors, 11)
+        checkpoint = self.checkpoint(11, errors)
         final_document_path = self.final_document_path()
         if final_document_path and final_document_path.exists():
             require(
@@ -1336,48 +1200,39 @@ class GateValidator:
                 code="final_document_not_rendered_via_script",
                 message="步骤 11: 最终文档必须通过 run-step.py 的步骤 11 流程生成",
                 step=11,
-                flow_tier=flow_tier,
-                field="checkpoints.step-11.rendered_via_script",
+                                field="checkpoints.step-11.rendered_via_script",
                 recommended_rollback_step=11,
                 recommended_repair_step=11,
             )
 
-    def step_12(self, flow_tier: str, errors: list[dict[str, Any]]) -> None:
-        self.common(12, flow_tier, errors)
-        self.check_pending_questions(errors, 12, flow_tier)
-        if flow_tier == "light":
-            self.check_skip_record(8, errors, 12, flow_tier)
-            self.check_skip_record(9, errors, 12, flow_tier)
-        elif flow_tier == "moderate":
-            self.check_skip_record(9, errors, 12, flow_tier)
+    def step_12(self, errors: list[dict[str, Any]]) -> None:
+        self.common(12, errors)
+        self.check_pending_questions(errors, 12)
         require(
             self.state.get("can_enter_step_12") is True,
             errors,
             code="gate_flag_false",
             message="步骤 12: can_enter_step_12 为 false",
             step=12,
-            flow_tier=flow_tier,
-            field="can_enter_step_12",
+                        field="can_enter_step_12",
             recommended_rollback_step=11,
             recommended_repair_step=11,
         )
-        self.check_working_draft_block("WD-CTX", errors, 12, flow_tier)
-        if flow_tier != "light":
-            self.check_working_draft_block("WD-TASK", errors, 12, flow_tier)
-        self.check_final_document(errors, 12, flow_tier)
-        step11 = self.checkpoint(11, errors, flow_tier)
+        self.check_working_draft_block("WD-CTX", errors, 12)
+        self.check_working_draft_block("WD-TASK", errors, 12)
+        self.check_final_document(errors, 12)
+        step11 = self.checkpoint(11, errors)
         require(
             step11.get("rendered_via_script") is True,
             errors,
             code="final_document_not_rendered_via_script",
             message="步骤 12: 最终文档必须来自 run-step.py 的步骤 11 成稿流程",
             step=12,
-            flow_tier=flow_tier,
-            field="checkpoints.step-11.rendered_via_script",
+                        field="checkpoints.step-11.rendered_via_script",
             recommended_rollback_step=11,
             recommended_repair_step=11,
         )
-        checkpoint = self.checkpoint(12, errors, flow_tier)
+        checkpoint = self.checkpoint(12, errors)
         if self.state.get("absorption_check_passed") or self.state.get("cleanup_allowed"):
             require(
                 checkpoint.get("validator_passed") is True,
@@ -1385,8 +1240,7 @@ class GateValidator:
                 code="cleanup_attempt_before_validation",
                 message="步骤 12: cleanup 标志不能先于 validator_passed=true",
                 step=12,
-                flow_tier=flow_tier,
-                field="checkpoints.step-12.validator_passed",
+                                field="checkpoints.step-12.validator_passed",
                 recommended_rollback_step=12,
                 recommended_repair_step=12,
             )
@@ -1401,7 +1255,6 @@ def format_issue_with_command(
     issue: dict[str, Any],
     *,
     state_path: Path,
-    flow_tier: str,
     state: dict[str, Any],
 ) -> str:
     lines = [f"  ✗ {issue['message']}", f"    → 建议：{issue['repair_guidance']}"]
@@ -1412,18 +1265,16 @@ def format_issue_with_command(
             + render_repair_command(
                 state_path=state_path,
                 repair_step=repair_step,
-                flow_tier=flow_tier,
-                state=state,
+                                state=state,
             )
         )
     return "\n".join(lines)
 
 
-def write_pass_receipt(path: Path, state: dict[str, Any], step: int, flow_tier: str) -> dict[str, Any]:
+def write_pass_receipt(path: Path, state: dict[str, Any], step: int) -> dict[str, Any]:
     fingerprint = compute_state_fingerprint(state)
     receipt = {
         "step": step,
-        "flow_tier": flow_tier,
         "state_fingerprint": fingerprint,
         "validated_at": iso_now(),
     }
@@ -1436,7 +1287,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="验证 create-technical-solution 状态文件")
     parser.add_argument("--state", required=True, help="状态文件路径")
     parser.add_argument("--step", type=int, required=True, help="要校验的步骤号")
-    parser.add_argument("--flow-tier", required=True, choices=["light", "moderate", "full", "pending"], help="当前流程级别")
+    parser.add_argument("--flow-tier", required=False, choices=["light", "moderate", "full", "pending"], help="当前流程级别（已废弃，flow_tier 已从协议中移除）")
     parser.add_argument("--format", choices=["json", "text"], default="text", help="输出格式")
     parser.add_argument("--write-pass-receipt", action="store_true", help="校验通过后写入 gate_receipt")
     args = parser.parse_args()
@@ -1445,15 +1296,14 @@ def main() -> int:
     state = load_state(state_path)
     validator = GateValidator(state, state_path)
     errors: list[dict[str, Any]] = []
-    getattr(validator, f"step_{args.step}")(args.flow_tier, errors)
+    getattr(validator, f"step_{args.step}")(errors)
 
     if errors:
         payload = {
             "step": args.step,
-            "flow_tier": args.flow_tier,
             "passed": False,
             "summary": build_summary(errors),
-            "repair_plan": build_repair_plan(errors, state_path=state_path, flow_tier=args.flow_tier, state=state),
+            "repair_plan": build_repair_plan(errors, state_path=state_path, state=state),
             "issues": errors,
         }
         if args.format == "json":
@@ -1461,12 +1311,12 @@ def main() -> int:
         else:
             print(f"步骤 {args.step} 门禁未通过:")
             for issue in errors:
-                print(format_issue_with_command(issue, state_path=state_path, flow_tier=args.flow_tier, state=state))
+                print(format_issue_with_command(issue, state_path=state_path, state=state))
         return 2
 
-    payload = {"step": args.step, "flow_tier": args.flow_tier, "passed": True, "summary": {"error_count": 0}}
+    payload = {"step": args.step, "passed": True, "summary": {"error_count": 0}}
     if args.write_pass_receipt:
-        payload["gate_receipt"] = write_pass_receipt(state_path, state, args.step, args.flow_tier)
+        payload["gate_receipt"] = write_pass_receipt(state_path, state, args.step)
     if args.format == "json":
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:

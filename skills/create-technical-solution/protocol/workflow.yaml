@@ -4,108 +4,79 @@ steps:
     slug: scope
     name: 定题与范围判断
     card: steps/01-定题与范围判断.md
-    allowed_flow_tiers: [light, moderate, full]
     next_step: 2
   - id: 2
     slug: prerequisites
     name: 检查前置文件
     card: steps/02-检查语义前置文件.md
-    allowed_flow_tiers: [light, moderate, full]
     next_step: 3
   - id: 3
     slug: template
     name: 读取当前生效模板
     card: steps/03-读取当前生效模板.md
-    allowed_flow_tiers: [light, moderate, full]
     next_step: 4
   - id: 4
     slug: tier
-    name: 判断方案类型
+    name: 确认方案类型
     card: steps/04-判断方案类型.md
-    allowed_flow_tiers: [light, moderate, full]
     next_step: 5
   - id: 5
     slug: members
     name: 加载成员名册
     card: steps/05-加载成员名册并选择参与者.md
-    allowed_flow_tiers: [light, moderate, full]
     next_step: 6
   - id: 6
     slug: repowiki
     name: 检测 repowiki
     card: steps/06-检测repowiki目录.md
-    allowed_flow_tiers: [light, moderate, full]
     next_step: 7
   - id: 7
     slug: context
     name: 构建共享上下文 (WD-CTX)
     card: steps/07-构建共享上下文.md
-    allowed_flow_tiers: [light, moderate, full]
     produces: [WD-CTX]
     content_block: WD-CTX
     gate_flags:
-      light: can_enter_step_10
-      moderate: can_enter_step_8
-      full: can_enter_step_8
-    next_step:
-      light: 10
-      moderate: 8
-      full: 8
+      can_enter_step_8: true
+    next_step: 8
   - id: 8
     slug: task-sheet
     name: 生成模板任务单 (WD-TASK)
     card: steps/08-生成模板任务单.md
-    allowed_flow_tiers: [moderate, full]
-    auto_skip_flow_tiers: [light]
     produces: [WD-TASK]
     content_block: WD-TASK
     gate_flags:
-      moderate: can_enter_step_10
-      full: can_enter_step_9
-    next_step:
-      moderate: 10
-      full: 9
+      can_enter_step_9: true
+    next_step: 9
   - id: 9
     slug: expert-analysis
     name: 专家分析 (WD-EXP-*)
     card: steps/09-组织专家按模板逐槽位分析.md
-    allowed_flow_tiers: [full]
-    auto_skip_flow_tiers: [light, moderate]
     produces_pattern: WD-EXP-*
     gate_flags:
-      full: can_enter_step_10
+      can_enter_step_10: true
     next_step: 10
   - id: 10
     slug: synthesis
     name: 协作收敛 (WD-SYN)
     card: steps/10-按模板逐槽位协作收敛.md
-    allowed_flow_tiers: [light, moderate, full]
-    produces_one_of: [WD-SYN, WD-SYN-LIGHT]
-    content_block_by_tier:
-      light: WD-SYN-LIGHT
-      moderate: WD-SYN
-      full: WD-SYN
+    produces: [WD-SYN]
+    content_block: WD-SYN
     gate_flags:
-      light: can_enter_step_11
-      moderate: can_enter_step_11
-      full: can_enter_step_11
+      can_enter_step_11: true
     question_gate: pending_questions
     next_step: 11
   - id: 11
     slug: render
     name: 严格模板成稿
     card: steps/11-严格模板成稿并保存结果.md
-    allowed_flow_tiers: [light, moderate, full]
     gate_flags:
-      light: can_enter_step_12
-      moderate: can_enter_step_12
-      full: can_enter_step_12
+      can_enter_step_12: true
     question_gate: pending_questions
     next_step: 12
   - id: 12
     slug: cleanup
     name: 吸收检查与清理
     card: steps/12-吸收检查与清理.md
-    allowed_flow_tiers: [light, moderate, full]
     question_gate: pending_questions
     next_step: done

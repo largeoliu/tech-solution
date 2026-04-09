@@ -229,7 +229,6 @@ def cmd_fixture(cases: list[dict], case_id: str, all_cases: bool = False) -> Non
         fixture = {
             "case_id": f"T{cases.index(case)+1:02d}" if case in cases else "unknown",
             "query": case.get("query", ""),
-            "expected_flow_tier": case.get("expected_behavior", [{}])[0] if case.get("expected_behavior") else "",
             "expected_behaviors": case.get("expected_behavior", []),
             "tags": case.get("tags", []),
             "files_required": case.get("files", []),
@@ -237,7 +236,6 @@ def cmd_fixture(cases: list[dict], case_id: str, all_cases: bool = False) -> Non
             "fixture_created_at": datetime.now().isoformat(),
             "state_template": state_template,
             "status": "pending",
-            "actual_flow_tier": None,
             "actual_behaviors": [],
             "assertion_results": {},
         }
@@ -276,20 +274,18 @@ def cmd_grade(cases: list[dict], case_id: str = None, all_cases: bool = False, s
         import subprocess
         try:
             state_data = yaml.safe_load(Path(state_path).read_text(encoding="utf-8")) or {}
-            tier = state_data.get("flow_tier") or "full"
             step = int(state_data.get("current_step") or 12)
             if state_data.get("can_enter_step_12") or state_data.get("final_document_path"):
                 step = 12
-            cmd = [sys.executable, str(VALIDATE_SCRIPT), "--state", state_path, "--step", str(step), "--flow-tier", tier, "--format", "json"]
+            cmd = [sys.executable, str(VALIDATE_SCRIPT), "--state", state_path, "--step", str(step), "--format", "json"]
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if proc.returncode == 0:
-                results["validate_state"] = {"passed": True, "message": f"状态文件门禁通过（step={step}, tier={tier}）"}
+                results["validate_state"] = {"passed": True, "message": f"状态文件门禁通过（step={step}）"}
             elif proc.returncode == 2:
                 output = json.loads(proc.stdout) if proc.stdout else {}
                 results["validate_state"] = {
                     "passed": False,
                     "step": step,
-                    "flow_tier": tier,
                     "issues": output.get("issues", []),
                     "repair_plan": output.get("repair_plan", []),
                 }
@@ -372,10 +368,6 @@ def cmd_report(fmt: str = "markdown") -> None:
             lines.append(f"### {f['case_id']}: {f['query'][:60]}")
             lines.append(f"- **状态**: {f.get('status', 'pending')}")
             lines.append(f"- **标签**: {', '.join(f.get('tags', []))}")
-            if f.get('expected_flow_tier'):
-                lines.append(f"- **预期 tier**: {f['expected_flow_tier']}")
-            if f.get('actual_flow_tier'):
-                lines.append(f"- **实际 tier**: {f['actual_flow_tier']}")
             lines.append("")
 
         content = "\n".join(lines)

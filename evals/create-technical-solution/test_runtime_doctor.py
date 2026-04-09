@@ -166,15 +166,13 @@ def workspace(tmp_path: Path) -> dict[str, Path]:
 def make_state(workspace: dict[str, Path], **overrides) -> dict:
     state = {
         "current_step": 10,
-        "completed_steps": [1, 2, 3, 4, 5, 6, 7, 8],
-        "skipped_steps": [9],
+        "completed_steps": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "skipped_steps": [],
         "pending_questions": [],
-        "flow_tier": "moderate",
-        "required_artifacts": ["WD-CTX", "WD-TASK", "WD-SYN"],
-        "produced_artifacts": ["WD-CTX", "WD-TASK", "WD-SYN"],
+        "required_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"],
+        "produced_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"],
         "gate_receipt": {
             "step": 10,
-            "flow_tier": "moderate",
             "state_fingerprint": "",
             "validated_at": "2026-04-08T09:31:00",
         },
@@ -189,18 +187,18 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
             "step-1": {"summary": "完成；slug=sample-solution；paths=1；gate: step-2 ready", "slug": "sample-solution", "scope_ready": True},
             "step-2": {"summary": "完成；检查前置文件；files=3；gate: step-3 ready", "prerequisites_checked": True},
             "step-3": {"summary": "完成；写入 draft 骨架；slots=4；gate: step-4 ready", "template_loaded": True, "template_fingerprint": "", "slot_count": 4},
-            "step-4": {"summary": "完成；flow_tier=moderate；signals=1；gate: step-5 ready", "solution_type": "现有资产改造", "flow_tier": "moderate", "signals": ["existing-asset-refactor"]},
+            "step-4": {"summary": "完成；方案类型=现有资产改造；gate: step-5 ready", "solution_type": "现有资产改造"},
             "step-5": {"summary": "完成；成员已选择；count=1；gate: step-6 ready", "members_checked": True, "selected_members": ["systems_architect"], "selected_member_count": 1},
             "step-6": {"summary": "完成；repowiki 不存在；sources=0；gate: step-7 ready", "repowiki_checked": True, "repowiki_exists": False, "repowiki_source_count": 0},
             "step-7": {"summary": "完成；写入 WD-CTX；CTX=1；gate: step-8 ready", "wd_ctx_written": True, "ctx_count": 1},
-            "step-8": {"summary": "完成；写入 WD-TASK；slots=4；gate: step-10 ready", "wd_task_written": True, "task_slot_count": 4},
-            "step-9": {"summary": "跳过；WD-EXP=0；reason=moderate；gate: step-10 ready", "skipped": True, "reason": "moderate 无需 WD-EXP-*", "wd_exp_count": 0},
+            "step-8": {"summary": "完成；写入 WD-TASK；slots=4；gate: step-9 ready", "wd_task_written": True, "task_slot_count": 4},
+            "step-9": {"summary": "完成；写入 WD-EXP-*；members=1；gate: step-10 ready", "wd_exp_written": True, "wd_exp_count": 1},
             "step-10": {"summary": "完成；写入 WD-SYN；slots=4；gate: step-11 ready", "wd_syn_written": True, "syn_slot_count": 4},
             "step-11": {"summary": "等待成稿", "final_document_written": False, "absorbed_slot_count": 0, "rendered_via_script": False},
             "step-12": {"summary": "等待校验", "validator_passed": False, "working_draft_deleted": False, "state_file_deleted": False},
         },
         "can_enter_step_8": True,
-        "can_enter_step_9": False,
+        "can_enter_step_9": True,
         "can_enter_step_10": True,
         "can_enter_step_11": True,
         "can_enter_step_12": False,
@@ -340,7 +338,6 @@ def test_apply_mode_refreshes_gate_receipt_when_receipt_is_only_problem(workspac
     state = make_state(workspace)
     state["gate_receipt"] = {
         "step": 10,
-        "flow_tier": "moderate",
         "state_fingerprint": vs.compute_state_fingerprint(state),
         "validated_at": "",
     }
@@ -352,7 +349,6 @@ def test_apply_mode_refreshes_gate_receipt_when_receipt_is_only_problem(workspac
     assert payload["passed"] is True
     refreshed = vs.load_state(workspace["state_path"])
     assert refreshed["gate_receipt"]["step"] == 10
-    assert refreshed["gate_receipt"]["flow_tier"] == "moderate"
     assert refreshed["gate_receipt"]["validated_at"]
     assert refreshed["gate_receipt"]["state_fingerprint"] == vs.compute_state_fingerprint(refreshed)
 
@@ -363,7 +359,6 @@ def test_apply_mode_does_not_refresh_receipt_when_semantic_issues_remain(workspa
     state = make_state(workspace)
     original_receipt = {
         "step": 10,
-        "flow_tier": "moderate",
         "state_fingerprint": "stale-fingerprint",
         "validated_at": "2026-04-08T09:31:00",
     }
@@ -385,7 +380,6 @@ def test_doctor_returns_validator_issues_and_repair_plan(workspace: dict[str, Pa
     state = make_state(workspace)
     state["gate_receipt"] = {
         "step": 10,
-        "flow_tier": "moderate",
         "state_fingerprint": "stale-fingerprint",
         "validated_at": "2026-04-08T09:31:00",
     }

@@ -33,7 +33,6 @@ def test_load_runtime_snapshot_resolves_core_state_and_paths(tmp_path: Path) -> 
     state_path = state_dir / "sample-solution.yaml"
     state = {
         "current_step": 9,
-        "flow_tier": "full",
         "template_path": ".architecture/templates/technical-solution-template.md",
         "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution.working.md",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
@@ -47,7 +46,6 @@ def test_load_runtime_snapshot_resolves_core_state_and_paths(tmp_path: Path) -> 
     assert snapshot.slug == "sample-solution"
     assert snapshot.state == state
     assert snapshot.current_step == 9
-    assert snapshot.flow_tier == "full"
     assert snapshot.template_path == (repo / ".architecture/templates/technical-solution-template.md").resolve()
     assert snapshot.working_draft_path == (repo / ".architecture/.state/create-technical-solution/sample-solution.working.md").resolve()
     assert snapshot.final_document_path == (repo / ".architecture/technical-solutions/sample-solution.md").resolve()
@@ -63,7 +61,6 @@ def test_load_runtime_snapshot_falls_back_to_slug_based_paths(tmp_path: Path) ->
     state_path = state_dir / "sample-solution.yaml"
     state = {
         "current_step": 3,
-        "flow_tier": "pending",
     }
     state_path.write_text(yaml.safe_dump(state, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
@@ -71,7 +68,6 @@ def test_load_runtime_snapshot_falls_back_to_slug_based_paths(tmp_path: Path) ->
 
     assert snapshot.slug == "sample-solution"
     assert snapshot.current_step == 3
-    assert snapshot.flow_tier == "pending"
     assert snapshot.template_path == (repo / ".architecture/templates/technical-solution-template.md").resolve()
     assert snapshot.working_draft_path == (repo / ".architecture/.state/create-technical-solution/sample-solution.working.md").resolve()
     assert snapshot.final_document_path == (repo / ".architecture/technical-solutions/sample-solution.md").resolve()

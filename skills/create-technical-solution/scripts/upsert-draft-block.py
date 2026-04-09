@@ -192,9 +192,9 @@ def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -
             "ctx_count": 0,
             "completed_at": iso_now(),
         }
-        state["can_enter_step_8"] = state.get("flow_tier") != "light"
-        state["can_enter_step_10"] = state.get("flow_tier") == "light"
-        state["current_step"] = 8 if state.get("flow_tier") != "light" else 10
+        state["can_enter_step_8"] = True
+        state["can_enter_step_10"] = False
+        state["current_step"] = 8
         if 7 not in completed:
             completed.append(7)
     elif block_name == "WD-TASK":
@@ -204,13 +204,9 @@ def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -
             "task_slot_count": 0,
             "completed_at": iso_now(),
         }
-        if state.get("flow_tier") == "full":
-            state["can_enter_step_9"] = True
-            state["can_enter_step_10"] = False
-            state["current_step"] = 9
-        else:
-            state["can_enter_step_10"] = True
-            state["current_step"] = 10
+        state["can_enter_step_9"] = True
+        state["can_enter_step_10"] = False
+        state["current_step"] = 9
         if 8 not in completed:
             completed.append(8)
     elif block_name.startswith("WD-EXP-"):
@@ -225,7 +221,7 @@ def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -
         state["current_step"] = 10
         if 9 not in completed:
             completed.append(9)
-    elif block_name in {"WD-SYN", "WD-SYN-LIGHT"}:
+    elif block_name == "WD-SYN":
         checkpoints["step-10"] = {
             "summary": summary,
             "wd_syn_written": True,
@@ -250,7 +246,7 @@ def update_counts(state: dict[str, Any], block_name: str, content: str) -> None:
         checkpoints["step-9"]["wd_exp_count"] = sum(
             1 for item in produced if isinstance(item, str) and item.startswith("WD-EXP-")
         )
-    elif block_name in {"WD-SYN", "WD-SYN-LIGHT"}:
+    elif block_name == "WD-SYN":
         checkpoints["step-10"]["syn_slot_count"] = count_slot_sections(content)
 
 

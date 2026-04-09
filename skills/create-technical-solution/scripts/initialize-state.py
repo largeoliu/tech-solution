@@ -22,7 +22,6 @@ from protocol_runtime import (
     final_document_relative_path,
     iso_now,
     load_yaml,
-    normalize_flow_tier,
     refresh_receipt,
 )
 
@@ -47,8 +46,6 @@ def initialize_state(
 ) -> dict[str, Any]:
     state = load_or_create_state(state_path)
 
-    current_flow_tier = normalize_flow_tier(state.get("flow_tier"), fallback="light")
-
     checkpoints = state.setdefault("checkpoints", {})
     if not isinstance(checkpoints, dict):
         checkpoints = {}
@@ -61,7 +58,6 @@ def initialize_state(
     }
     state["solution_root"] = str(SOLUTION_ROOT)
     state["final_document_path"] = str(final_document_relative_path(slug))
-    state["flow_tier"] = current_flow_tier
     pending_questions = state.setdefault("pending_questions", [])
     if not isinstance(pending_questions, list):
         state["pending_questions"] = []
@@ -79,8 +75,6 @@ def initialize_state(
     refresh_receipt(
         state,
         step=int(state.get("current_step") or next_step or 1),
-        flow_tier=current_flow_tier,
-        default_flow_tier="light",
     )
     dump_yaml(state_path, state, ensure_parent=True)
     return {

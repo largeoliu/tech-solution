@@ -38,7 +38,7 @@ def load_sync_module(scripts_dir: Path):
     return module
 
 
-def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, dict[str, Any]]:
+def run_cleanup(state_path: Path, summary: str) -> tuple[int, dict[str, Any]]:
     if not state_path.exists():
         return 2, {
             "passed": False,
@@ -48,7 +48,7 @@ def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, di
         }
 
     state = load_yaml(state_path, missing_ok=True)
-    require_receipt(state, expected_step=12, expected_flow_tier=flow_tier)
+    require_receipt(state, expected_step=12)
     repo_root = state_path.parent.parent.parent.parent
     draft_value = str(state.get("working_draft_path") or "")
     working_draft = Path(draft_value) if Path(draft_value).is_absolute() else (repo_root / draft_value)
@@ -80,7 +80,6 @@ def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, di
     step12["state_file_deleted"] = False
     refreshed_after_sync["gate_receipt"] = {
         "step": 12,
-        "flow_tier": flow_tier,
         "state_fingerprint": "",
         "validated_at": "",
     }
@@ -92,12 +91,11 @@ def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, di
     refreshed_state = load_yaml(state_path)
     gate = validator.GateValidator(refreshed_state, state_path)
     errors: list[dict[str, Any]] = []
-    gate.step_12(flow_tier, errors)
+    gate.step_12(errors)
     if errors:
         return 2, {
             "passed": False,
             "step": 12,
-            "flow_tier": flow_tier,
             "summary": validator.build_summary(errors),
             "repair_plan": validator.build_repair_plan(errors),
             "issues": errors,
@@ -112,7 +110,6 @@ def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, di
     step12["state_file_deleted"] = False
     refreshed_state["gate_receipt"] = {
         "step": 12,
-        "flow_tier": flow_tier,
         "state_fingerprint": "",
         "validated_at": "",
     }
@@ -126,7 +123,6 @@ def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, di
     return 0, {
         "passed": True,
         "step": 12,
-        "flow_tier": flow_tier,
         "final_document_path": str(final_document),
         "deleted": {
             "working_draft": not working_draft.exists(),
@@ -138,12 +134,11 @@ def run_cleanup(state_path: Path, flow_tier: str, summary: str) -> tuple[int, di
 def main() -> int:
     parser = argparse.ArgumentParser(description="步骤 12 原子清理：先验证，再置标志并删除中间产物")
     parser.add_argument("--state", required=True, help="状态文件路径")
-    parser.add_argument("--flow-tier", choices=["light", "moderate", "full"], required=True, help="流程级别")
     parser.add_argument("--summary", required=True, help="写入 checkpoints.step-12.summary 的摘要")
     parser.add_argument("--format", choices=["json", "text"], default="json", help="输出格式")
     args = parser.parse_args()
 
-    exit_code, payload = run_cleanup(Path(args.state).resolve(), args.flow_tier, args.summary)
+    exit_code, payload = run_cleanup(Path(args.state).resolve(), args.summary)
     if args.format == "json":
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:

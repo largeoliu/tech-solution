@@ -56,11 +56,10 @@ def write_state(path: Path, state: dict) -> None:
     path.write_text(yaml.safe_dump(state, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
-def make_state(workspace: dict[str, Path], *, step: int, flow_tier: str = "full", selected_members: list[str] | None = None) -> dict:
+def make_state(workspace: dict[str, Path], *, step: int, selected_members: list[str] | None = None) -> dict:
     members = ["systems_architect"] if selected_members is None else selected_members
     return {
         "current_step": step,
-        "flow_tier": flow_tier,
         "template_path": ".architecture/templates/technical-solution-template.md",
         "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution.working.md",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
@@ -91,7 +90,7 @@ def test_step8_scaffold_uses_template_slots(tmp_path: Path) -> None:
     scaffolds = load_script("block_scaffolds")
     runtime_snapshot = load_script("runtime_snapshot")
     workspace = make_workspace(tmp_path)
-    write_state(workspace["state_path"], make_state(workspace, step=8, flow_tier="moderate"))
+    write_state(workspace["state_path"], make_state(workspace, step=8))
 
     snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
     payload = scaffolds.emit_scaffold(snapshot)
@@ -101,19 +100,6 @@ def test_step8_scaffold_uses_template_slots(tmp_path: Path) -> None:
     assert "### 2.2 风险与验证" in payload
     assert "必须消费的共享上下文" in payload
     assert payload.count("### ") == 4
-
-
-def test_light_step8_scaffold_auto_skips_to_step10_light_payload(tmp_path: Path) -> None:
-    scaffolds = load_script("block_scaffolds")
-    runtime_snapshot = load_script("runtime_snapshot")
-    workspace = make_workspace(tmp_path)
-    write_state(workspace["state_path"], make_state(workspace, step=8, flow_tier="light"))
-
-    snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
-    payload = scaffolds.emit_scaffold(snapshot)
-
-    assert payload.startswith("## WD-SYN-LIGHT\n")
-    assert "## WD-TASK" not in payload
 
 
 def test_step9_scaffold_emits_all_selected_members_by_default(tmp_path: Path) -> None:
@@ -133,19 +119,6 @@ def test_step9_scaffold_emits_all_selected_members_by_default(tmp_path: Path) ->
     assert "### 决策类型" in payload
 
 
-def test_moderate_step9_scaffold_auto_skips_to_step10_payload(tmp_path: Path) -> None:
-    scaffolds = load_script("block_scaffolds")
-    runtime_snapshot = load_script("runtime_snapshot")
-    workspace = make_workspace(tmp_path)
-    write_state(workspace["state_path"], make_state(workspace, step=9, flow_tier="moderate"))
-
-    snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
-    payload = scaffolds.emit_scaffold(snapshot)
-
-    assert payload.startswith("## WD-SYN\n")
-    assert "## WD-EXP-" not in payload
-
-
 def test_step9_scaffold_requires_selected_members(tmp_path: Path) -> None:
     scaffolds = load_script("block_scaffolds")
     runtime_snapshot = load_script("runtime_snapshot")
@@ -158,26 +131,12 @@ def test_step9_scaffold_requires_selected_members(tmp_path: Path) -> None:
         scaffolds.emit_scaffold(snapshot)
 
 
-def test_step10_scaffold_uses_flow_tier_block_variant(tmp_path: Path) -> None:
-    scaffolds = load_script("block_scaffolds")
-    runtime_snapshot = load_script("runtime_snapshot")
-    workspace = make_workspace(tmp_path)
-    write_state(workspace["state_path"], make_state(workspace, step=10, flow_tier="light"))
-
-    snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
-    payload = scaffolds.emit_scaffold(snapshot)
-
-    assert payload.startswith("## WD-SYN-LIGHT\n")
-    assert "### 槽位：1.1 需求概述" in payload
-    assert "候选路径对比" in payload
-
-
 def test_step10_wd_syn_scaffold_matches_full_shared_slot_contract(tmp_path: Path) -> None:
     scaffolds = load_script("block_scaffolds")
     runtime_snapshot = load_script("runtime_snapshot")
     wd_syn_contract = load_script("wd_syn_contract")
     workspace = make_workspace(tmp_path)
-    write_state(workspace["state_path"], make_state(workspace, step=10, flow_tier="moderate"))
+    write_state(workspace["state_path"], make_state(workspace, step=10))
 
     snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
     payload = scaffolds.emit_scaffold(snapshot)
@@ -190,7 +149,7 @@ def test_step10_wd_syn_scaffold_contains_explicit_target_capability_placeholder(
     scaffolds = load_script("block_scaffolds")
     runtime_snapshot = load_script("runtime_snapshot")
     workspace = make_workspace(tmp_path)
-    write_state(workspace["state_path"], make_state(workspace, step=10, flow_tier="moderate"))
+    write_state(workspace["state_path"], make_state(workspace, step=10))
 
     snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
     payload = scaffolds.emit_scaffold(snapshot)

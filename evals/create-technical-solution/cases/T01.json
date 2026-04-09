@@ -11,7 +11,7 @@
       "状态文件初始化仅包含最小流程控制字段，不承载正文内容",
       "步骤 2 确认三前置文件存在",
       "步骤 3 提取模板一级章节并编号 SLOT-01, SLOT-02, ...",
-      "步骤 4 判定 flow_tier = full，required_artifacts 含 WD-CTX, WD-TASK, WD-EXP, WD-SYN",
+      "步骤 4 required_artifacts 含 WD-CTX, WD-TASK, WD-EXP, WD-SYN",
       "步骤 5 selected_members 记录在 checkpoints.step-5，且全部来自 .architecture/members.yml 实际条目",
       "步骤 6 检测 repowiki（存在或不存在均报告）",
       "步骤 7 WD-CTX 写入 working draft，state 仅保留短摘要与数量信息",
@@ -33,14 +33,11 @@
       ".architecture/templates/technical-solution-template.md"
     ],
     "expected_behavior": [
-      "flow_tier 判定为 light",
-      "required_artifacts 仅含 WD-CTX, WD-SYN-LIGHT",
-      "不生成 WD-TASK 和 WD-EXP-*",
-      "生成 WD-CTX 和 WD-SYN-LIGHT",
-      "步骤 8/9 显式跳过并记录原因，且不把正文写入 state",
+      "全流程完整执行（步骤 1-12），required_artifacts 含 WD-CTX, WD-TASK, WD-EXP, WD-SYN",
+      "生成 WD-CTX, WD-TASK, WD-EXP-* 和 WD-SYN",
       "最终文档写入 .architecture/technical-solutions/[slug].md"
     ],
-    "tags": ["train", "light", "步骤覆盖"]
+    "tags": ["train", "full", "步骤覆盖"]
   },
   {
     "skills": ["create-technical-solution"],
@@ -51,14 +48,12 @@
       ".architecture/templates/technical-solution-template.md"
     ],
     "expected_behavior": [
-      "flow_tier 判定为 moderate",
-      "required_artifacts 含 WD-CTX, WD-TASK, WD-SYN，不含 WD-EXP",
-      "生成 WD-TASK 和 WD-SYN（非 WD-SYN-LIGHT）",
-      "不执行步骤 9，不生成 WD-EXP-*",
+      "全流程完整执行（步骤 1-12），required_artifacts 含 WD-CTX, WD-TASK, WD-EXP, WD-SYN",
+      "生成 WD-TASK 和 WD-SYN",
       "WD-SYN 候选方案对比覆盖复用/改造/新建三路径",
       "若已有同名文件，默认覆盖目标文件"
     ],
-    "tags": ["train", "moderate", "步骤覆盖"]
+    "tags": ["train", "full", "步骤覆盖"]
   },
   {
     "skills": ["create-technical-solution"],
@@ -70,7 +65,6 @@
       "repowiki/"
     ],
     "expected_behavior": [
-      "flow_tier 判定为 full",
       "步骤 6 检测并记录 repowiki 路径，后续分析引用其中内容但正文仍只写入 draft",
       "专家分析的关键结论仍绑定 CTX 编号，repowiki 仅作补充",
       "每个需要专家判断的槽位均有对应的 WD-EXP-* 区块",
@@ -90,12 +84,11 @@
       ".architecture/templates/technical-solution-template.md"
     ],
     "expected_behavior": [
-      "flow_tier 判定为 moderate",
-      "repowiki 不存在时步骤 6 报告未找到并跳过",
-      "生成 WD-CTX, WD-TASK, WD-SYN，不生成 WD-EXP",
-      "required_artifacts 与 tier 匹配"
+      "全流程完整执行（步骤 1-12）",
+      "repowiki 不存在时步骤 6 报告未找到并继续",
+      "生成 WD-CTX, WD-TASK, WD-EXP, WD-SYN"
     ],
-    "tags": ["validation", "moderate", "步骤覆盖"]
+    "tags": ["validation", "full", "步骤覆盖"]
   },
   {
     "skills": ["create-technical-solution"],
@@ -106,7 +99,6 @@
       ".architecture/templates/technical-solution-template.md"
     ],
     "expected_behavior": [
-      "flow_tier 判定为 full",
       "拆分方案中选定路径附带职责边界证据和兼容性证据",
       "决策类型为新建的条目同时回答不可复用和不可改造",
       "completed_steps 无跳号为 1 到 12"
@@ -123,8 +115,7 @@
     ],
     "notes": "members.yml 仅含 1 名成员",
     "expected_behavior": [
-      "流程不因成员少而阻塞，selected_members 仅含此人",
-      "若 flow_tier 为 full，仍有 WD-EXP 区块"
+      "流程不因成员少而阻塞，selected_members 仅含此人"
     ],
     "tags": ["train", "边缘"]
   },
@@ -181,8 +172,7 @@
       ".architecture/templates/technical-solution-template.md"
     ],
     "expected_behavior": [
-      "flow_tier 判定为 moderate（涉及两模块但无新建核心能力）",
-      "不判定为 full"
+      "流程完整执行"
     ],
     "tags": ["validation", "边缘"]
   },

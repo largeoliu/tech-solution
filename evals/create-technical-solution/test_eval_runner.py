@@ -122,9 +122,7 @@ def test_emit_scaffold_installed_copy_smoke(tmp_path):
         (
             [
                 "--complete", "--summary", "tier set",
-                "--flow-tier", "full",
                 "--solution-type", "新功能方案",
-                "--signal", "introduces-core-capability",
             ],
             "step-4",
         ),
@@ -160,7 +158,7 @@ def test_runtime_doctor_installed_copy_smoke(tmp_path):
 
     result = subprocess.run(
         ["python3", str(doctor), "--state", str(state_path),
-         "--step", "1", "--flow-tier", "light", "--format", "json"],
+         "--step", "1", "--format", "json"],
         capture_output=True, text=True, check=False, cwd=install_root,
     )
     assert result.returncode == 0, f"Doctor failed: {result.stdout}\n{result.stderr}"

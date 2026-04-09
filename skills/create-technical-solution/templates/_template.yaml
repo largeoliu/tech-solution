@@ -1,13 +1,10 @@
 current_step: 1
 completed_steps: []
-skipped_steps: []
-flow_tier: "pending"
 required_artifacts: []
 produced_artifacts: []
 pending_questions: []
 gate_receipt:
   step: 0
-  flow_tier: ""
   state_fingerprint: ""
   validated_at: ""
 solution_root: ".architecture/technical-solutions"
@@ -33,8 +30,6 @@ checkpoints:
   step-4:
     summary: ""
     solution_type: ""
-    flow_tier: ""
-    signals: []
   step-5:
     summary: ""
     members_checked: false
@@ -55,8 +50,6 @@ checkpoints:
     task_slot_count: 0
   step-9:
     summary: ""
-    skipped: false
-    reason: ""
     wd_exp_count: 0
   step-10:
     summary: ""
