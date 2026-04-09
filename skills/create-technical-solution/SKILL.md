@@ -52,8 +52,9 @@ compatibility:
 使用 `run-step.py` 统一编排器，自动处理验证、receipt 刷新、参数推导和 step card 加载，Agent 只需关注创作工作。
 
 1. **查看任务**：`python /path/to/run-step.py --state <状态文件>` → 输出当前步骤、验证状态、操作指引、下一步命令
-2. **执行并提交**：`python /path/to/run-step.py --state <状态文件> --complete --summary "..." [--content-file /tmp/xxx.md]`
-3. **重复**直到步骤 12 完成
+2. **只读 scaffold**：`python /path/to/run-step.py --state <状态文件> --emit-scaffold` → 仅向 `stdout` 输出当前步骤 scaffold；不修改 state、working draft 或 receipt，且 `--emit-scaffold 与 --complete 不能同时使用`；scaffold 目标步骤遵循当前 auto-skip 语义
+3. **执行并提交**：`python /path/to/run-step.py --state <状态文件> --complete --summary "..." [--content-file /tmp/xxx.md]`
+4. **重复**直到步骤 12 完成
 
 各步骤的完整命令示例：
 
@@ -75,6 +76,10 @@ compatibility:
 ## 运行入口与内部脚本
 - `python /path/to/run-step.py --state <状态文件> [--complete --summary "..." ...]`
   - 唯一受支持的对外入口。统一封装验证、receipt 刷新、参数推导、step card 加载、working draft 写入、最终文档成稿与清理
+- `python /path/to/run-step.py --state <状态文件> --emit-scaffold`
+  - 同一入口下的只读辅助模式；仅输出 scaffold 到 `stdout`，不是第二条写入路径，也不会替代 `--complete`
+- `python /path/to/runtime_doctor.py --state <状态文件> [--step N] [--flow-tier <tier>] [--apply-safe-fixes]`
+  - 运行时 repair helper，不是主执行路径；默认 `dry-run`，只有 `--apply-safe-fixes` 才允许做结构性安全修复（规范目录、旧 draft 路径/状态迁移、语义安全的 receipt 修复）
 - 其他脚本（如 `initialize-state.py`、`extract-template-snapshot.py`、`upsert-draft-block.py`、`set-flow-tier.py`、`advance-state-step.py`、`render-final-document.py`、`finalize-cleanup.py`）
   - 仅保留给 `run-step.py`、测试与内部兼容流程使用；不再作为用户公开操作入口
 - 创作型步骤的 `content-file`
@@ -114,7 +119,7 @@ compatibility:
 - `full` 流程的 `WD-EXP-*` 必须是按成员拆分的独立稳定区块，例如 `WD-EXP-SYSTEMS_ARCHITECT`；不得用单个总块冒充多个专家产物。
 - 步骤 10 必须保留 `WD-SYN` 收敛区块，不得以最终文档替代——中间产物和最终文档职责不同，缺少 WD-SYN 会导致回退时无法追溯决策依据。
 - `moderate` 流程的 step-9 必须显式 skip，而不是“先推进 step-9 再口头说明直接做 step-10”。
-- 步骤 1-12 进入前必须先通过 `run-step.py` 触发 validator 门禁并写 receipt；若未通过，优先消费 `--format json` 返回的 `repair_plan[]`，并按其中 `action_types` 判断修复动作类别、按 `depends_on_steps` 指定的前置关系执行修复、按 `state_patch_hint` 更新状态字段、按 `artifact_write_hint` 落盘缺失产物、按 `working_draft_context_hint` 选择允许消费的上游稳定区块、按结构化 `completion_checks` 确认每项修复已闭合，并优先使用结构化 `retry_command` 重跑校验；其次再参考 `summary.recommended_repair_sequence`、`summary.recommended_rollback_step`、`summary.missing_artifacts` 与 `issues[*].repair_guidance` 后重试，直到通过后继续
+- 步骤 1-12 进入前必须先通过 `run-step.py` 触发 validator 门禁并写 receipt；若未通过，优先消费 `--format json` 返回的 `repair_plan[]`，按 `repair_plan[].step` 与 `repair_plan[].depends_on_steps` 安排修复顺序，按 `repair_plan[].action_type` 判断是否需要重跑对应步骤，并用 `repair_plan[].script_command` 作为首选重试命令；产物闭合以 `repair_plan[].expected_artifacts_after_fix` 为准，再结合 `summary.recommended_repair_sequence`、`summary.recommended_rollback_step`、`summary.missing_artifacts`、`summary.skip_instead_of_retry` 与 `issues[*].repair_guidance` 补充判断，直到通过后继续
 
 <HARD-GATE>
 步骤门控强制要求：步骤 1-12 进入前必须先通过 `run-step.py` 触发对应步骤的 validator 门禁与 receipt 刷新。内部 validator 会检查：
@@ -127,7 +132,7 @@ compatibility:
 7. step-12 前最终文档与模板槽位顺序是否一致
 8. `working_draft_path` / `final_document_path` 是否仍位于白名单目录
 
-若未通过，优先消费 `--format json` 返回的 `repair_plan[]` 修复后重试。严禁跳过验证直接进入下一步；严禁把“我认为门控已通过”当成通过依据。
+若未通过，优先消费 `--format json` 返回的 `repair_plan[]` 修复后重试；重点看 `repair_plan[].step`、`repair_plan[].action_type`、`repair_plan[].depends_on_steps`、`repair_plan[].expected_artifacts_after_fix` 与 `repair_plan[].script_command`，并结合 `summary.*` 和 `issues[*].repair_guidance`。严禁跳过验证直接进入下一步；严禁把“我认为门控已通过”当成通过依据。
 </HARD-GATE>
 
 ## 复杂度评估与流程裁剪

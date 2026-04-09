@@ -28,6 +28,8 @@ from protocol_runtime import (
     render_repair_command,
     working_draft_relative_path,
 )
+from wd_syn_contract import missing_slot_fragments as missing_wd_syn_slot_fragments
+from wd_syn_contract import target_capability_present
 
 
 ALLOWED_TOP_LEVEL_FIELDS = {
@@ -120,6 +122,17 @@ def normalize_task_heading(title: str) -> str:
 def normalize_syn_heading(title: str) -> str:
     normalized = normalize_text(title)
     return re.sub(r"^槽位：\s*", "", normalized)
+
+
+def extract_syn_slot_block(block: str, title: str) -> str:
+    pattern = re.compile(rf"^\s*###\s+槽位：\s*{re.escape(title)}\s*$", re.MULTILINE)
+    match = pattern.search(block)
+    if not match:
+        return ""
+    start = match.start()
+    next_match = re.search(r"^\s*###\s+槽位：\s*.+$", block[match.end():], re.MULTILINE)
+    end = match.end() + next_match.start() if next_match else len(block)
+    return block[start:end].strip()
 
 def normalize_text(value: str) -> str:
     return " ".join(str(value).replace("\xa0", " ").split())
@@ -953,8 +966,17 @@ class GateValidator:
                     details={"expected_slots": template_titles, "actual_slots": actual_titles},
                 ),
             )
-        required_fragments = ["#### 候选方案对比", "| 复用 |", "| 改造 |", "| 新建 |", "#### 选定路径", "关键证据引用"]
-        missing = [fragment for fragment in required_fragments if fragment not in block]
+        missing: list[str] = []
+        for title in template_titles:
+            slot_block = extract_syn_slot_block(block, title)
+            if not slot_block:
+                continue
+            if not target_capability_present(slot_block):
+                if "#### 目标能力" not in missing:
+                    missing.append("#### 目标能力")
+            for fragment in missing_wd_syn_slot_fragments(slot_block, title):
+                if fragment not in missing:
+                    missing.append(fragment)
         if missing:
             add_issue(
                 errors,

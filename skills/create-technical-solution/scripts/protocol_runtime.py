@@ -187,6 +187,24 @@ def final_document_path_for_slug(*, repo_root: Path, slug: str) -> Path:
     return (repo_root / final_document_relative_path(slug)).resolve()
 
 
+def resolve_repo_path(
+    repo_root: Path,
+    path_value: Any,
+    *,
+    default_relative: Path | str | None = None,
+) -> Path | None:
+    raw = str(path_value or "").strip()
+    if raw:
+        candidate = Path(raw)
+    elif default_relative is None:
+        return None
+    else:
+        candidate = Path(default_relative)
+    if not candidate.is_absolute():
+        candidate = repo_root / candidate
+    return candidate.resolve()
+
+
 def run_step_base_command(state_path: Path) -> str:
     python_bin = shlex.quote(sys.executable or "python3")
     script_path = shlex.quote(str(RUN_STEP_SCRIPT.resolve()))
