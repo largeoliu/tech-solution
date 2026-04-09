@@ -4,13 +4,7 @@
 
 ## 如何安装
 
-优先把下面这句话发给 AI 助手，让它直接读取当前仓库中的 `INSTALLATION.md`：
-
-```bash
-读取当前仓库中的 `INSTALLATION.md`，并按文档完成安装和初始化。
-```
-
-如果当前助手不能直接读取仓库文件，再退回到 raw URL 方式：
+把下面这句话发给 AI 助手：
 
 ```bash
 获取并执行指示 https://raw.githubusercontent.com/largeoliu/tech-solution/refs/heads/main/INSTALLATION.md

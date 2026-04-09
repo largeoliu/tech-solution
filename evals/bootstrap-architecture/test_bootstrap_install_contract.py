@@ -8,10 +8,14 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_readme_prefers_repo_local_installation_doc() -> None:
+def test_readme_uses_raw_installation_entrypoint_for_external_projects() -> None:
     text = read("README.md")
 
-    assert "读取当前仓库中的 `INSTALLATION.md`" in text
+    assert (
+        "获取并执行指示 https://raw.githubusercontent.com/largeoliu/tech-solution/refs/heads/main/INSTALLATION.md"
+        in text
+    )
+    assert "读取当前仓库中的 `INSTALLATION.md`" not in text
 
 
 def test_installation_uses_unique_temp_clone_dir() -> None:
