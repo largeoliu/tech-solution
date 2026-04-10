@@ -33,6 +33,7 @@ from wd_syn_contract import target_capability_present
 
 
 ALLOWED_TOP_LEVEL_FIELDS = {
+    "slug",
     "current_step",
     "completed_steps",
     "skipped_steps",
@@ -40,6 +41,7 @@ ALLOWED_TOP_LEVEL_FIELDS = {
     "produced_artifacts",
     "pending_questions",
     "gate_receipt",
+    "pending_ticket",
     "solution_root",
     "template_path",
     "members_path",
@@ -71,7 +73,7 @@ SUMMARY_FORBIDDEN_PATTERNS = [
 ARTIFACT_REPAIR_STEP = {
     "WD-CTX": 7,
     "WD-TASK": 8,
-    "WD-EXP-*": 9,
+    "WD-EXP-SLOT-*": 9,
     "final_document": 11,
 }
 
@@ -231,7 +233,7 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
     if code == "final_document_headings_mismatch":
         return "回到步骤 11，按当前模板顺序重生成最终文档。"
     if code == "step_order_violation":
-        return "回到步骤 10，先把 WD-SYN 落盘，再进入步骤 11。"
+        return "回到步骤 10，先把 WD-SYN-SLOT-* 落盘，再进入步骤 11。"
     if code == "cleanup_attempt_before_validation":
         return "步骤 12 必须先通过门禁，再通过 run-step.py 完成清理步骤。"
     return "修复对应状态字段或草稿区块后重试。"
@@ -368,7 +370,7 @@ class GateValidator:
         if resolved.name == "meta.yaml":
             self.repo_root = resolved.parents[4]
         else:
-            self.repo_root = self.state_dir.parents[3] if len(self.state_dir.parents) >= 3 else self.state_dir.parent
+            self.repo_root = resolved.parents[3] if len(resolved.parents) >= 4 else self.state_dir.parent
         self.arch_root = self.repo_root / ".architecture" if (self.repo_root / ".architecture").exists() else self.repo_root
 
     def checkpoint(self, step_num: int, errors: list[dict[str, Any]]) -> dict[str, Any]:
@@ -777,7 +779,7 @@ class GateValidator:
                 overwritten = prior_checkpoint.get("wd_ctx_written") is True
             elif artifact == "WD-TASK":
                 overwritten = prior_checkpoint.get("wd_task_written") is True
-            elif artifact.startswith("WD-SYN"):
+            elif artifact.startswith("WD-SYN") or artifact == "WD-SYN-SLOT-*":
                 overwritten = prior_checkpoint.get("wd_syn_written") is True
             code = "draft_block_overwritten" if overwritten else "missing_working_draft_block"
             add_issue(
@@ -804,7 +806,7 @@ class GateValidator:
         syn_match = re.match(r"^WD-SYN-(SLOT-\d+)$", artifact)
         if syn_match:
             return working_dir / "slots" / syn_match.group(1) / "synthesis.md"
-        if artifact == "WD-EXP-*":
+        if artifact in {"WD-EXP-*", "WD-EXP-SLOT-*"}:
             slots_dir = working_dir / "slots"
             if slots_dir.is_dir():
                 for slot_dir in sorted(slots_dir.iterdir()):
@@ -812,7 +814,7 @@ class GateValidator:
                     if exp.exists() and exp.stat().st_size > 0:
                         return exp
             return None
-        if artifact in {"WD-SYN", "WD-SYN-LIGHT"}:
+        if artifact in {"WD-SYN", "WD-SYN-LIGHT", "WD-SYN-SLOT-*"}:
             slots_dir = working_dir / "slots"
             if slots_dir.is_dir():
                 for slot_dir in sorted(slots_dir.iterdir()):
@@ -966,10 +968,10 @@ class GateValidator:
                 errors,
                 make_issue(
                     code="wd_syn_slots_incomplete",
-                    message=f"步骤 {step_num}: WD-SYN 必须按模板槽位逐项收敛",
+                    message=f"步骤 {step_num}: WD-SYN-SLOT-* 必须按模板槽位逐项收敛",
                     step=step_num,
                                         field="working_draft_path",
-                    missing_artifacts=["WD-SYN"],
+                    missing_artifacts=["WD-SYN-SLOT-*"],
                     recommended_rollback_step=10,
                     recommended_repair_step=10,
                     details={"expected_slots": template_titles, "actual_slots": actual_titles},
@@ -980,10 +982,10 @@ class GateValidator:
                 errors,
                 make_issue(
                     code="missing_working_draft_block",
-                    message=f"步骤 {step_num}: WD-SYN 缺少最小收敛结构",
+                    message=f"步骤 {step_num}: WD-SYN-SLOT-* 缺少最小收敛结构",
                     step=step_num,
                                         field="working_draft_path",
-                    missing_artifacts=["WD-SYN"],
+                    missing_artifacts=["WD-SYN-SLOT-*"],
                     recommended_rollback_step=10,
                     recommended_repair_step=10,
                     details={"missing_fragments": missing},

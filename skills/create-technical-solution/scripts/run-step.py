@@ -43,12 +43,18 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
+import uuid
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+os.environ["__CTS_INTERNAL_CALL"] = "1"
 
 try:
     import yaml
@@ -62,14 +68,17 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from protocol_runtime import (
+    compute_artifact_fingerprint,
     dump_yaml,
     iso_now,
+    repo_root_from_state_path,
     require_receipt,
     refresh_receipt,
     render_run_step_command,
     run_step_base_command,
     working_draft_path_for_slug,
     workflow_default_block,
+    workflow_step,
     workflow_step_card_path,
     workflow_step_name,
 )
@@ -98,7 +107,9 @@ def seed_checkpoint_summary(state_path: Path, step: int, summary: str) -> None:
         return
     checkpoint["summary"] = summary
     refresh_receipt(state)
-    state_path.write_text(yaml.safe_dump(state, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    state_path.write_text(
+        yaml.safe_dump(state, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
 
 
 def get_current_step(state: dict[str, Any]) -> int:
@@ -131,6 +142,24 @@ def default_block_for_step(step: int) -> str | None:
         return None
 
 
+def allowed_block_pattern_for_step(step: int) -> str | None:
+    workflow = workflow_step(step)
+    if workflow.get("content_block"):
+        return str(workflow["content_block"])
+    if workflow.get("produces_pattern"):
+        return str(workflow["produces_pattern"])
+    produces = workflow.get("produces")
+    if isinstance(produces, list) and len(produces) == 1:
+        return str(produces[0])
+    return None
+
+
+def block_matches_pattern(block_name: str, pattern: str) -> bool:
+    if pattern.endswith("*"):
+        return block_name.startswith(pattern[:-1])
+    return block_name == pattern
+
+
 def run_script(args: list[str], cwd: Path | None = None) -> tuple[int, str, str]:
     """运行子进程脚本，返回 (exit_code, stdout, stderr)。"""
     result = subprocess.run(
@@ -144,7 +173,10 @@ def run_script(args: list[str], cwd: Path | None = None) -> tuple[int, str, str]
 
 @lru_cache(maxsize=1)
 def load_initialize_state_module() -> Any:
-    spec = importlib.util.spec_from_file_location("create_technical_solution_initialize_state", SCRIPTS_DIR / "initialize-state.py")
+    spec = importlib.util.spec_from_file_location(
+        "create_technical_solution_initialize_state",
+        SCRIPTS_DIR / "initialize-state.py",
+    )
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -154,7 +186,9 @@ def load_initialize_state_module() -> Any:
 
 @lru_cache(maxsize=1)
 def load_validate_state_module() -> Any:
-    spec = importlib.util.spec_from_file_location("create_technical_solution_validate_state", SCRIPTS_DIR / "validate-state.py")
+    spec = importlib.util.spec_from_file_location(
+        "create_technical_solution_validate_state", SCRIPTS_DIR / "validate-state.py"
+    )
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -164,7 +198,10 @@ def load_validate_state_module() -> Any:
 
 @lru_cache(maxsize=1)
 def load_upsert_draft_block_module() -> Any:
-    spec = importlib.util.spec_from_file_location("create_technical_solution_upsert_draft_block", SCRIPTS_DIR / "upsert-draft-block.py")
+    spec = importlib.util.spec_from_file_location(
+        "create_technical_solution_upsert_draft_block",
+        SCRIPTS_DIR / "upsert-draft-block.py",
+    )
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -174,7 +211,10 @@ def load_upsert_draft_block_module() -> Any:
 
 @lru_cache(maxsize=1)
 def load_render_final_document_module() -> Any:
-    spec = importlib.util.spec_from_file_location("create_technical_solution_render_final_document", SCRIPTS_DIR / "render-final-document.py")
+    spec = importlib.util.spec_from_file_location(
+        "create_technical_solution_render_final_document",
+        SCRIPTS_DIR / "render-final-document.py",
+    )
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -184,7 +224,10 @@ def load_render_final_document_module() -> Any:
 
 @lru_cache(maxsize=1)
 def load_finalize_cleanup_module() -> Any:
-    spec = importlib.util.spec_from_file_location("create_technical_solution_finalize_cleanup", SCRIPTS_DIR / "finalize-cleanup.py")
+    spec = importlib.util.spec_from_file_location(
+        "create_technical_solution_finalize_cleanup",
+        SCRIPTS_DIR / "finalize-cleanup.py",
+    )
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -194,7 +237,10 @@ def load_finalize_cleanup_module() -> Any:
 
 @lru_cache(maxsize=1)
 def load_advance_state_step_module() -> Any:
-    spec = importlib.util.spec_from_file_location("create_technical_solution_advance_state_step", SCRIPTS_DIR / "advance-state-step.py")
+    spec = importlib.util.spec_from_file_location(
+        "create_technical_solution_advance_state_step",
+        SCRIPTS_DIR / "advance-state-step.py",
+    )
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -204,7 +250,10 @@ def load_advance_state_step_module() -> Any:
 
 @lru_cache(maxsize=1)
 def load_extract_template_snapshot_module() -> Any:
-    spec = importlib.util.spec_from_file_location("create_technical_solution_extract_template_snapshot", SCRIPTS_DIR / "extract-template-snapshot.py")
+    spec = importlib.util.spec_from_file_location(
+        "create_technical_solution_extract_template_snapshot",
+        SCRIPTS_DIR / "extract-template-snapshot.py",
+    )
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -214,7 +263,9 @@ def load_extract_template_snapshot_module() -> Any:
 
 @lru_cache(maxsize=1)
 def load_block_scaffolds_module() -> Any:
-    spec = importlib.util.spec_from_file_location("create_technical_solution_block_scaffolds", SCRIPTS_DIR / "block_scaffolds.py")
+    spec = importlib.util.spec_from_file_location(
+        "create_technical_solution_block_scaffolds", SCRIPTS_DIR / "block_scaffolds.py"
+    )
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -222,7 +273,9 @@ def load_block_scaffolds_module() -> Any:
     return module
 
 
-def run_validator(state_path: Path, step: int, write_receipt: bool = False) -> tuple[bool, str]:
+def run_validator(
+    state_path: Path, step: int, write_receipt: bool = False
+) -> tuple[bool, str]:
     """运行 validate-state.py，返回 (passed, output)。"""
     module = load_validate_state_module()
     state = module.load_state(state_path)
@@ -235,7 +288,9 @@ def run_validator(state_path: Path, step: int, write_receipt: bool = False) -> t
             "step": step,
             "passed": False,
             "summary": module.build_summary(errors),
-            "repair_plan": module.build_repair_plan(errors, state_path=state_path, state=state),
+            "repair_plan": module.build_repair_plan(
+                errors, state_path=state_path, state=state
+            ),
             "issues": errors,
         }
         return False, json.dumps(payload, ensure_ascii=False, indent=2)
@@ -246,7 +301,9 @@ def run_validator(state_path: Path, step: int, write_receipt: bool = False) -> t
         "summary": {"error_count": 0},
     }
     if write_receipt:
-        payload["gate_receipt"] = module.write_pass_receipt(state_path, validator.state, step)
+        payload["gate_receipt"] = module.write_pass_receipt(
+            state_path, validator.state, step
+        )
     return True, json.dumps(payload, ensure_ascii=False, indent=2)
 
 
@@ -283,15 +340,56 @@ def upsert_blocks_in_process(
     module = load_upsert_draft_block_module()
     original_state_text = state_path.read_text(encoding="utf-8")
     state = load_state(state_path)
+    staging_dir: Path | None = None
+    backup_dir: Path | None = None
+    promoted = False
+
+    def cleanup_dir(path: Path | None) -> None:
+        if path is None or not path.exists():
+            return
+        try:
+            shutil.rmtree(path)
+        except Exception:
+            pass
+
+    def restore_promoted_tree() -> None:
+        nonlocal promoted
+        if not promoted:
+            return
+        try:
+            if working_dir.exists():
+                shutil.rmtree(working_dir)
+            if backup_dir is not None and backup_dir.exists():
+                backup_dir.rename(working_dir)
+        except Exception:
+            pass
+        promoted = False
+
     try:
         if validate_step is not None:
             require_receipt(state, expected_step=validate_step)
         slots = state.get("slots") or []
+        staging_dir = Path(
+            tempfile.mkdtemp(
+                prefix=f".{working_dir.name}.staging-",
+                dir=str(working_dir.parent),
+            )
+        )
+        if working_dir.exists():
+            shutil.copytree(working_dir, staging_dir, dirs_exist_ok=True)
         for block_name, content in block_updates:
-            module.write_working_draft_file(working_dir, block_name, content, slots)
+            module.write_working_draft_file(staging_dir, block_name, content, slots)
         module.sync_state_for_blocks(state, block_updates, summary)
         refresh_receipt(state)
         dump_yaml(state_path, state)
+        if working_dir.exists():
+            backup_dir = working_dir.parent / (
+                f".{working_dir.name}.backup-{uuid.uuid4().hex}"
+            )
+            working_dir.rename(backup_dir)
+        staging_dir.rename(working_dir)
+        promoted = True
+        staging_dir = None
         if validate_step is not None:
             passed, validator_output = run_validator(
                 state_path,
@@ -299,20 +397,31 @@ def upsert_blocks_in_process(
                 write_receipt=False,
             )
             if not passed:
-                raise RuntimeError(f"步骤 {validate_step} 验证失败:\n{validator_output}")
+                raise RuntimeError(
+                    f"步骤 {validate_step} 验证失败:\n{validator_output}"
+                )
     except SystemExit as exc:
         try:
             state_path.write_text(original_state_text, encoding="utf-8")
         except Exception:
             pass
+        cleanup_dir(staging_dir)
+        restore_promoted_tree()
+        cleanup_dir(backup_dir)
         return 1, str(exc)
     except Exception as exc:
         try:
             state_path.write_text(original_state_text, encoding="utf-8")
         except Exception:
             pass
-        exit_code = 2 if isinstance(exc, RuntimeError) and str(exc).startswith("步骤 ") else 1
+        cleanup_dir(staging_dir)
+        restore_promoted_tree()
+        cleanup_dir(backup_dir)
+        exit_code = (
+            2 if isinstance(exc, RuntimeError) and str(exc).startswith("步骤 ") else 1
+        )
         return exit_code, f"批量写入失败，已回滚: {exc}"
+    cleanup_dir(backup_dir)
     return 0, json.dumps(
         {
             "working_dir": str(working_dir),
@@ -378,7 +487,9 @@ def advance_state_step_in_process(
     return 0, json.dumps(payload, ensure_ascii=False, indent=2)
 
 
-def initialize_state_in_process(state_path: Path, slug: str, summary: str) -> tuple[int, str]:
+def initialize_state_in_process(
+    state_path: Path, slug: str, summary: str
+) -> tuple[int, str]:
     module = load_initialize_state_module()
     try:
         payload = module.initialize_state(
@@ -412,8 +523,7 @@ def extract_template_snapshot_in_process(
 
     fingerprint = module.compute_template_fingerprint(template_markdown, headings)
     working_draft = (repo_root / draft_path).resolve()
-    working_draft.parent.mkdir(parents=True, exist_ok=True)
-    working_draft.write_text(module.build_working_draft(template_file, headings, slug), encoding="utf-8")
+    module.create_working_directory(working_draft, headings)
     try:
         module.update_state(
             state_path=state_path.resolve(),
@@ -445,7 +555,9 @@ def extract_step_card_operations(step: int) -> str:
         return f"（step card 文件不存在: {card_path}）"
     content = card_path.read_text(encoding="utf-8")
     # 提取 ## 操作 到下一个 ## 之间的内容
-    match = re.search(r"^## 操作\s*\n(.*?)(?=^## |\Z)", content, re.MULTILINE | re.DOTALL)
+    match = re.search(
+        r"^## 操作\s*\n(.*?)(?=^## |\Z)", content, re.MULTILINE | re.DOTALL
+    )
     if match:
         return match.group(1).strip()
     return content
@@ -459,7 +571,9 @@ def print_status(state_path: Path, snapshot: RuntimeSnapshot | None = None) -> i
     if not state:
         print("=" * 60)
         print("状态文件不存在或为空。")
-        print(f"请先运行: {run_step_base_command(snapshot.state_path)} --complete --summary \"<主题摘要>\" --slug <slug>")
+        print(
+            f'请先运行: {run_step_base_command(snapshot.state_path)} --prepare --slug <slug>'
+        )
         print("=" * 60)
         return 0
 
@@ -515,7 +629,9 @@ def _print_next_command(state_path: Path, step: int, state: dict[str, Any]) -> N
 # ── complete 模式：各步骤的实现 ──────────────────────────────
 
 
-def complete_step_1(state_path: Path, summary: str, slug: str | None, **_: Any) -> tuple[int, str]:
+def complete_step_1(
+    state_path: Path, summary: str, slug: str | None, **_: Any
+) -> tuple[int, str]:
     if not slug:
         return 1, "步骤 1 需要 --slug 参数。"
     code, stdout = initialize_state_in_process(state_path, slug, summary)
@@ -559,8 +675,15 @@ def complete_step_3(state_path: Path, summary: str, **_: Any) -> tuple[int, str]
     state = snapshot.state
     slug = snapshot.slug
     repo_root = snapshot.repo_root
-    template_path = str(state.get("template_path") or ".architecture/templates/technical-solution-template.md")
-    draft_path = str(working_draft_path_for_slug(repo_root=repo_root, slug=slug).relative_to(repo_root))
+    template_path = str(
+        state.get("template_path")
+        or ".architecture/templates/technical-solution-template.md"
+    )
+    draft_path = str(
+        working_draft_path_for_slug(repo_root=repo_root, slug=slug).relative_to(
+            repo_root
+        )
+    )
     code, stdout = extract_template_snapshot_in_process(
         state_path=state_path,
         template_path=template_path,
@@ -573,11 +696,12 @@ def complete_step_3(state_path: Path, summary: str, **_: Any) -> tuple[int, str]
     return 0, f"✅ 步骤 3 完成。模板已读取，working draft 已创建。\n{stdout}"
 
 
-FULL_REQUIRED_ARTIFACTS = ["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN-*"]
+FULL_REQUIRED_ARTIFACTS = ["WD-CTX", "WD-TASK", "WD-EXP-SLOT-*", "WD-SYN-SLOT-*"]
 
 
 def complete_step_4(
-    state_path: Path, summary: str,
+    state_path: Path,
+    summary: str,
     solution_type: str | None = None,
     **_: Any,
 ) -> tuple[int, str]:
@@ -600,7 +724,10 @@ def complete_step_4(
 
 
 def complete_step_5(
-    state_path: Path, summary: str, members: list[str] | None = None, **_: Any,
+    state_path: Path,
+    summary: str,
+    members: list[str] | None = None,
+    **_: Any,
 ) -> tuple[int, str]:
     if not members:
         return 1, "步骤 5 需要至少一个 --member 参数。"
@@ -610,7 +737,10 @@ def complete_step_5(
         step=5,
         summary=summary,
         field=["members_checked=true"],
-        field_json=[f"selected_members={members_json}", f"selected_member_count={len(members)}"],
+        field_json=[
+            f"selected_members={members_json}",
+            f"selected_member_count={len(members)}",
+        ],
         state_fields=None,
         state_fields_json=None,
         append_completed=True,
@@ -675,6 +805,22 @@ def complete_creative_step(
     if not block_updates:
         return 1, f"步骤 {step} 传入的内容为空。"
 
+    pending_ticket = snapshot.state.get("pending_ticket")
+    allowed_pattern = None
+    if isinstance(pending_ticket, dict) and int(pending_ticket.get("step") or 0) == step:
+        allowed_pattern = str(pending_ticket.get("allowed_block_pattern") or "").strip() or None
+    if allowed_pattern:
+        invalid_blocks = [
+            block_name
+            for block_name, _content in block_updates
+            if not block_matches_pattern(block_name, allowed_pattern)
+        ]
+        if invalid_blocks:
+            return (
+                1,
+                f"步骤 {step} 的 ticket 仅允许写入 {allowed_pattern}，实际收到: {', '.join(invalid_blocks)}",
+            )
+
     code, output = upsert_blocks_in_process(
         state_path,
         working_dir,
@@ -685,15 +831,18 @@ def complete_creative_step(
     if code != 0:
         return code, f"写入 working draft 失败:\n{output}"
 
-    results = [f"  ✓ {block_name} 已写入 working draft" for block_name, _body in block_updates]
+    results = [
+        f"  ✓ {block_name} 已写入 working draft" for block_name, _body in block_updates
+    ]
     detail = "\n".join(results)
     new_snapshot = load_runtime_snapshot(state_path)
     new_step = new_snapshot.current_step
     return 0, f"✅ 步骤 {step} 完成。\n{detail}\n已推进到步骤 {new_step}。"
 
 
-
-def complete_step_11(state_path: Path, summary: str, snapshot: RuntimeSnapshot | None = None, **_: Any) -> tuple[int, str]:
+def complete_step_11(
+    state_path: Path, summary: str, snapshot: RuntimeSnapshot | None = None, **_: Any
+) -> tuple[int, str]:
     snapshot = snapshot or load_runtime_snapshot(state_path)
     assert snapshot is not None
     seed_checkpoint_summary(state_path, 11, summary)
@@ -706,7 +855,9 @@ def complete_step_11(state_path: Path, summary: str, snapshot: RuntimeSnapshot |
     return 0, f"✅ 步骤 11 完成。最终文档已渲染。\n{stdout}"
 
 
-def complete_step_12(state_path: Path, summary: str, snapshot: RuntimeSnapshot | None = None, **_: Any) -> tuple[int, str]:
+def complete_step_12(
+    state_path: Path, summary: str, snapshot: RuntimeSnapshot | None = None, **_: Any
+) -> tuple[int, str]:
     snapshot = snapshot or load_runtime_snapshot(state_path)
     assert snapshot is not None
     seed_checkpoint_summary(state_path, 12, summary)
@@ -729,17 +880,17 @@ def emit_scaffold(state_path: Path, members: list[str] | None = None) -> int:
     return 0
 
 
-def complete_step(args: argparse.Namespace) -> int:
-    """根据当前步骤分发到对应的 complete 处理函数。"""
-    state_path = Path(args.state).resolve()
-    summary = args.summary
-
-    # 步骤 1 特殊处理：state 可能还不存在
-    if args.slug and (not state_path.exists() or get_current_step(load_state(state_path)) == 1):
-        code, msg = complete_step_1(state_path, summary, args.slug)
-        print(msg)
-        return code
-
+def prepare_step(state_path: Path, *, slug: str | None = None) -> int:
+    state_exists = state_path.exists() and state_path.stat().st_size > 0
+    if not state_exists:
+        if not slug:
+            print("❌ 状态文件不存在且未提供 --slug。请使用 --prepare --slug <slug> 初始化。")
+            return 1
+        state = {"slug": slug.strip(), "current_step": 1,
+                 "members_path": ".architecture/members.yml",
+                 "principles_path": ".architecture/principles.md",
+                 "template_path": ".architecture/templates/technical-solution-template.md"}
+        dump_yaml(state_path, state, ensure_parent=True)
     snapshot = load_runtime_snapshot(state_path)
     state = snapshot.state
     if not state:
@@ -748,21 +899,128 @@ def complete_step(args: argparse.Namespace) -> int:
 
     step = snapshot.current_step
 
-    stdin_content = getattr(args, '_stdin_content', None)
+    if step >= 2:
+        try:
+            require_receipt(state, expected_step=step)
+        except SystemExit as exc:
+            print(f"步骤 {step} prepare 失败:\n{exc}")
+            return 1
+
+    ticket = {
+        "step": step,
+        "value": uuid.uuid4().hex,
+        "state_fingerprint": state.get("gate_receipt", {}).get("state_fingerprint", ""),
+        "artifact_fingerprint": compute_artifact_fingerprint(
+            repo_root=repo_root_from_state_path(state_path),
+            state=state,
+        ),
+        "allowed_block_pattern": allowed_block_pattern_for_step(step) or "",
+        "issued_at": iso_now(),
+    }
+    state["pending_ticket"] = ticket
+    dump_yaml(state_path, state)
+    print(
+        json.dumps(
+            {
+                "step": step,
+                "ticket": ticket["value"],
+                "artifact_fingerprint": ticket["artifact_fingerprint"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def validate_pending_ticket(
+    state_path: Path,
+    *,
+    step: int,
+    provided_ticket: str | None,
+) -> tuple[int, str] | None:
+    state = load_state(state_path)
+    pending_ticket = state.get("pending_ticket")
+    if not isinstance(pending_ticket, dict) or int(pending_ticket.get("step") or 0) != step:
+        return None
+    if not provided_ticket:
+        return 1, "❌ 当前步骤已 prepare，必须提供 --ticket 后才能 --complete。"
+    if provided_ticket != str(pending_ticket.get("value") or ""):
+        return 1, "❌ --ticket 无效，请重新执行 --prepare 获取新的 ticket。"
+    current_state_fingerprint = state.get("gate_receipt", {}).get("state_fingerprint", "")
+    if current_state_fingerprint != str(pending_ticket.get("state_fingerprint") or ""):
+        return 1, "❌ 状态自 prepare 后已变化，请重新执行 --prepare。"
+    current_artifact_fingerprint = compute_artifact_fingerprint(
+        repo_root=repo_root_from_state_path(state_path),
+        state=state,
+    )
+    if current_artifact_fingerprint != str(pending_ticket.get("artifact_fingerprint") or ""):
+        return 1, "❌ 中间产物自 prepare 后已变化，请重新执行 --prepare。"
+    return None
+
+
+def clear_pending_ticket(state_path: Path) -> None:
+    state = load_state(state_path)
+    if not state or not state.get("pending_ticket"):
+        return
+    state["pending_ticket"] = {}
+    dump_yaml(state_path, state)
+
+
+def complete_step(args: argparse.Namespace) -> int:
+    """根据当前步骤分发到对应的 complete 处理函数。"""
+    state_path = Path(args.state).resolve()
+    summary = args.summary
+
+    snapshot = load_runtime_snapshot(state_path)
+    state = snapshot.state
+    if not state:
+        if not getattr(args, "slug", None):
+            print("❌ 状态文件不存在。请先用 --prepare --slug <slug> 初始化。")
+            return 1
+        state = {"slug": args.slug.strip(), "current_step": 1,
+                 "members_path": ".architecture/members.yml",
+                 "principles_path": ".architecture/principles.md",
+                 "template_path": ".architecture/templates/technical-solution-template.md"}
+        dump_yaml(state_path, state, ensure_parent=True)
+        snapshot = load_runtime_snapshot(state_path)
+        state = snapshot.state
+
+    step = snapshot.current_step
+    ticket_error = validate_pending_ticket(
+        state_path,
+        step=step,
+        provided_ticket=getattr(args, "ticket", None),
+    )
+    if ticket_error is not None:
+        code, message = ticket_error
+        print(message)
+        return code
+
+    stdin_content = getattr(args, "_stdin_content", None)
     dispatch = {
         1: lambda: complete_step_1(state_path, summary, args.slug),
         2: lambda: complete_step_2(state_path, summary),
         3: lambda: complete_step_3(state_path, summary),
         4: lambda: complete_step_4(
-            state_path, summary,
+            state_path,
+            summary,
             solution_type=args.solution_type,
         ),
         5: lambda: complete_step_5(state_path, summary, members=args.member),
         6: lambda: complete_step_6(state_path, summary),
-        7: lambda: complete_creative_step(state_path, summary, 7, stdin_content, snapshot=snapshot),
-        8: lambda: complete_creative_step(state_path, summary, 8, stdin_content, snapshot=snapshot),
-        9: lambda: complete_creative_step(state_path, summary, 9, stdin_content, snapshot=snapshot),
-        10: lambda: complete_creative_step(state_path, summary, 10, stdin_content, snapshot=snapshot),
+        7: lambda: complete_creative_step(
+            state_path, summary, 7, stdin_content, snapshot=snapshot
+        ),
+        8: lambda: complete_creative_step(
+            state_path, summary, 8, stdin_content, snapshot=snapshot
+        ),
+        9: lambda: complete_creative_step(
+            state_path, summary, 9, stdin_content, snapshot=snapshot
+        ),
+        10: lambda: complete_creative_step(
+            state_path, summary, 10, stdin_content, snapshot=snapshot
+        ),
         11: lambda: complete_step_11(state_path, summary, snapshot=snapshot),
         12: lambda: complete_step_12(state_path, summary, snapshot=snapshot),
     }
@@ -774,6 +1032,9 @@ def complete_step(args: argparse.Namespace) -> int:
 
     code, msg = handler()
     print(msg)
+
+    if code == 0 and getattr(args, "ticket", None):
+        clear_pending_ticket(state_path)
 
     # 打印下一步提示
     if code == 0 and step < 12:
@@ -793,29 +1054,39 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--state", required=True, help="状态文件路径")
+    parser.add_argument("--prepare", action="store_true", help="为当前步骤生成一次性 ticket")
     parser.add_argument("--complete", action="store_true", help="完成当前步骤并推进")
-    parser.add_argument("--emit-scaffold", action="store_true", help="输出当前步骤 scaffold 到 stdout")
+    parser.add_argument(
+        "--emit-scaffold", action="store_true", help="输出当前步骤 scaffold 到 stdout"
+    )
     parser.add_argument("--summary", help="步骤完成摘要（--complete 时必需）")
 
     # 步骤特定参数
     parser.add_argument("--slug", help="步骤 1: 方案 slug")
     parser.add_argument("--solution-type", help="步骤 4: 方案类型")
-    parser.add_argument("--member", action="append", default=[], help="步骤 5: 参与成员（可重复）")
+    parser.add_argument("--ticket", help="--prepare 生成的一次性 ticket")
+    parser.add_argument(
+        "--member", action="append", default=[], help="步骤 5: 参与成员（可重复）"
+    )
 
     args = parser.parse_args()
 
-    if not sys.stdin.isatty():
-        args._stdin_content = sys.stdin.read()
-    else:
-        args._stdin_content = None
+    if sum([bool(args.prepare), bool(args.complete), bool(args.emit_scaffold)]) > 1:
+        parser.error("--prepare、--emit-scaffold 与 --complete 不能同时使用。")
 
-    if args.complete and args.emit_scaffold:
-        parser.error("--emit-scaffold 与 --complete 不能同时使用。")
+    args._stdin_content = None
+    if args.complete and not sys.stdin.isatty():
+        try:
+            args._stdin_content = sys.stdin.read()
+        except OSError:
+            args._stdin_content = None
 
     if args.complete:
         if not args.summary:
             parser.error("--complete 需要 --summary 参数。")
         return complete_step(args)
+    if args.prepare:
+        return prepare_step(Path(args.state).resolve(), slug=getattr(args, "slug", None))
     if args.emit_scaffold:
         return emit_scaffold(Path(args.state).resolve(), members=args.member)
     else:

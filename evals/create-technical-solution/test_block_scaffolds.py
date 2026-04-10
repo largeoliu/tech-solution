@@ -48,7 +48,7 @@ def make_workspace(tmp_path: Path) -> dict[str, Path]:
         "repo": repo,
         "state_path": state_dir / "sample-solution.yaml",
         "template_path": template_path,
-        "working_draft_path": state_dir / "sample-solution.working.md",
+        "working_draft_path": state_dir / "sample-solution",
     }
 
 
@@ -61,7 +61,7 @@ def make_state(workspace: dict[str, Path], *, step: int, selected_members: list[
     return {
         "current_step": step,
         "template_path": ".architecture/templates/technical-solution-template.md",
-        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution.working.md",
+        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
         "checkpoints": {
             "step-5": {
@@ -81,7 +81,7 @@ def test_step7_scaffold_emits_ctx_block(tmp_path: Path) -> None:
     snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
     payload = scaffolds.emit_scaffold(snapshot)
 
-    assert payload.startswith("## WD-CTX\n")
+    assert payload.startswith("### CTX-01\n")
     assert "### CTX-01" in payload
     assert "适用槽位" in payload
 
@@ -95,7 +95,7 @@ def test_step8_scaffold_uses_template_slots(tmp_path: Path) -> None:
     snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
     payload = scaffolds.emit_scaffold(snapshot)
 
-    assert payload.startswith("## WD-TASK\n")
+    assert payload.startswith("### 1.1 需求概述\n")
     assert "### 1.1 需求概述" in payload
     assert "### 2.2 风险与验证" in payload
     assert "必须消费的共享上下文" in payload
@@ -114,9 +114,10 @@ def test_step9_scaffold_emits_all_selected_members_by_default(tmp_path: Path) ->
     snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
     payload = scaffolds.emit_scaffold(snapshot)
 
-    assert "## WD-EXP-SYSTEMS_ARCHITECT" in payload
-    assert "## WD-EXP-DOMAIN_EXPERT" in payload
-    assert "### 决策类型" in payload
+    assert "---BLOCK:WD-EXP-SLOT-01" in payload
+    assert "### 专家：systems_architect" in payload
+    assert "### 专家：domain_expert" in payload
+    assert "- 决策类型:" in payload
 
 
 def test_step9_scaffold_requires_selected_members(tmp_path: Path) -> None:

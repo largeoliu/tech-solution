@@ -52,7 +52,7 @@ def selected_members(state: dict[str, Any]) -> list[str]:
 def resolve_members(state: dict[str, Any], members: list[str] | None = None) -> list[str]:
     configured = selected_members(state)
     if not configured:
-        raise SystemExit("步骤 9 缺少 checkpoints.step-5.selected_members，无法生成 WD-EXP-* scaffold。")
+        raise SystemExit("步骤 9 缺少 checkpoints.step-5.selected_members，无法生成 WD-EXP-SLOT-* scaffold。")
     if not members:
         return configured
     allowed = {member.upper(): member for member in configured}

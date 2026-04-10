@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -58,6 +59,9 @@ def initialize_state(
     }
     state["solution_root"] = str(SOLUTION_ROOT)
     state["final_document_path"] = str(final_document_relative_path(slug))
+    state.setdefault("members_path", ".architecture/members.yml")
+    state.setdefault("principles_path", ".architecture/principles.md")
+    state.setdefault("template_path", ".architecture/templates/technical-solution-template.md")
     pending_questions = state.setdefault("pending_questions", [])
     if not isinstance(pending_questions, list):
         state["pending_questions"] = []
@@ -87,6 +91,9 @@ def initialize_state(
 
 
 def main() -> int:
+    if not os.environ.get("__CTS_INTERNAL_CALL"):
+        print("❌ 本脚本不可直接调用。请使用 run-step.py --prepare / --complete --ticket。", file=sys.stderr)
+        sys.exit(1)
     parser = argparse.ArgumentParser(description="初始化步骤 1 的最小状态字段")
     parser.add_argument("--state", required=True, help="状态文件路径")
     parser.add_argument("--slug", required=True, help="方案 slug")

@@ -48,7 +48,35 @@ def compute_state_fingerprint(state: dict[str, Any]) -> str:
             "state_fingerprint": "",
             "validated_at": "",
         }
+    scrubbed["pending_ticket"] = {
+        "step": 0,
+        "value": "",
+        "state_fingerprint": "",
+        "artifact_fingerprint": "",
+        "allowed_block_pattern": "",
+        "issued_at": "",
+    }
     payload = yaml.safe_dump(scrubbed, allow_unicode=True, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def compute_artifact_fingerprint(*, repo_root: Path, state: dict[str, Any]) -> str:
+    entries: list[tuple[str, str]] = []
+
+    draft_path = resolve_repo_path(repo_root, state.get("working_draft_path"))
+    if draft_path and draft_path.is_dir():
+        for path in sorted(p for p in draft_path.rglob("*") if p.is_file()):
+            relative = path.relative_to(repo_root).as_posix()
+            content_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+            entries.append((relative, content_hash))
+
+    final_document_path = resolve_repo_path(repo_root, state.get("final_document_path"))
+    if final_document_path and final_document_path.is_file():
+        relative = final_document_path.relative_to(repo_root).as_posix()
+        content_hash = hashlib.sha256(final_document_path.read_bytes()).hexdigest()
+        entries.append((relative, content_hash))
+
+    payload = "\n".join(f"{path}:{digest}" for path, digest in entries)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -198,27 +226,40 @@ def render_run_step_command(
     summary_placeholder: str = "<完成摘要>",
 ) -> list[str]:
     base = run_step_base_command(state_path)
+    prepare_line = f"{base} --prepare"
 
     if step == 1:
-        return [f'{base} --complete --summary "<主题摘要>" --slug <slug>']
-    if step in {2, 3, 6, 11, 12}:
-        return [f'{base} --complete --summary "{summary_placeholder}"']
+        return [
+            f"{base} --prepare --slug <slug>",
+            f'{base} --complete --ticket <ticket> --summary "<主题摘要>" --slug <slug>',
+        ]
+    if step in {2, 3, 6}:
+        return [
+            prepare_line,
+            f'{base} --complete --ticket <ticket> --summary "{summary_placeholder}"',
+        ]
     if step == 4:
         return [
-            f'{base} --complete --summary "<类型判定>" '
-            '--solution-type "<方案类型>"'
+            prepare_line,
+            f'{base} --complete --ticket <ticket> --summary "<类型判定>" '
+            '--solution-type "<方案类型>"',
         ]
     if step == 5:
-        return [f'{base} --complete --summary "<成员选定>" --member <MEMBER_ID> [--member ...]']
+        return [
+            prepare_line,
+            f'{base} --complete --ticket <ticket> --summary "<成员选定>" --member <MEMBER_ID> [--member ...]',
+        ]
     if step == 7:
         return [
-            f'{base} --complete --summary "<WD-CTX 完成>" <<\'HEREDOC\'',
+            prepare_line,
+            f'{base} --complete --ticket <ticket> --summary "<WD-CTX 完成>" <<\'HEREDOC\'',
             "<WD-CTX 内容>",
             "HEREDOC",
         ]
     if step == 8:
         return [
-            f'{base} --complete --summary "<WD-TASK 完成>" <<\'HEREDOC\'',
+            prepare_line,
+            f'{base} --complete --ticket <ticket> --summary "<WD-TASK 完成>" <<\'HEREDOC\'',
             "<WD-TASK 内容>",
             "HEREDOC",
         ]
@@ -238,7 +279,8 @@ def render_run_step_command(
             block_lines.append("<专家分析内容>")
             block_lines.append("")
         return [
-            f'{base} --complete --summary "<专家分析完成>" <<\'HEREDOC\'',
+            prepare_line,
+            f'{base} --complete --ticket <ticket> --summary "<专家分析完成>" <<\'HEREDOC\'',
             *block_lines,
             "HEREDOC",
         ]
@@ -258,11 +300,17 @@ def render_run_step_command(
             syn_lines.append("<收敛内容>")
             syn_lines.append("")
         return [
-            f'{base} --complete --summary "<收敛完成>" <<\'HEREDOC\'',
+            prepare_line,
+            f'{base} --complete --ticket <ticket> --summary "<收敛完成>" <<\'HEREDOC\'',
             *syn_lines,
             "HEREDOC",
         ]
-    return [f'{base} --complete --summary "{summary_placeholder}"']
+    if step in {11, 12}:
+        return [
+            prepare_line,
+            f'{base} --complete --ticket <ticket> --summary "{summary_placeholder}"',
+        ]
+    return [f'{base} --complete --ticket <ticket> --summary "{summary_placeholder}"']
 
 
 def render_repair_command(

@@ -50,18 +50,17 @@ steps:
     next_step: 9
   - id: 9
     slug: expert-analysis
-    name: 专家分析 (WD-EXP-*)
+    name: 专家分析 (WD-EXP-SLOT-*)
     card: steps/09-组织专家按模板逐槽位分析.md
-    produces_pattern: WD-EXP-*
+    produces_pattern: WD-EXP-SLOT-*
     gate_flags:
       can_enter_step_10: true
     next_step: 10
   - id: 10
     slug: synthesis
-    name: 协作收敛 (WD-SYN)
+    name: 协作收敛 (WD-SYN-SLOT-*)
     card: steps/10-按模板逐槽位协作收敛.md
-    produces: [WD-SYN]
-    content_block: WD-SYN
+    produces_pattern: WD-SYN-SLOT-*
     gate_flags:
       can_enter_step_11: true
     question_gate: pending_questions

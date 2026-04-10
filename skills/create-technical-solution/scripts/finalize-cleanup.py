@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import importlib.util
 import json
@@ -141,6 +142,9 @@ def run_cleanup(state_path: Path, summary: str) -> tuple[int, dict[str, Any]]:
 
 
 def main() -> int:
+    if not os.environ.get("__CTS_INTERNAL_CALL"):
+        print("❌ 本脚本不可直接调用。请使用 run-step.py --prepare / --complete --ticket。", file=sys.stderr)
+        sys.exit(1)
     parser = argparse.ArgumentParser(description="步骤 12 原子清理：先验证，再置标志并删除中间产物")
     parser.add_argument("--state", required=True, help="状态文件路径")
     parser.add_argument("--summary", required=True, help="写入 checkpoints.step-12.summary 的摘要")

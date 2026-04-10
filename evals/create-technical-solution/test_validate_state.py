@@ -99,7 +99,7 @@ def workspace(tmp_path: Path) -> dict[str, Path]:
         "members_path": members_path,
         "principles_path": principles_path,
         "solution_root": solution_root,
-        "working_draft_path": state_dir / "sample-solution.working.md",
+        "working_draft_path": state_dir / "sample-solution",
         "final_document_path": solution_root / "sample-solution.md",
         "state_path": state_dir / "sample-solution.yaml",
         "content_file": repo / "final-content.md",
@@ -107,20 +107,24 @@ def workspace(tmp_path: Path) -> dict[str, Path]:
 
 
 def make_state(workspace: dict[str, Path], **overrides) -> dict:
+    headings = vs.extract_slot_headings(workspace["template_path"].read_text(encoding="utf-8"))
+    syn_artifacts = [f"WD-SYN-{item['slot']}" for item in headings]
     state = {
         "current_step": 10,
         "completed_steps": [1, 2, 3, 4, 5, 6, 7, 8],
         "skipped_steps": [],
-        "required_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"],
-        "produced_artifacts": ["WD-CTX", "WD-TASK", "WD-SYN"],
+        "pending_questions": [],
+        "required_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP-*"] + syn_artifacts,
+        "produced_artifacts": ["WD-CTX", "WD-TASK"] + syn_artifacts,
         "gate_receipt": {"step": 10, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"},
         "solution_root": ".architecture/technical-solutions",
         "template_path": ".architecture/templates/technical-solution-template.md",
         "members_path": ".architecture/members.yml",
         "principles_path": ".architecture/principles.md",
         "repowiki_path": ".qoder/repowiki",
-        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution.working.md",
+        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
+        "slots": [{"slot": item["slot"], "title": item["title"]} for item in headings],
         "checkpoints": {
             "step-1": {"summary": "完成；slug=sample-solution；paths=1；gate: step-2 ready", "slug": "sample-solution", "scope_ready": True},
             "step-2": {"summary": "完成；检查前置文件；files=3；gate: step-3 ready", "prerequisites_checked": True},
@@ -131,19 +135,18 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
             "step-7": {"summary": "完成；写入 WD-CTX；CTX=4；gate: step-8 ready", "wd_ctx_written": True, "ctx_count": 4},
             "step-8": {"summary": "完成；写入 WD-TASK；slots=4；gate: step-9 ready", "wd_task_written": True, "task_slot_count": 4},
             "step-9": {"summary": "进行中", "skipped": False, "reason": "", "wd_exp_count": 0},
-            "step-10": {"summary": "完成；写入 WD-SYN；slots=4；gate: step-11 ready", "wd_syn_written": True, "syn_slot_count": 4},
+            "step-10": {"summary": "完成；写入 WD-SYN-SLOT-*；slots=4；gate: step-11 ready", "wd_syn_written": True, "syn_slot_count": 4},
             "step-11": {"summary": "完成；final_document=1；absorbed_slots=4；gate: step-12 ready", "final_document_written": True, "absorbed_slot_count": 4, "rendered_via_script": True},
             "step-12": {"summary": "完成；validator_passed=true；deleted=0", "validator_passed": False, "working_draft_deleted": False, "state_file_deleted": False},
         },
         "can_enter_step_8": True,
         "can_enter_step_9": True,
-        "can_enter_step_10": False,
+        "can_enter_step_10": True,
         "can_enter_step_11": True,
         "can_enter_step_12": True,
         "absorption_check_passed": False,
         "cleanup_allowed": False,
     }
-    headings = vs.extract_slot_headings(workspace["template_path"].read_text(encoding="utf-8"))
     state["checkpoints"]["step-3"]["template_fingerprint"] = vs.compute_template_fingerprint(
         workspace["template_path"].read_text(encoding="utf-8"),
         headings,
@@ -163,17 +166,11 @@ def make_validator(state: dict, workspace: dict[str, Path]):
 
 
 def write_good_draft(workspace: dict[str, Path]) -> None:
-    workspace["working_draft_path"].write_text(
-        """# Working Draft: sample-solution
-
-## WD-CTX
-
-### CTX-01
-来源: code
-
-## WD-TASK
-
-### 1.1 需求概述
+    working_dir = workspace["working_draft_path"]
+    working_dir.mkdir(parents=True, exist_ok=True)
+    (working_dir / "ctx.md").write_text("### CTX-01\n来源: code\n", encoding="utf-8")
+    (working_dir / "task.md").write_text(
+        """### 1.1 需求概述
 必须消费的共享上下文: CTX-01
 
 ### 1.2 核心目标
@@ -184,56 +181,50 @@ def write_good_draft(workspace: dict[str, Path]) -> None:
 
 ### 2.2 风险与验证
 必须消费的共享上下文: CTX-01
-
-## WD-SYN
-
-### 槽位：1.1 需求概述
-#### 候选方案对比
-| 路径 | 可行性 | 关键证据 | 选择理由 |
-|------|--------|----------|----------|
-| 复用 | ❌ | CTX-01 | 不足 |
-| 改造 | ✅ | CTX-01 | 推荐 |
-| 新建 | ❌ | CTX-01 | 成本高 |
-#### 选定路径
-- **关键证据引用**：CTX-01
-
-### 槽位：1.2 核心目标
-#### 候选方案对比
-| 路径 | 可行性 | 关键证据 | 选择理由 |
-|------|--------|----------|----------|
-| 复用 | ❌ | CTX-01 | 不足 |
-| 改造 | ✅ | CTX-01 | 推荐 |
-| 新建 | ❌ | CTX-01 | 成本高 |
-#### 选定路径
-- **关键证据引用**：CTX-01
-
-### 槽位：2.1 方案设计
-#### 候选方案对比
-| 路径 | 可行性 | 关键证据 | 选择理由 |
-|------|--------|----------|----------|
-| 复用 | ❌ | CTX-01 | 不足 |
-| 改造 | ✅ | CTX-01 | 推荐 |
-| 新建 | ❌ | CTX-01 | 成本高 |
-#### 选定路径
-- **关键证据引用**：CTX-01
-
-### 槽位：2.2 风险与验证
-#### 候选方案对比
-| 路径 | 可行性 | 关键证据 | 选择理由 |
-|------|--------|----------|----------|
-| 复用 | ❌ | CTX-01 | 不足 |
-| 改造 | ✅ | CTX-01 | 推荐 |
-| 新建 | ❌ | CTX-01 | 成本高 |
-#### 选定路径
-- **关键证据引用**：CTX-01
 """,
         encoding="utf-8",
     )
+    for index, title in enumerate(("1.1 需求概述", "1.2 核心目标", "2.1 方案设计", "2.2 风险与验证"), start=1):
+        slot_dir = working_dir / "slots" / f"SLOT-{index:02d}"
+        slot_dir.mkdir(parents=True, exist_ok=True)
+        (slot_dir / "experts.md").write_text(
+            f"### 专家：systems_architect\n- 决策类型: 改造\n- 核心理由: 复用现有骨架并补齐 {title}。\n- 关键证据引用: CTX-01\n- 未决点: 无\n",
+            encoding="utf-8",
+        )
+        (slot_dir / "synthesis.md").write_text(
+            make_wd_syn_block(title),
+            encoding="utf-8",
+        )
+
+
+def make_wd_syn_block(title: str) -> str:
+    return f"""### 槽位：{title}
+#### 目标能力
+- 收敛 {title} 的最终写法。
+#### 候选方案对比
+| 路径 | 可行性 | 关键证据 | 选择理由 |
+|------|--------|----------|----------|
+| 复用 | ❌ | CTX-01 | 不足 |
+| 改造 | ✅ | CTX-01 | 推荐 |
+| 新建 | ❌ | CTX-01 | 成本高 |
+#### 选定路径
+- 路径: 改造
+- 选定写法: 在 {title} 位置补齐内容。
+- 关键证据引用: CTX-01
+- 建议落位槽位: {title}
+- 模板承载缺口: 无
+- 未决问题: 无
+"""
+
+
+def slot_dir(workspace: dict[str, Path], index: int) -> Path:
+    return workspace["working_draft_path"] / "slots" / f"SLOT-{index:02d}"
 
 
 class TestStateBoundary:
     def test_validator_rejects_forbidden_state_fields(self, workspace: dict[str, Path]) -> None:
         state = make_state(workspace, slug="sample-solution")
+        state["evil_forbidden_field"] = "should not be here"
         validator = make_validator(state, workspace)
         errors: list[dict] = []
         validator.step_10(errors)
@@ -298,95 +289,49 @@ class TestScripts:
             )
 
     def test_upsert_draft_block_preserves_existing_blocks(self, workspace: dict[str, Path]) -> None:
-        workspace["working_draft_path"].write_text(
-            "# Working Draft: sample-solution\n\n## Template Metadata\n\nmeta\n\n## Template Slots\n\nslots\n\n## WD-CTX\n\n### CTX-01\n\n来源\n",
-            encoding="utf-8",
+        write_good_draft(workspace)
+        slots = make_state(workspace)["slots"]
+        target = udb.write_working_draft_file(
+            workspace["working_draft_path"],
+            "WD-TASK",
+            "### 1.1 需求概述\n任务\n",
+            slots,
         )
-        state = make_state(workspace, current_step=8, completed_steps=[1, 2, 3, 4, 5, 6, 7])
-        state["gate_receipt"] = {"step": 8, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
-        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
-        write_state(workspace, state)
-        content_file = workspace["repo"] / "wd-task.md"
-        content_file.write_text("### 1.1 需求概述\n\n任务\n", encoding="utf-8")
-        payload = udb.upsert_block(
-            working_draft_path=workspace["working_draft_path"],
-            block_name="WD-TASK",
-            content_path=content_file,
-        )
-        updated = workspace["working_draft_path"].read_text(encoding="utf-8")
-        refreshed = vs.load_state(workspace["state_path"])
-        assert "## WD-CTX" in updated
-        assert "## WD-TASK" in updated
-        assert payload["blocks"] == ["WD-TASK"]
-        assert refreshed["checkpoints"]["step-8"]["wd_task_written"] is True
+        assert (workspace["working_draft_path"] / "ctx.md").exists()
+        assert target == workspace["working_draft_path"] / "task.md"
+        assert "### 1.1 需求概述" in target.read_text(encoding="utf-8")
 
     def test_upsert_draft_block_rejects_nested_block_heading(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
-        state = make_state(workspace, current_step=10)
-        state["gate_receipt"] = {"step": 10, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
-        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
-        write_state(workspace, state)
-        content_file = workspace["repo"] / "wd-syn-invalid.md"
-        content_file.write_text("## WD-SYN\n\n### 槽位：1.1 需求概述\n\n内容\n", encoding="utf-8")
+        slots = make_state(workspace)["slots"]
         with pytest.raises(SystemExit):
-            udb.upsert_block(
-                working_draft_path=workspace["working_draft_path"],
-                state_path=workspace["state_path"],
-                block_name="WD-SYN",
-                content_path=content_file,
-                summary="完成；写入 WD-SYN；slots=1；gate: step-11 ready",
-                require_receipt_step=10,
+            udb.write_working_draft_file(
+                workspace["working_draft_path"],
+                "WD-SYN-SLOT-01",
+                "## WD-SYN\n\n### 槽位：1.1 需求概述\n\n内容\n",
+                slots,
             )
 
     def test_upsert_draft_block_supports_wd_exp_member_block(self, workspace: dict[str, Path]) -> None:
-        workspace["working_draft_path"].write_text(
-            "# Working Draft: sample-solution\n\n## WD-CTX\n\n### CTX-01\n\n来源\n\n## WD-TASK\n\n### 1.1 需求概述\n\n任务\n",
-            encoding="utf-8",
+        write_good_draft(workspace)
+        slots = make_state(workspace)["slots"]
+        target = udb.write_working_draft_file(
+            workspace["working_draft_path"],
+            "WD-EXP-SLOT-03",
+            "### 专家：systems_architect\n- 决策类型: 改造\n- 核心理由: 复用不足，需要在现有资产上扩展。\n- 关键证据引用: CTX-01\n- 未决点: 无\n",
+            slots,
         )
-        state = make_state(
-            workspace,
-            current_step=9,
-            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8],
-            skipped_steps=[],
-            required_artifacts=["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"],
-            produced_artifacts=["WD-CTX", "WD-TASK"],
-            can_enter_step_9=True,
-            can_enter_step_10=False,
-        )
-        state["gate_receipt"] = {"step": 9, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
-        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
-        write_state(workspace, state)
-
-        content_file = workspace["repo"] / "wd-exp-systems-architect.md"
-        content_file.write_text(
-            "### 参与槽位\n- 2.1 方案设计\n\n### 决策类型\n- 改造\n\n### 核心理由\n- 复用不足，需要在现有资产上扩展。\n\n### 关键证据引用\n- CTX-01\n\n### 未决点\n- 无\n",
-            encoding="utf-8",
-        )
-
-        payload = udb.upsert_block(
-            working_draft_path=workspace["working_draft_path"],
-            block_name="WD-EXP-SYSTEMS_ARCHITECT",
-            content_path=content_file,
-        )
-
-        refreshed = vs.load_state(workspace["state_path"])
-        updated = workspace["working_draft_path"].read_text(encoding="utf-8")
-        assert "## WD-EXP-SYSTEMS_ARCHITECT" in updated
-        assert payload["blocks"] == ["WD-EXP-SYSTEMS_ARCHITECT"]
-        assert refreshed["checkpoints"]["step-9"]["wd_exp_count"] == 0
-        assert refreshed["can_enter_step_10"] is False
+        updated = target.read_text(encoding="utf-8")
+        assert target == workspace["working_draft_path"] / "slots" / "SLOT-03" / "experts.md"
+        assert "### 专家：systems_architect" in updated
 
     def test_upsert_draft_block_sync_requires_explicit_flag(self, workspace: dict[str, Path]) -> None:
-        workspace["working_draft_path"].write_text(
-            "# Working Draft: sample-solution\n\n## WD-CTX\n\n### CTX-01\n\n来源\n\n## WD-TASK\n\n### 1.1 需求概述\n\n任务\n",
-            encoding="utf-8",
-        )
+        write_good_draft(workspace)
         state = make_state(
             workspace,
             current_step=9,
             completed_steps=[1, 2, 3, 4, 5, 6, 7, 8],
             skipped_steps=[],
-            required_artifacts=["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"],
             produced_artifacts=["WD-CTX", "WD-TASK"],
             can_enter_step_9=True,
             can_enter_step_10=False,
@@ -395,20 +340,15 @@ class TestScripts:
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
         write_state(workspace, state)
 
-        content_file = workspace["repo"] / "wd-exp-systems-architect.md"
-        content_file.write_text(
-            "### 参与槽位\n- 2.1 方案设计\n\n### 决策类型\n- 改造\n\n### 核心理由\n- 复用不足，需要在现有资产上扩展。\n\n### 关键证据引用\n- CTX-01\n\n### 未决点\n- 无\n",
-            encoding="utf-8",
-        )
-
-        payload = udb.upsert_block(
-            working_draft_path=workspace["working_draft_path"],
+        payload = udb.upsert_with_sync(
+            working_dir=workspace["working_draft_path"],
             state_path=workspace["state_path"],
-            block_name="WD-EXP-SYSTEMS_ARCHITECT",
-            content_path=content_file,
-            summary="完成；写入 WD-EXP-SYSTEMS_ARCHITECT；count=1；gate: step-10 ready",
+            block_updates=[(
+                "WD-EXP-SLOT-03",
+                "### 专家：systems_architect\n- 决策类型: 改造\n- 核心理由: 复用不足，需要在现有资产上扩展。\n- 关键证据引用: CTX-01\n- 未决点: 无\n",
+            )],
+            summary="完成；写入 WD-EXP-SLOT-*；count=1；gate: step-10 ready",
             require_receipt_step=9,
-            sync_state=True,
         )
 
         refreshed = vs.load_state(workspace["state_path"])
@@ -525,6 +465,7 @@ class TestValidator:
         assert any(error["code"] == "invalid_working_draft_path" for error in errors)
 
     def test_step_4_accepts_state_dir_working_draft_path(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].mkdir(parents=True, exist_ok=True)
         state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
         validator = make_validator(state, workspace)
         errors: list[dict] = []
@@ -544,9 +485,9 @@ class TestValidator:
         assert any(error["code"] == "invalid_working_draft_path" for error in errors)
 
     def test_step_8_detects_missing_task_slots(self, workspace: dict[str, Path]) -> None:
-        workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n### 一、背景\n\n粗粒度任务\n", encoding="utf-8")
+        write_good_draft(workspace)
+        (workspace["working_draft_path"] / "task.md").write_text("### 一、背景\n粗粒度任务\n", encoding="utf-8")
         state = make_state(workspace, current_step=8, completed_steps=[1, 2, 3, 4, 5, 6, 7], can_enter_step_8=True)
-        state["required_artifacts"] = ["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"]
         state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
@@ -554,8 +495,9 @@ class TestValidator:
         assert any(error["code"] == "task_slots_incomplete" for error in errors)
 
     def test_step_8_rejects_ctx_mixed_into_task_block(self, workspace: dict[str, Path]) -> None:
-        workspace["working_draft_path"].write_text(
-            "## WD-CTX\n\n### CTX-01\n\n来源\n\n## WD-TASK\n\n### SLOT-01: 1.1 需求概述\n\n任务\n\n### CTX-02\n\n错误位置\n",
+        write_good_draft(workspace)
+        (workspace["working_draft_path"] / "task.md").write_text(
+            "### SLOT-01: 1.1 需求概述\n任务\n\n### CTX-02\n错误位置\n",
             encoding="utf-8",
         )
         state = make_state(workspace, current_step=8, completed_steps=[1, 2, 3, 4, 5, 6, 7], can_enter_step_8=True)
@@ -606,7 +548,8 @@ class TestValidator:
         assert any(error["code"] == "artifact_state_desync" for error in errors)
 
     def test_step_7_requires_repowiki_consumption_when_exists(self, workspace: dict[str, Path]) -> None:
-        workspace["working_draft_path"].write_text("## WD-CTX\n\n", encoding="utf-8")
+        workspace["working_draft_path"].mkdir(parents=True, exist_ok=True)
+        (workspace["working_draft_path"] / "ctx.md").write_text("", encoding="utf-8")
         state = make_state(workspace, current_step=7, completed_steps=[1, 2, 3, 4, 5, 6], produced_artifacts=["WD-CTX"])
         state["checkpoints"]["step-6"]["repowiki_exists"] = True
         state["checkpoints"]["step-6"]["repowiki_source_count"] = 0
@@ -616,7 +559,8 @@ class TestValidator:
         assert any(error["code"] == "repowiki_not_consumed" for error in errors)
 
     def test_step_10_requires_wd_syn_quality(self, workspace: dict[str, Path]) -> None:
-        workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n## WD-SYN\n\n### 槽位：1.1 需求概述\n", encoding="utf-8")
+        write_good_draft(workspace)
+        (slot_dir(workspace, 1) / "synthesis.md").write_text("### 槽位：1.1 需求概述\n", encoding="utf-8")
         state = make_state(workspace)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
@@ -626,10 +570,8 @@ class TestValidator:
     def test_step_10_reports_missing_wd_syn_fragments_from_shared_contract(self, workspace: dict[str, Path]) -> None:
         wd_syn_contract = load_script("wd_syn_contract")
         slot_block = "### 槽位：1.1 需求概述\n#### 候选方案对比\n"
-        workspace["working_draft_path"].write_text(
-            f"## WD-CTX\n\n## WD-TASK\n\n## WD-SYN\n\n{slot_block}",
-            encoding="utf-8",
-        )
+        write_good_draft(workspace)
+        (slot_dir(workspace, 1) / "synthesis.md").write_text(slot_block, encoding="utf-8")
         state = make_state(workspace)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
@@ -645,8 +587,9 @@ class TestValidator:
         assert sorted(issue["missing_fragments"]) == sorted(expected)
 
     def test_step_10_rejects_missing_full_shared_slot_contract_lines(self, workspace: dict[str, Path]) -> None:
-        workspace["working_draft_path"].write_text(
-            "## WD-CTX\n\n### CTX-01\n\n来源\n\n## WD-TASK\n\n### 1.1 需求概述\n\n任务\n\n### 1.2 核心目标\n\n任务\n\n### 2.1 方案设计\n\n任务\n\n### 2.2 风险与验证\n\n任务\n\n## WD-SYN\n\n### 槽位：1.1 需求概述\n#### 目标能力\n- <本槽位要承载的能力或结论>\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 1.1 需求概述\n- 未决问题: <若无则写无>\n\n### 槽位：1.2 核心目标\n#### 目标能力\n- <本槽位要承载的能力或结论>\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 1.2 核心目标\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n\n### 槽位：2.1 方案设计\n#### 目标能力\n- <本槽位要承载的能力或结论>\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 2.1 方案设计\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n\n### 槽位：2.2 风险与验证\n#### 目标能力\n- <本槽位要承载的能力或结论>\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 2.2 风险与验证\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n",
+        write_good_draft(workspace)
+        (slot_dir(workspace, 1) / "synthesis.md").write_text(
+            "### 槽位：1.1 需求概述\n#### 目标能力\n- <本槽位要承载的能力或结论>\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 1.1 需求概述\n- 未决问题: <若无则写无>\n",
             encoding="utf-8",
         )
         state = make_state(workspace)
@@ -659,8 +602,9 @@ class TestValidator:
         assert issue["missing_fragments"] == ["- 模板承载缺口:"]
 
     def test_step_10_rejects_empty_target_capability_section(self, workspace: dict[str, Path]) -> None:
-        workspace["working_draft_path"].write_text(
-            "## WD-CTX\n\n### CTX-01\n\n来源\n\n## WD-TASK\n\n### 1.1 需求概述\n\n任务\n\n### 1.2 核心目标\n\n任务\n\n### 2.1 方案设计\n\n任务\n\n### 2.2 风险与验证\n\n任务\n\n## WD-SYN\n\n### 槽位：1.1 需求概述\n#### 目标能力\n\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 1.1 需求概述\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n\n### 槽位：1.2 核心目标\n#### 目标能力\n- 已填写目标\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 1.2 核心目标\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n\n### 槽位：2.1 方案设计\n#### 目标能力\n- 已填写目标\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 2.1 方案设计\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n\n### 槽位：2.2 风险与验证\n#### 目标能力\n- 已填写目标\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 2.2 风险与验证\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n",
+        write_good_draft(workspace)
+        (slot_dir(workspace, 1) / "synthesis.md").write_text(
+            "### 槽位：1.1 需求概述\n#### 目标能力\n\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ☐ | CTX-01 | <待补充> |\n| 改造 | ☐ | CTX-01 | <待补充> |\n| 新建 | ☐ | CTX-01 | <待补充> |\n#### 选定路径\n- 路径: <复用 / 改造 / 新建>\n- 选定写法: <一句话写法>\n- 关键证据引用: CTX-01\n- 建议落位槽位: 1.1 需求概述\n- 模板承载缺口: <若无则写无>\n- 未决问题: <若无则写无>\n",
             encoding="utf-8",
         )
         state = make_state(workspace)
@@ -673,10 +617,9 @@ class TestValidator:
         assert issue["missing_fragments"] == ["#### 目标能力"]
 
     def test_step_10_requires_wd_syn_per_slot(self, workspace: dict[str, Path]) -> None:
-        workspace["working_draft_path"].write_text(
-            "## WD-CTX\n\n### CTX-01\n\n来源\n\n## WD-TASK\n\n### 1.1 需求概述\n\n任务\n\n### 1.2 核心目标\n\n任务\n\n### 2.1 方案设计\n\n任务\n\n### 2.2 风险与验证\n\n任务\n\n## WD-SYN\n\n### 槽位：1.1 需求概述\n\n#### 候选方案对比\n\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ❌ | CTX-01 | 不足 |\n| 改造 | ✅ | CTX-01 | 推荐 |\n| 新建 | ❌ | CTX-01 | 成本高 |\n\n#### 选定路径\n\n- **关键证据引用**：CTX-01\n",
-            encoding="utf-8",
-        )
+        write_good_draft(workspace)
+        for index in range(2, 5):
+            (slot_dir(workspace, index) / "synthesis.md").write_text("", encoding="utf-8")
         state = make_state(workspace)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
@@ -742,7 +685,8 @@ class TestValidator:
         assert any(error["code"] == "invalid_solution_root" for error in errors)
 
     def test_step_11_detects_overwritten_wd_ctx(self, workspace: dict[str, Path]) -> None:
-        workspace["working_draft_path"].write_text("## WD-TASK\n\n### 1.1 需求概述\n\n任务\n\n## WD-SYN\n\n### 槽位：1.1 需求概述\n\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ❌ | CTX-01 | 不足 |\n| 改造 | ✅ | CTX-01 | 推荐 |\n| 新建 | ❌ | CTX-01 | 成本高 |\n#### 选定路径\n- **关键证据引用**：CTX-01\n", encoding="utf-8")
+        write_good_draft(workspace)
+        (workspace["working_draft_path"] / "ctx.md").write_text("", encoding="utf-8")
         state = make_state(workspace, current_step=11)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
@@ -790,7 +734,7 @@ class TestCleanup:
         assert refreshed["checkpoints"]["step-11"]["rendered_via_script"] is True
 
     def test_finalize_cleanup_failure_keeps_files(self, workspace: dict[str, Path]) -> None:
-        workspace["working_draft_path"].write_text("# Working Draft: sample\n\n## WD-TASK\n\n### 1.1 需求概述\n\n任务\n", encoding="utf-8")
+        write_good_draft(workspace)
         workspace["final_document_path"].write_text(FINAL_DOC, encoding="utf-8")
         state = make_state(workspace, current_step=12, completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 10, 11], produced_artifacts=["WD-TASK"])
         state["checkpoints"]["step-7"]["wd_ctx_written"] = True

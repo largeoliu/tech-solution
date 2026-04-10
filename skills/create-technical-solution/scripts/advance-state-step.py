@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -136,6 +137,9 @@ def advance_state_step(
 
 
 def main() -> int:
+    if not os.environ.get("__CTS_INTERNAL_CALL"):
+        print("❌ 本脚本不可直接调用。请使用 run-step.py --prepare / --complete --ticket。", file=sys.stderr)
+        sys.exit(1)
     parser = argparse.ArgumentParser(description="推进状态文件中的步骤和 checkpoint")
     parser.add_argument("--state", required=True, help="状态文件路径")
     parser.add_argument("--step", type=int, required=True, help="当前完成的步骤号")

@@ -52,30 +52,31 @@ compatibility:
 使用 `run-step.py` 统一编排器，自动处理验证、receipt 刷新、参数推导和 step card 加载，Agent 只需关注创作工作。
 
 1. **查看任务**：`python /path/to/run-step.py --state <状态文件>` → 输出当前步骤、验证状态、操作指引、下一步命令
-2. **只读 scaffold**：`python /path/to/run-step.py --state <状态文件> --emit-scaffold` → 仅向 `stdout` 输出当前步骤 scaffold；不修改 state、working draft 或 receipt，且 `--emit-scaffold 与 --complete 不能同时使用`；scaffold 目标步骤遵循当前 auto-skip 语义
-3. **执行并提交**：`python /path/to/run-step.py --state <状态文件> --complete --summary "..."` （创作型步骤通过 stdin/heredoc 传入内容）
-4. **重复**直到步骤 12 完成
+2. **只读 scaffold**：`python /path/to/run-step.py --state <状态文件> --emit-scaffold` → 仅向 `stdout` 输出当前步骤 scaffold；不修改 state、working draft 或 receipt，且 `--emit-scaffold 与 --complete 不能同时使用`；同理也不能与 `--prepare` 同时使用；scaffold 目标步骤遵循当前 auto-skip 语义
+3. **领取 ticket**：`python /path/to/run-step.py --state <状态文件> --prepare` → 校验当前步骤 receipt 与现场指纹，写入一次性 `pending_ticket`
+4. **执行并提交**：`python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> --summary "..."` （创作型步骤通过 stdin/heredoc 传入内容）
+5. **重复**直到步骤 12 完成
 
 各步骤的完整命令示例：
 
 | 步骤 | 命令 |
 |------|------|
-| 1 | `--complete --summary "..." --slug <slug>` |
-| 2, 3, 6 | `--complete --summary "..."` |
-| 4 | `--complete --summary "..." --solution-type "..."` |
-| 5 | `--complete --summary "..." --member <ID> [--member ...]` |
-| 7, 8 | `--complete --summary "..." <<'HEREDOC'\n...\nHEREDOC` |
-| 9 | `--complete --summary "..." <<'HEREDOC'\n---BLOCK:WD-EXP-SLOT-XX\n...\nHEREDOC` |
-| 10 | `--complete --summary "..." <<'HEREDOC'\n---BLOCK:WD-SYN-SLOT-XX\n...\nHEREDOC` |
-| 11, 12 | `--complete --summary "..."` |
+| 1 | `--prepare` 后 `--complete --ticket <ticket> --summary "..." --slug <slug>` |
+| 2, 3, 6 | `--prepare` 后 `--complete --ticket <ticket> --summary "..."` |
+| 4 | `--prepare` 后 `--complete --ticket <ticket> --summary "..." --solution-type "..."` |
+| 5 | `--prepare` 后 `--complete --ticket <ticket> --summary "..." --member <ID> [--member ...]` |
+| 7, 8 | `--prepare` 后 `--complete --ticket <ticket> --summary "..." <<'HEREDOC'\n...\nHEREDOC` |
+| 9 | `--prepare` 后 `--complete --ticket <ticket> --summary "..." <<'HEREDOC'\n---BLOCK:WD-EXP-SLOT-XX\n...\nHEREDOC` |
+| 10 | `--prepare` 后 `--complete --ticket <ticket> --summary "..." <<'HEREDOC'\n---BLOCK:WD-SYN-SLOT-XX\n...\nHEREDOC` |
+| 11, 12 | `--prepare` 后 `--complete --ticket <ticket> --summary "..."` |
 
-全自动步骤（2、3、6、11、12）无需额外输入，直接 `--complete` 即可。
+全自动步骤（2、3、6、11、12）无需额外业务参数，但仍必须遵循 `--prepare` → `--complete --ticket <ticket>`。
 
 ## 状态文件初始化
 只能通过 `run-step.py` 完成步骤 1 初始化 `.architecture/.state/create-technical-solution/[slug].yaml`。它会在 state 缺失时自动创建文件、写入 step-1 最小 checkpoint、派生路径并刷新 receipt；不得再手工 `cp templates/_template.yaml` 后补 YAML。
 
 ## 运行入口与内部脚本
-- `python /path/to/run-step.py --state <状态文件> [--complete --summary "..." ...]`
+- `python /path/to/run-step.py --state <状态文件> [--prepare | --complete --ticket <ticket> --summary "..." ...]`
   - 唯一受支持的对外入口。统一封装验证、receipt 刷新、参数推导、step card 加载、working draft 写入、最终文档成稿与清理
 - `python /path/to/run-step.py --state <状态文件> --emit-scaffold`
   - 同一入口下的只读辅助模式；仅输出 scaffold 到 `stdout`，不是第二条写入路径，也不会替代 `--complete`
@@ -93,10 +94,12 @@ compatibility:
 - 每步完成后写入 `checkpoints.step-N` 并追加 `completed_steps`
 - 回退时从 `completed_steps` 移除受影响步骤，重置 `current_step`
 - **state / draft 职责固定**：state 只保留 `current_step`、`completed_steps`、`required_artifacts`、`produced_artifacts`、gate flags、路径字段，最小 checkpoint、cleanup 状态
-- **正文只允许写入 working draft**：`WD-CTX`、`WD-TASK`、`WD-EXP-*`、`WD-SYN`、`WD-IMPACT-*` 一律只存在于 working draft；共享上下文、专家判断、收敛结论、详细设计正文不得写进 state
+- **正文只允许写入 working draft**：`WD-CTX`、`WD-TASK`、`WD-EXP-SLOT-*`、`WD-SYN-SLOT-*`、`WD-IMPACT-*` 一律只存在于 working draft；共享上下文、专家判断、收敛结论、详细设计正文不得写进 state
 - **checkpoint 必须结构化且瘦身**：`checkpoints.step-N.summary` 只能写流程摘要，不得复述正文
 - **流程摘要只允许描述**：本步是否完成/跳过、写入了什么区块、区块数量/槽位数量、下一步 gate 是否齐备
 - **严禁手写 produced_artifacts**：必须以 `run-step.py` 在块写入后的同步结果为准，不得口头宣称某个 `WD-*` 已存在
+- **ticket 必须先领后交**：每次真正写入前都必须先 `--prepare` 生成一次性 `pending_ticket`，再用 `--complete --ticket <ticket>` 提交；不得跳过 prepare，也不得复用旧 ticket
+- **ticket 绑定现场指纹**：`pending_ticket` 会绑定当前步骤、state fingerprint、artifact fingerprint 与允许写入的 block pattern；prepare 之后若 state、working draft、final document 或提交 block 范围发生漂移，必须重新 `--prepare`
 
 - **step-4 必须通过 `run-step.py` 原子完成**：`required_artifacts` 必须在同一次步骤提交中同步写入，禁止先推进再手改 YAML
 - **step-3 先验只检查前置，不检查产物**：步骤 3 的 validator 只确认 step 1/2、模板文件与路径前置条件；`template_fingerprint`、`slot_count`、`working_draft_path` 必须由 `run-step.py` 的 step-3 受控流程首次生成，禁止因为 step 3 校验失败而手改 state
@@ -119,9 +122,9 @@ compatibility:
 - 每步 checkpoint 至少包含：本步新增区块、本步新增条目数量、下一步门控所需产物是否齐备；若无法列出，视为本步未完成
 - 不得仅以”已完成””已读取””已写入””已删除”等口头表述推进步骤，必须给出本步结果摘要
 - 参与成员必须来自 `.architecture/members.yml` 的实际条目——虚构角色会导致后续专家分析步骤加载不到真实视角，产出无效。
-- 步骤 9 必须实际加载对应专家的角色和视角，不得模拟 `WD-EXP-*` 产出——跳过专家分析等于跳过多视角验证，方案会遗漏关键风险。
-- `WD-EXP-*` 必须是按成员拆分的独立稳定区块，例如 `WD-EXP-SYSTEMS_ARCHITECT`；不得用单个总块冒充多个专家产物。
-- 步骤 10 必须保留 `WD-SYN` 收敛区块，不得以最终文档替代——中间产物和最终文档职责不同，缺少 WD-SYN 会导致回退时无法追溯决策依据。
+- 步骤 9 必须实际加载对应专家的角色和视角，不得模拟 `WD-EXP-SLOT-*` 产出——跳过专家分析等于跳过多视角验证，方案会遗漏关键风险。
+- `WD-EXP-SLOT-*` 必须按槽位稳定落盘，每个槽位内再保留逐专家小节；不得用单个总块冒充多个槽位产物。
+- 步骤 10 必须保留 `WD-SYN-SLOT-*` 收敛区块，不得以最终文档替代——中间产物和最终文档职责不同，缺少逐槽位收敛会导致回退时无法追溯决策依据。
 - `moderate` 流程的 step-9 必须显式 skip，而不是“先推进 step-9 再口头说明直接做 step-10”。
 - 步骤 1-12 进入前必须先通过 `run-step.py` 触发 validator 门禁并写 receipt；若未通过，优先消费 `--format json` 返回的 `repair_plan[]`，按 `repair_plan[].step` 与 `repair_plan[].depends_on_steps` 安排修复顺序，按 `repair_plan[].action_type` 判断是否需要重跑对应步骤，并用 `repair_plan[].script_command` 作为首选重试命令；产物闭合以 `repair_plan[].expected_artifacts_after_fix` 为准，再结合 `summary.recommended_repair_sequence`、`summary.recommended_rollback_step`、`summary.missing_artifacts`、`summary.skip_instead_of_retry` 与 `issues[*].repair_guidance` 补充判断，直到通过后继续
 
@@ -132,7 +135,7 @@ compatibility:
 3. 门控标志位正确性
 4. 当前模板快照是否仍与 `.architecture/templates/technical-solution-template.md` 一致
 5. `WD-TASK` 是否覆盖当前模板全部槽位
-6. 存在逐专家 `WD-EXP-*` 独立区块
+6. 存在逐槽位 `WD-EXP-SLOT-*` 稳定文件
 7. step-12 前最终文档与模板槽位顺序是否一致
 8. `working_draft_path` / `final_document_path` 是否仍位于白名单目录
 
@@ -140,13 +143,13 @@ compatibility:
 </HARD-GATE>
 
 ## 流程级别
-所有流程统一为 full 级别，中间产物固定为 `WD-CTX`、`WD-TASK`、`WD-EXP-*`、`WD-SYN`。
+所有流程统一为 full 级别，中间产物固定为 `WD-CTX`、`WD-TASK`、`WD-EXP-SLOT-*`、`WD-SYN-SLOT-*`。
 
 明确反例：在现有抽检系统上新增"按比例抽审能力 / 新抽样方式 / 新审核治理维度 / 新判定模式"属于 `introduces-core-capability"，必须执行完整流程。
 
 step 8 必须按当前模板的真实槽位逐项生成任务单，不得只按"背景/总体设计/详细设计/测试/上线"这类粗粒度章节分配。
 `WD-TASK` 必须与模板槽位一一对应且顺序一致，不得多写 `SLOT-20`、不得把 `CTX-*` 混入任务单。
-`WD-SYN` 必须按模板槽位逐项收敛，不接受用一段"总体结论"替代逐槽位收敛。
+`WD-SYN-SLOT-*` 必须按模板槽位逐项收敛，不接受用一段"总体结论"替代逐槽位收敛。
 
 ## 中间产物文档完整性
 - 一次流程只维护一份 working draft 目录；其 slug 必须与最终技术方案文件一致。若主题变化导致 slug 变化，必须终止当前流程并以新 slug 重启，不得并行保留多份草稿
@@ -174,7 +177,7 @@ step 8 必须按当前模板的真实槽位逐项生成任务单，不得只按"
 
 <HARD-GATE>
 最终成稿门控：步骤 11 完成前不得生成最终文档。必须满足以下全部条件才可进入步骤 11：
-1. 所有非阻塞槽位均已写入 WD-SYN 收敛产物
+1. 所有非阻塞槽位均已写入 `WD-SYN-SLOT-*` 收敛产物
 2. 所有新建结论的关键证据引用已覆盖不可复用、不可改造与新建必要性说明
 3. 不存在未解决的模板承载缺口
 4. validate-state.py 步骤 11 门控检查通过（退出码 0）
@@ -232,9 +235,9 @@ step 8 必须按当前模板的真实槽位逐项生成任务单，不得只按"
 
 - `python /path/to/run-step.py --state <状态文件>` 会给出面向执行的 repair 指引；对外流程只消费这里返回的修复建议，不要绕过 `run-step.py` 自己拼接修复动作
 - 参与成员必须来自 `.architecture/members.yml` 实际条目——虚构角色会导致步骤 9 专家分析加载失败，产出无效。
-- 步骤 9 不得模拟 `WD-EXP-*` 产出或直接跳到最终文档，必须实际加载对应专家的角色和视角
+- 步骤 9 不得模拟 `WD-EXP-SLOT-*` 产出或直接跳到最终文档，必须实际加载对应专家的角色和视角
 - 步骤 8 不得只生成粗粒度章节任务单，必须按当前模板真实槽位逐项分配
-- 步骤 10、11 不得以最终文档替代 `WD-SYN` 收敛区块；中间产物和最终文档是两回事
+- 步骤 10、11 不得以最终文档替代 `WD-SYN-SLOT-*` 收敛区块；中间产物和最终文档是两回事
 - 复制 state 模板后仍处于 step 1 初始态；若还没写 step-1 checkpoint、`final_document_path`、receipt，就不能开始写方案正文
 - 只读了 `members.yml` 不等于完成 step 5；只有 `checkpoints.step-5.selected_members` 真正落盘才算
 - 不得把最终文档写到 `docs/`；step 11 只允许通过 `run-step.py` 的成稿流程落盘到 `.architecture/technical-solutions/`
@@ -247,4 +250,4 @@ step 8 必须按当前模板的真实槽位逐项生成任务单，不得只按"
 - step 11 若发生推理失败、写文件失败或标题顺序校验失败，必须停留在步骤 11 并先走 validator repair loop，禁止直接推进步骤 12。
 - step 12 只能通过 `run-step.py` 的清理流程完成；禁止手工先改 `absorption_check_passed=true`、再 `rm` 文件、再尝试推进状态。
 - 仓库里即使已有 `docs/技术方案*.md` 或其他分析 agent，也不能替代 `create-technical-solution` 主路径；最终产物仍必须落在 `.architecture/technical-solutions/`
-- 若某一步脚本失败，不得改成“一次性写完整 WD-CTX + WD-TASK + WD-SYN 再回填步骤”；这会让 receipt、checkpoint、produced_artifacts 脱节
+- 若某一步脚本失败，不得改成“一次性写完整 WD-CTX + WD-TASK + WD-SYN-SLOT-* 再回填步骤”；这会让 receipt、checkpoint、produced_artifacts 脱节

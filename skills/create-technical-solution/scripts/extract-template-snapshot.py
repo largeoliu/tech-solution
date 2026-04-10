@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import hashlib
 import json
@@ -137,6 +138,9 @@ def update_state(
 
 
 def main() -> int:
+    if not os.environ.get("__CTS_INTERNAL_CALL"):
+        print("❌ 本脚本不可直接调用。请使用 run-step.py --prepare / --complete --ticket。", file=sys.stderr)
+        sys.exit(1)
     parser = argparse.ArgumentParser(description="提取模板指纹并生成 working draft 骨架")
     parser.add_argument("--template", required=True, help="模板路径")
     parser.add_argument("--slug", required=True, help="方案 slug")

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -69,6 +70,9 @@ def sync_artifacts_in_state(state_path: Path, require_receipt_step: int | None =
 
 
 def main() -> int:
+    if not os.environ.get("__CTS_INTERNAL_CALL"):
+        print("❌ 本脚本不可直接调用。请使用 run-step.py --prepare / --complete --ticket。", file=sys.stderr)
+        sys.exit(1)
     parser = argparse.ArgumentParser(description="从 working draft 目录反推产物列表并可回写状态")
     parser.add_argument("--working-dir", required=True, help="working draft 目录路径")
     parser.add_argument("--state", help="状态文件路径；若提供则回写 produced_artifacts")

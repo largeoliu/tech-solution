@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import json
 import re
@@ -217,6 +218,9 @@ def upsert_with_sync(
 
 
 def main() -> int:
+    if not os.environ.get("__CTS_INTERNAL_CALL"):
+        print("❌ 本脚本不可直接调用。请使用 run-step.py --prepare / --complete --ticket。", file=sys.stderr)
+        sys.exit(1)
     parser = argparse.ArgumentParser(description="按 block 安全更新 working draft 目录")
     parser.add_argument("--working-dir", required=True, help="working draft 目录路径")
     parser.add_argument("--state", help="状态文件路径")

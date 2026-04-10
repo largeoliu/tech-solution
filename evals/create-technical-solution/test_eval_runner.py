@@ -143,7 +143,7 @@ def test_emit_scaffold_installed_copy_smoke(tmp_path):
         capture_output=True, text=True, check=False, cwd=install_root,
     )
     assert result.returncode == 0, f"emit-scaffold failed: {result.stderr}"
-    assert "WD-CTX" in result.stdout
+    assert "### CTX-01" in result.stdout
 
 
 def test_runtime_doctor_installed_copy_smoke(tmp_path):

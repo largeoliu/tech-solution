@@ -6,18 +6,18 @@ blocks:
   WD-TASK:
     type: singleton
     heading: WD-TASK
-  WD-EXP:
+  WD-EXP-SLOT:
     type: pattern
-    heading_pattern: WD-EXP-[A-Z0-9_-]+
+    heading_pattern: WD-EXP-SLOT-\d+
     required_sections:
       - 参与槽位
       - 决策类型
       - 核心理由
       - 关键证据引用
       - 未决点
-  WD-SYN:
-    type: singleton
-    heading: WD-SYN
+  WD-SYN-SLOT:
+    type: pattern
+    heading_pattern: WD-SYN-SLOT-\d+
   WD-SYN-LIGHT:
     type: singleton
     heading: WD-SYN-LIGHT

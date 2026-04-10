@@ -38,97 +38,27 @@ TEMPLATE = """# 技术方案文档
 """
 
 
-GOOD_DRAFT = """# Working Draft: sample-solution
-
-## WD-CTX
-
-### CTX-01
-来源: code
-
-## WD-TASK
-
-### 1.1 需求概述
-必须消费的共享上下文: CTX-01
-
-### 1.2 核心目标
-必须消费的共享上下文: CTX-01
-
-### 2.1 方案设计
-必须消费的共享上下文: CTX-01
-
-### 2.2 风险与验证
-必须消费的共享上下文: CTX-01
-
-## WD-SYN
-
-### 槽位：1.1 需求概述
-#### 目标能力
-- 已填写目标
-#### 候选方案对比
-| 路径 | 可行性 | 关键证据 | 选择理由 |
-|------|--------|----------|----------|
-| 复用 | ☐ | CTX-01 | <待补充> |
-| 改造 | ☐ | CTX-01 | <待补充> |
-| 新建 | ☐ | CTX-01 | <待补充> |
-#### 选定路径
-- 路径: 改造
-- 选定写法: 一句话写法
-- 关键证据引用: CTX-01
-- 建议落位槽位: 1.1 需求概述
-- 模板承载缺口: 无
-- 未决问题: 无
-
-### 槽位：1.2 核心目标
-#### 目标能力
-- 已填写目标
-#### 候选方案对比
-| 路径 | 可行性 | 关键证据 | 选择理由 |
-|------|--------|----------|----------|
-| 复用 | ☐ | CTX-01 | <待补充> |
-| 改造 | ☐ | CTX-01 | <待补充> |
-| 新建 | ☐ | CTX-01 | <待补充> |
-#### 选定路径
-- 路径: 改造
-- 选定写法: 一句话写法
-- 关键证据引用: CTX-01
-- 建议落位槽位: 1.2 核心目标
-- 模板承载缺口: 无
-- 未决问题: 无
-
-### 槽位：2.1 方案设计
-#### 目标能力
-- 已填写目标
-#### 候选方案对比
-| 路径 | 可行性 | 关键证据 | 选择理由 |
-|------|--------|----------|----------|
-| 复用 | ☐ | CTX-01 | <待补充> |
-| 改造 | ☐ | CTX-01 | <待补充> |
-| 新建 | ☐ | CTX-01 | <待补充> |
-#### 选定路径
-- 路径: 改造
-- 选定写法: 一句话写法
-- 关键证据引用: CTX-01
-- 建议落位槽位: 2.1 方案设计
-- 模板承载缺口: 无
-- 未决问题: 无
-
-### 槽位：2.2 风险与验证
-#### 目标能力
-- 已填写目标
-#### 候选方案对比
-| 路径 | 可行性 | 关键证据 | 选择理由 |
-|------|--------|----------|----------|
-| 复用 | ☐ | CTX-01 | <待补充> |
-| 改造 | ☐ | CTX-01 | <待补充> |
-| 新建 | ☐ | CTX-01 | <待补充> |
-#### 选定路径
-- 路径: 改造
-- 选定写法: 一句话写法
-- 关键证据引用: CTX-01
-- 建议落位槽位: 2.2 风险与验证
-- 模板承载缺口: 无
-- 未决问题: 无
-"""
+def make_wd_syn_block(title: str) -> str:
+    return "\n".join(
+        [
+            f"### 槽位：{title}",
+            "#### 目标能力",
+            "- 已填写目标",
+            "#### 候选方案对比",
+            "| 路径 | 可行性 | 关键证据 | 选择理由 |",
+            "|------|--------|----------|----------|",
+            "| 复用 | ☐ | CTX-01 | <待补充> |",
+            "| 改造 | ☐ | CTX-01 | <待补充> |",
+            "| 新建 | ☐ | CTX-01 | <待补充> |",
+            "#### 选定路径",
+            "- 路径: 改造",
+            "- 选定写法: 一句话写法",
+            "- 关键证据引用: CTX-01",
+            f"- 建议落位槽位: {title}",
+            "- 模板承载缺口: 无",
+            "- 未决问题: 无",
+        ]
+    )
 
 
 @pytest.fixture()
@@ -158,19 +88,21 @@ def workspace(tmp_path: Path) -> dict[str, Path]:
         "members_path": members_path,
         "principles_path": principles_path,
         "state_path": state_dir / "sample-solution.yaml",
-        "working_draft_path": state_dir / "sample-solution.working.md",
+        "working_draft_path": state_dir / "sample-solution",
         "final_document_path": solution_root / "sample-solution.md",
     }
 
 
 def make_state(workspace: dict[str, Path], **overrides) -> dict:
+    headings = vs.extract_slot_headings(workspace["template_path"].read_text(encoding="utf-8"))
+    syn_artifacts = [f"WD-SYN-{item['slot']}" for item in headings]
     state = {
         "current_step": 10,
         "completed_steps": [1, 2, 3, 4, 5, 6, 7, 8, 9],
         "skipped_steps": [],
         "pending_questions": [],
-        "required_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"],
-        "produced_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"],
+        "required_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP-*"] + syn_artifacts,
+        "produced_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP-*"] + syn_artifacts,
         "gate_receipt": {
             "step": 10,
             "state_fingerprint": "",
@@ -181,7 +113,7 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
         "members_path": ".architecture/members.yml",
         "principles_path": ".architecture/principles.md",
         "repowiki_path": ".qoder/repowiki",
-        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution.working.md",
+        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
         "checkpoints": {
             "step-1": {"summary": "完成；slug=sample-solution；paths=1；gate: step-2 ready", "slug": "sample-solution", "scope_ready": True},
@@ -192,8 +124,8 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
             "step-6": {"summary": "完成；repowiki 不存在；sources=0；gate: step-7 ready", "repowiki_checked": True, "repowiki_exists": False, "repowiki_source_count": 0},
             "step-7": {"summary": "完成；写入 WD-CTX；CTX=1；gate: step-8 ready", "wd_ctx_written": True, "ctx_count": 1},
             "step-8": {"summary": "完成；写入 WD-TASK；slots=4；gate: step-9 ready", "wd_task_written": True, "task_slot_count": 4},
-            "step-9": {"summary": "完成；写入 WD-EXP-*；members=1；gate: step-10 ready", "wd_exp_written": True, "wd_exp_count": 1},
-            "step-10": {"summary": "完成；写入 WD-SYN；slots=4；gate: step-11 ready", "wd_syn_written": True, "syn_slot_count": 4},
+            "step-9": {"summary": "完成；写入 WD-EXP-*；members=1；gate: step-10 ready", "wd_exp_written": True, "wd_exp_count": 4},
+            "step-10": {"summary": "完成；写入 WD-SYN-SLOT-*；slots=4；gate: step-11 ready", "wd_syn_written": True, "syn_slot_count": 4},
             "step-11": {"summary": "等待成稿", "final_document_written": False, "absorbed_slot_count": 0, "rendered_via_script": False},
             "step-12": {"summary": "等待校验", "validator_passed": False, "working_draft_deleted": False, "state_file_deleted": False},
         },
@@ -204,8 +136,8 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
         "can_enter_step_12": False,
         "absorption_check_passed": False,
         "cleanup_allowed": False,
+        "slots": [{"slot": item["slot"], "title": item["title"]} for item in headings],
     }
-    headings = vs.extract_slot_headings(workspace["template_path"].read_text(encoding="utf-8"))
     state["checkpoints"]["step-3"]["template_fingerprint"] = vs.compute_template_fingerprint(
         workspace["template_path"].read_text(encoding="utf-8"),
         headings,
@@ -220,7 +152,93 @@ def write_state(workspace: dict[str, Path], state: dict) -> None:
 
 
 def write_good_draft(path: Path) -> None:
-    path.write_text(GOOD_DRAFT, encoding="utf-8")
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "ctx.md").write_text(
+        "\n".join([
+            "### CTX-01",
+            "来源: code",
+            "结论或约束: existing implementation",
+            "适用槽位: 1.1 需求概述、1.2 核心目标、2.1 方案设计、2.2 风险与验证",
+            "可信度或缺口: 已核实",
+        ]),
+        encoding="utf-8",
+    )
+    (path / "task.md").write_text(
+        "\n\n".join([
+            "\n".join([
+                "### 1.1 需求概述",
+                "- 槽位标识: SLOT-01",
+                "- 必须消费的共享上下文: CTX-01",
+                "- 参与专家: systems_architect",
+                "- 每位专家必答问题:",
+                "  - <围绕当前槽位补齐复用 / 改造 / 新建比较>",
+                "- 建议落位槽位: 1.1 需求概述",
+                "- 落位表达要求: <只写当前模板槽位需要的最小闭环>",
+                "- 缺口或阻塞项: 无",
+            ]),
+            "\n".join([
+                "### 1.2 核心目标",
+                "- 槽位标识: SLOT-02",
+                "- 必须消费的共享上下文: CTX-01",
+                "- 参与专家: systems_architect",
+                "- 每位专家必答问题:",
+                "  - <围绕当前槽位补齐复用 / 改造 / 新建比较>",
+                "- 建议落位槽位: 1.2 核心目标",
+                "- 落位表达要求: <只写当前模板槽位需要的最小闭环>",
+                "- 缺口或阻塞项: 无",
+            ]),
+            "\n".join([
+                "### 2.1 方案设计",
+                "- 槽位标识: SLOT-03",
+                "- 必须消费的共享上下文: CTX-01",
+                "- 参与专家: systems_architect",
+                "- 每位专家必答问题:",
+                "  - <围绕当前槽位补齐复用 / 改造 / 新建比较>",
+                "- 建议落位槽位: 2.1 方案设计",
+                "- 落位表达要求: <只写当前模板槽位需要的最小闭环>",
+                "- 缺口或阻塞项: 无",
+            ]),
+            "\n".join([
+                "### 2.2 风险与验证",
+                "- 槽位标识: SLOT-04",
+                "- 必须消费的共享上下文: CTX-01",
+                "- 参与专家: systems_architect",
+                "- 每位专家必答问题:",
+                "  - <围绕当前槽位补齐复用 / 改造 / 新建比较>",
+                "- 建议落位槽位: 2.2 风险与验证",
+                "- 落位表达要求: <只写当前模板槽位需要的最小闭环>",
+                "- 缺口或阻塞项: 无",
+            ]),
+        ]),
+        encoding="utf-8",
+    )
+    for index, title in enumerate(["1.1 需求概述", "1.2 核心目标", "2.1 方案设计", "2.2 风险与验证"], start=1):
+        slot = path / "slots" / f"SLOT-{index:02d}"
+        slot.mkdir(parents=True, exist_ok=True)
+        (slot / "experts.md").write_text(
+            "\n".join([
+                "### 专家：systems_architect",
+                "- 决策类型: 改造",
+                "- 核心理由: 绑定 CTX-01，说明为什么选这条路径",
+                "- 关键证据引用: CTX-01",
+                "- 未决点: 无",
+            ]),
+            encoding="utf-8",
+        )
+        (slot / "synthesis.md").write_text(make_wd_syn_block(title), encoding="utf-8")
+
+
+def assert_good_draft(path: Path) -> None:
+    assert path.is_dir()
+    assert (path / "ctx.md").exists()
+    assert (path / "task.md").exists()
+    assert (path / "slots" / "SLOT-01" / "experts.md").exists()
+    assert (path / "slots" / "SLOT-04" / "synthesis.md").exists()
+
+
+def write_incomplete_draft(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "ctx.md").write_text("### CTX-01\n来源: code\n", encoding="utf-8")
 
 
 def load_doctor():
@@ -258,8 +276,8 @@ def test_apply_mode_migrates_legacy_working_draft_to_canonical_state_dir(workspa
     assert exit_code == 0
     assert payload["passed"] is True
     refreshed = vs.load_state(workspace["state_path"])
-    assert refreshed["working_draft_path"] == ".architecture/.state/create-technical-solution/sample-solution.working.md"
-    assert workspace["working_draft_path"].read_text(encoding="utf-8") == GOOD_DRAFT
+    assert refreshed["working_draft_path"] == ".architecture/.state/create-technical-solution/sample-solution"
+    assert_good_draft(workspace["working_draft_path"])
     assert not legacy_path.exists()
 
 
@@ -277,8 +295,8 @@ def test_apply_mode_rewrites_legacy_state_path_without_clobbering_existing_canon
     assert exit_code == 0
     assert payload["passed"] is True
     refreshed = vs.load_state(workspace["state_path"])
-    assert refreshed["working_draft_path"] == ".architecture/.state/create-technical-solution/sample-solution.working.md"
-    assert workspace["working_draft_path"].read_text(encoding="utf-8") == GOOD_DRAFT
+    assert refreshed["working_draft_path"] == ".architecture/.state/create-technical-solution/sample-solution"
+    assert_good_draft(workspace["working_draft_path"])
     assert legacy_path.read_text(encoding="utf-8") == "legacy draft content\n"
 
 
@@ -296,7 +314,7 @@ def test_apply_mode_creates_missing_canonical_parent_directories_only(workspace:
     assert payload["passed"] is True
     assert workspace["solution_root"].exists()
     assert not workspace["final_document_path"].exists()
-    assert workspace["working_draft_path"].read_text(encoding="utf-8") == GOOD_DRAFT
+    assert_good_draft(workspace["working_draft_path"])
 
 
 def test_healthy_state_with_valid_receipt_stays_no_op(workspace: dict[str, Path]) -> None:
@@ -318,7 +336,7 @@ def test_healthy_state_with_valid_receipt_stays_no_op(workspace: dict[str, Path]
 
 def test_directory_only_mutation_reports_mutated_true_even_when_semantic_issues_remain(workspace: dict[str, Path]) -> None:
     doctor = load_doctor()
-    workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n## WD-SYN\n\n### 槽位：1.1 需求概述\n", encoding="utf-8")
+    write_incomplete_draft(workspace["working_draft_path"])
     state = make_state(workspace)
     write_state(workspace, state)
     workspace["solution_root"].rmdir()
@@ -329,7 +347,8 @@ def test_directory_only_mutation_reports_mutated_true_even_when_semantic_issues_
     assert payload["passed"] is False
     assert payload["mutated"] is True
     assert workspace["solution_root"].exists()
-    assert any(issue["code"] == "missing_working_draft_block" for issue in payload["issues"])
+    assert any(issue["code"] == "draft_block_overwritten" for issue in payload["issues"])
+    assert any("WD-TASK" in issue.get("missing_artifacts", []) for issue in payload["issues"])
 
 
 def test_apply_mode_refreshes_gate_receipt_when_receipt_is_only_problem(workspace: dict[str, Path]) -> None:
@@ -355,7 +374,7 @@ def test_apply_mode_refreshes_gate_receipt_when_receipt_is_only_problem(workspac
 
 def test_apply_mode_does_not_refresh_receipt_when_semantic_issues_remain(workspace: dict[str, Path]) -> None:
     doctor = load_doctor()
-    workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n## WD-SYN\n\n### 槽位：1.1 需求概述\n", encoding="utf-8")
+    write_incomplete_draft(workspace["working_draft_path"])
     state = make_state(workspace)
     original_receipt = {
         "step": 10,
@@ -371,12 +390,13 @@ def test_apply_mode_does_not_refresh_receipt_when_semantic_issues_remain(workspa
     assert payload["passed"] is False
     refreshed = vs.load_state(workspace["state_path"])
     assert refreshed["gate_receipt"] == original_receipt
-    assert any(issue["code"] == "missing_working_draft_block" for issue in payload["issues"])
+    assert any(issue["code"] == "draft_block_overwritten" for issue in payload["issues"])
+    assert any("WD-TASK" in issue.get("missing_artifacts", []) for issue in payload["issues"])
 
 
 def test_doctor_returns_validator_issues_and_repair_plan(workspace: dict[str, Path]) -> None:
     doctor = load_doctor()
-    workspace["working_draft_path"].write_text("## WD-CTX\n\n## WD-TASK\n\n## WD-SYN\n\n### 槽位：1.1 需求概述\n", encoding="utf-8")
+    write_incomplete_draft(workspace["working_draft_path"])
     state = make_state(workspace)
     state["gate_receipt"] = {
         "step": 10,
@@ -389,5 +409,6 @@ def test_doctor_returns_validator_issues_and_repair_plan(workspace: dict[str, Pa
 
     assert exit_code == 2
     assert any(issue["code"] == "invalid_gate_receipt" for issue in payload["issues"])
-    assert any(issue["code"] == "missing_working_draft_block" for issue in payload["issues"])
+    assert any(issue["code"] == "draft_block_overwritten" for issue in payload["issues"])
+    assert any("WD-TASK" in issue.get("missing_artifacts", []) for issue in payload["issues"])
     assert any(item["step"] == 10 and "run-step.py" in item["script_command"] for item in payload["repair_plan"])

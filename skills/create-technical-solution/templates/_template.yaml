@@ -7,6 +7,7 @@ gate_receipt:
   step: 0
   state_fingerprint: ""
   validated_at: ""
+pending_ticket: {}
 solution_root: ".architecture/technical-solutions"
 template_path: ".architecture/templates/technical-solution-template.md"
 members_path: ".architecture/members.yml"

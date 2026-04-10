@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import json
 import re
@@ -47,6 +48,17 @@ def extract_slot_headings(markdown: str) -> list[str]:
     return [title for level, title in headings if level == slot_level]
 
 
+def strip_slot_heading(content: str, title: str) -> str:
+    lines = content.strip().splitlines()
+    if not lines:
+        return ""
+    expected = f"### 槽位：{title}"
+    if normalize_text(lines[0]) != normalize_text(expected):
+        return content.strip()
+    stripped = "\n".join(lines[1:]).strip()
+    return stripped
+
+
 def render_from_draft(state_path: Path) -> str:
     state = load_yaml(state_path)
     draft_value = str(state.get("working_draft_path") or "").strip()
@@ -77,7 +89,10 @@ def render_from_draft(state_path: Path) -> str:
         title = slot_info.get("title", "")
         syn_path = draft_path / "slots" / slot_id / "synthesis.md"
         if syn_path.exists() and syn_path.stat().st_size > 0:
-            sections[title] = syn_path.read_text(encoding="utf-8").strip()
+            sections[title] = strip_slot_heading(
+                syn_path.read_text(encoding="utf-8"),
+                title,
+            )
 
     template_content = template_path.read_text(encoding="utf-8")
     expected_slots = extract_slot_headings(template_content)
@@ -157,6 +172,9 @@ def render_final_document(
 
 
 def main() -> int:
+    if not os.environ.get("__CTS_INTERNAL_CALL"):
+        print("❌ 本脚本不可直接调用。请使用 run-step.py --prepare / --complete --ticket。", file=sys.stderr)
+        sys.exit(1)
     parser = argparse.ArgumentParser(description="步骤 11 的唯一合法成稿路径")
     parser.add_argument("--state", required=True, help="状态文件路径")
     parser.add_argument("--summary", required=True, help="写入 checkpoints.step-11.summary 的摘要")
