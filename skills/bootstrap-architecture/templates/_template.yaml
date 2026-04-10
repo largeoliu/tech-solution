@@ -13,8 +13,7 @@ required_artifacts:
 produced_artifacts: []
 template_mode: default
 cleanup_allowed: false
-pending_questions: []
 blocked: false
 block_reason: null
+# 旧版嵌套字段，新版检查点存储在独立的 checkpoints.step-<N>.yaml 文件中
 checkpoints: {}
-active_references: []
