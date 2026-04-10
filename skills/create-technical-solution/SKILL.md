@@ -53,7 +53,7 @@ compatibility:
 
 1. **查看任务**：`python /path/to/run-step.py --state <状态文件>` → 输出当前步骤、验证状态、操作指引、下一步命令
 2. **只读 scaffold**：`python /path/to/run-step.py --state <状态文件> --emit-scaffold` → 仅向 `stdout` 输出当前步骤 scaffold；不修改 state、working draft 或 receipt，且 `--emit-scaffold 与 --complete 不能同时使用`；scaffold 目标步骤遵循当前 auto-skip 语义
-3. **执行并提交**：`python /path/to/run-step.py --state <状态文件> --complete --summary "..." [--content-file /tmp/xxx.md]`
+3. **执行并提交**：`python /path/to/run-step.py --state <状态文件> --complete --summary "..."` （创作型步骤通过 stdin/heredoc 传入内容）
 4. **重复**直到步骤 12 完成
 
 各步骤的完整命令示例：
@@ -64,8 +64,9 @@ compatibility:
 | 2, 3, 6 | `--complete --summary "..."` |
 | 4 | `--complete --summary "..." --solution-type "..."` |
 | 5 | `--complete --summary "..." --member <ID> [--member ...]` |
-| 7, 8, 10 | `--complete --summary "..." --content-file /tmp/<block>.md` |
-| 9 | `--complete --summary "..." --content-file /tmp/wd-exp-<MEMBER>.md [--content-file ...]` |
+| 7, 8 | `--complete --summary "..." <<'HEREDOC'\n...\nHEREDOC` |
+| 9 | `--complete --summary "..." <<'HEREDOC'\n---BLOCK:WD-EXP-SLOT-XX\n...\nHEREDOC` |
+| 10 | `--complete --summary "..." <<'HEREDOC'\n---BLOCK:WD-SYN-SLOT-XX\n...\nHEREDOC` |
 | 11, 12 | `--complete --summary "..."` |
 
 全自动步骤（2、3、6、11、12）无需额外输入，直接 `--complete` 即可。
@@ -82,8 +83,11 @@ compatibility:
   - 运行时 repair helper，不是主执行路径；默认 `dry-run`，只有 `--apply-safe-fixes` 才允许做结构性安全修复（规范目录、旧 draft 路径/状态迁移、语义安全的 receipt 修复）
 - 其他脚本（如 `initialize-state.py`、`extract-template-snapshot.py`、`upsert-draft-block.py`、`advance-state-step.py`、`render-final-document.py`、`finalize-cleanup.py`）
   - 仅保留给 `run-step.py`、测试与内部兼容流程使用；不再作为用户公开操作入口
-- 创作型步骤的 `content-file`
-  - 只能包含目标 block 的区块体内容；不得再包含 `## WD-*`、`## Template Metadata`、`## Template Slots` 或 `# Working Draft`
+- 创作型步骤通过 stdin/heredoc 传入内容
+  - Step 7/8: 整体 stdin 作为单个 block body
+  - Step 9: 按 `---BLOCK:WD-EXP-SLOT-XX` 标记分隔多个槽位的专家分析
+  - Step 10: 按 `---BLOCK:WD-SYN-SLOT-XX` 标记分隔多个槽位的收敛结果
+  - 不得在 block body 中包含 `## WD-*` 或 draft 容器标题
 
 ## 状态更新规则
 - 每步完成后写入 `checkpoints.step-N` 并追加 `completed_steps`
@@ -98,9 +102,9 @@ compatibility:
 - **step-3 先验只检查前置，不检查产物**：步骤 3 的 validator 只确认 step 1/2、模板文件与路径前置条件；`template_fingerprint`、`slot_count`、`working_draft_path` 必须由 `run-step.py` 的 step-3 受控流程首次生成，禁止因为 step 3 校验失败而手改 state
 - **所有写状态动作都要求 receipt**：`run-step.py` 在进入当前步骤前必须先完成 validator 门禁并刷新 receipt；不得绕过该流程直接写 state、draft、final document 或 cleanup 结果
 - **receipt 必须跟随 current_step 原子刷新**：任何 mutating script 成功后都必须把 `gate_receipt.step` 刷新到最新 `current_step`；若 `receipt.step` 落后于 `current_step`，视为非法状态，必须停下修复，不能继续写 draft、render 或 cleanup
-- **working draft 只能块级写入**：step 7/8/9/10 只能通过 `run-step.py` 的受控写入路径更新 `WD-*` 区块，禁止整份覆盖 draft；任何覆盖导致旧 block 消失，视为流程失败
-- **block body 不能再带 block 标题**：传给 `run-step.py --content-file` 的文件只允许是区块体内容；如果再次包含 `## WD-*` 或 draft 容器标题，视为无效输入
-- **state 中路径必须相对化**：`solution_root` 固定为 `.architecture/technical-solutions`，`working_draft_path` 固定为 `.architecture/.state/create-technical-solution/[slug].working.md`；不得把绝对路径写回 state
+- **working draft 只能文件级写入**：step 7/8/9/10 只能通过 `run-step.py` 的受控写入路径更新对应文件，禁止整份覆盖 draft 目录
+- **block body 不得带块级标题**：通过 stdin 传入的内容只允许是区块体内容；如果包含 `## WD-*` 或 draft 容器标题，视为无效输入
+- **state 中路径必须相对化**：`solution_root` 固定为 `.architecture/technical-solutions`，`working_draft_path` 固定为 `.architecture/.state/create-technical-solution/[slug]`（目录）；不得把绝对路径写回 state
 - **最终文档目录固定**：`final_document_path` 只能位于 `.architecture/technical-solutions/`，不得写入 `docs/`、项目根目录或其他自定义目录
 - **目录策略固定为双读单写**：可以读取历史 `.architecture/solutions/`，但本次流程的新 working draft 统一写入 `.architecture/.state/create-technical-solution/`，最终文档统一写入 `.architecture/technical-solutions/`
 - **禁止外部脚本补状态**：不得用 inline Python、手工 Edit YAML、直接 `rm` 文件来伪造 receipt、fingerprint、checkpoint、cleanup 结果；一旦 gate fail，必须停在当前步修复脚本要求的最小前置
@@ -124,7 +128,7 @@ compatibility:
 <HARD-GATE>
 步骤门控强制要求：步骤 1-12 进入前必须先通过 `run-step.py` 触发对应步骤的 validator 门禁与 receipt 刷新。内部 validator 会检查：
 1. 状态文件字段完整性
-2. working draft 中 `WD-*` 区块与状态声明是否一致
+2. working draft 目录中 `WD-*` 文件与状态声明是否一致
 3. 门控标志位正确性
 4. 当前模板快照是否仍与 `.architecture/templates/technical-solution-template.md` 一致
 5. `WD-TASK` 是否覆盖当前模板全部槽位
@@ -145,8 +149,8 @@ step 8 必须按当前模板的真实槽位逐项生成任务单，不得只按"
 `WD-SYN` 必须按模板槽位逐项收敛，不接受用一段"总体结论"替代逐槽位收敛。
 
 ## 中间产物文档完整性
-- 一次流程只维护一份 working draft；其 slug 必须与最终技术方案文件一致。若主题变化导致 slug 变化，必须终止当前流程并以新 slug 重启，不得并行保留多份草稿
-- 下游步骤只能消费已经写入 working draft 的稳定 `WD-*` 区块；未写入的区块视为不存在，不得预支后续结论
+- 一次流程只维护一份 working draft 目录；其 slug 必须与最终技术方案文件一致。若主题变化导致 slug 变化，必须终止当前流程并以新 slug 重启，不得并行保留多份草稿
+- 下游步骤只能消费已经写入 working draft 目录的稳定文件；未写入的文件视为不存在，不得预支后续结论
 - 展示层可以只给摘要，但 `WD-*` 中间产物必须保留完整字段、证据追溯、阻塞条件、冲突处理和失效标记，不得因展示层精简而减配
 - working draft 只保存稳定、可复用、可回退的结论，不保存 scratchpad、原始推理片段或临时口径
 - 回退或重进时，必须先写 `WD-IMPACT-[n]`；已失效内容必须显式标注作废范围，无可复用内容时 `保持有效内容` 写 `无`

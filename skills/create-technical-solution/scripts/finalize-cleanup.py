@@ -49,16 +49,20 @@ def run_cleanup(state_path: Path, summary: str) -> tuple[int, dict[str, Any]]:
 
     state = load_yaml(state_path, missing_ok=True)
     require_receipt(state, expected_step=12)
-    repo_root = state_path.parent.parent.parent.parent
+    resolved = state_path.resolve()
+    if resolved.name == "meta.yaml":
+        repo_root = resolved.parents[4]
+    else:
+        repo_root = resolved.parents[3]
     draft_value = str(state.get("working_draft_path") or "")
     working_draft = Path(draft_value) if Path(draft_value).is_absolute() else (repo_root / draft_value)
     final_document = repo_root / str(state.get("final_document_path") or "")
 
-    if not working_draft.exists():
+    if not working_draft.is_dir():
         return 2, {
             "passed": False,
             "error": "state_deleted_before_cleanup_finalization",
-            "message": "working draft 在 cleanup finalize 开始前已不存在。必须先保留中间产物，再执行步骤 12。",
+            "message": "working draft 目录在 cleanup finalize 开始前已不存在。必须先保留中间产物，再执行步骤 12。",
             "working_draft_path": str(working_draft),
         }
 
@@ -117,8 +121,13 @@ def run_cleanup(state_path: Path, summary: str) -> tuple[int, dict[str, Any]]:
     refreshed_state["gate_receipt"]["validated_at"] = iso_now()
     dump_yaml(state_path, refreshed_state)
 
-    working_draft.unlink(missing_ok=False)
-    state_path.unlink(missing_ok=False)
+    import shutil
+    shutil.rmtree(str(working_draft))
+    if state_path.exists():
+        state_parent = state_path.parent
+        state_path.unlink(missing_ok=False)
+        if state_parent.name != ".state" and not any(state_parent.iterdir()):
+            state_parent.rmdir()
 
     return 0, {
         "passed": True,

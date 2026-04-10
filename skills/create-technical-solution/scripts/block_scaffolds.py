@@ -31,16 +31,15 @@ def load_extract_template_snapshot_module() -> Any:
     return module
 
 
-def template_slot_titles(snapshot: RuntimeSnapshot) -> list[str]:
+def template_slots(snapshot: RuntimeSnapshot) -> list[dict[str, str]]:
+    state_slots = snapshot.state.get("slots") or []
+    if state_slots:
+        return state_slots
     if not snapshot.template_path.exists():
         raise SystemExit(f"模板文件不存在: {snapshot.template_path}")
     module = load_extract_template_snapshot_module()
     headings = module.extract_slot_headings(snapshot.template_path.read_text(encoding="utf-8"))
-    titles = [str(item.get("title") or "").strip() for item in headings]
-    titles = [title for title in titles if title]
-    if not titles:
-        raise SystemExit(f"模板未提取到任何槽位: {snapshot.template_path}")
-    return titles
+    return [{"slot": item["slot"], "title": item["title"]} for item in headings]
 
 
 def selected_members(state: dict[str, Any]) -> list[str]:
@@ -67,12 +66,10 @@ def resolve_members(state: dict[str, Any], members: list[str] | None = None) -> 
 
 
 def build_wd_ctx_scaffold(snapshot: RuntimeSnapshot) -> str:
-    slots = template_slot_titles(snapshot)
-    slot_line = "、".join(slots)
+    slots = template_slots(snapshot)
+    slot_line = "、".join(s["title"] for s in slots)
     return "\n".join(
         [
-            "## WD-CTX",
-            "",
             "### CTX-01",
             "来源: <文件路径 / 目录 / 用户输入>",
             "结论或约束: <共享事实、已有实现、限制条件>",
@@ -84,12 +81,14 @@ def build_wd_ctx_scaffold(snapshot: RuntimeSnapshot) -> str:
 
 def build_wd_task_scaffold(snapshot: RuntimeSnapshot) -> str:
     members = ", ".join(selected_members(snapshot.state) or ["<MEMBER_ID>"])
-    lines = ["## WD-TASK", ""]
-    for title in template_slot_titles(snapshot):
+    lines: list[str] = []
+    for slot_info in template_slots(snapshot):
+        title = slot_info["title"]
+        slot_id = slot_info.get("slot", "")
         lines.extend(
             [
                 f"### {title}",
-                "- 槽位标识: <SLOT-ID>",
+                f"- 槽位标识: {slot_id}",
                 "- 必须消费的共享上下文: CTX-01",
                 f"- 参与专家: {members}",
                 "- 每位专家必答问题:",
@@ -104,42 +103,37 @@ def build_wd_task_scaffold(snapshot: RuntimeSnapshot) -> str:
 
 
 def build_wd_exp_scaffold(snapshot: RuntimeSnapshot, members: list[str] | None = None) -> str:
-    slots = template_slot_titles(snapshot)
+    slots = template_slots(snapshot)
+    resolved_members = resolve_members(snapshot.state, members)
     payloads: list[str] = []
-    for member in resolve_members(snapshot.state, members):
-        payloads.append(
-            "\n".join(
+    for slot_info in slots:
+        slot_id = slot_info.get("slot", "")
+        lines = [f"---BLOCK:WD-EXP-{slot_id}", ""]
+        for member in resolved_members:
+            lines.extend(
                 [
-                    f"## WD-EXP-{member.upper()}",
+                    f"### 专家：{member}",
+                    "- 决策类型: <复用 / 改造 / 新建>",
+                    "- 核心理由: <绑定 CTX 编号，说明为什么选这条路径>",
+                    "- 关键证据引用: CTX-01",
+                    "- 未决点: <若无则写无>",
                     "",
-                    "### 参与槽位",
-                    f"- {slots[0]}",
-                    "",
-                    "### 决策类型",
-                    "- <复用 / 改造 / 新建>",
-                    "",
-                    "### 核心理由",
-                    "- <绑定 CTX 编号，说明为什么选这条路径>",
-                    "",
-                    "### 关键证据引用",
-                    "- CTX-01",
-                    "",
-                    "### 未决点",
-                    "- <若无则写无>",
                 ]
             )
-        )
+        payloads.append("\n".join(lines).rstrip())
     return "\n\n".join(payloads)
 
 
 def build_wd_syn_scaffold(snapshot: RuntimeSnapshot) -> str:
-    block_name = workflow_default_block(10) or "WD-SYN"
-    lines = [f"## {block_name}", ""]
-    for title in template_slot_titles(snapshot):
-        lines.extend(
-            render_slot_lines(title) + [""]
-        )
-    return "\n".join(lines).rstrip()
+    slots = template_slots(snapshot)
+    payloads: list[str] = []
+    for slot_info in slots:
+        slot_id = slot_info.get("slot", "")
+        title = slot_info["title"]
+        lines = [f"---BLOCK:WD-SYN-{slot_id}", ""]
+        lines.extend(render_slot_lines(title))
+        payloads.append("\n".join(lines).rstrip())
+    return "\n\n".join(payloads)
 
 
 def emit_scaffold(snapshot: RuntimeSnapshot, members: list[str] | None = None) -> str:

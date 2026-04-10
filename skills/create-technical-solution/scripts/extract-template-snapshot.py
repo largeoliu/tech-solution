@@ -69,22 +69,18 @@ def compute_template_fingerprint(markdown: str, headings: list[dict[str, Any]]) 
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def build_working_draft(template_path: Path, headings: list[dict[str, Any]], slug: str) -> str:
-    lines = [
-        f"# Working Draft: {slug}",
-        "",
-        "## Template Metadata",
-        "",
-        f"- template_path: {template_path}",
-        f"- slot_count: {len(headings)}",
-        "",
-        "## Template Slots",
-        "",
-    ]
+def create_working_directory(working_dir: Path, headings: list[dict[str, Any]]) -> None:
+    working_dir.mkdir(parents=True, exist_ok=True)
+    (working_dir / "ctx.md").write_text("", encoding="utf-8")
+    (working_dir / "task.md").write_text("", encoding="utf-8")
+    slots_dir = working_dir / "slots"
+    slots_dir.mkdir(parents=True, exist_ok=True)
     for item in headings:
-        lines.append(f"- {item['slot']}: {item['title']}")
-    lines.extend(["", "## WD-CTX", "", "_待填充_", ""])
-    return "\n".join(lines)
+        slot_id = item["slot"]
+        slot_dir = slots_dir / slot_id
+        slot_dir.mkdir(parents=True, exist_ok=True)
+        (slot_dir / "experts.md").write_text("", encoding="utf-8")
+        (slot_dir / "synthesis.md").write_text("", encoding="utf-8")
 
 
 def update_state(
@@ -114,6 +110,7 @@ def update_state(
     state["solution_root"] = str(SOLUTION_ROOT)
     state["template_path"] = str(template_path.relative_to(repo_root))
     state["working_draft_path"] = str(expected_working_draft)
+    state["slots"] = [{"slot": item["slot"], "title": item["title"]} for item in headings]
     checkpoints = state.setdefault("checkpoints", {})
     if not isinstance(checkpoints, dict):
         checkpoints = {}
@@ -143,7 +140,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="提取模板指纹并生成 working draft 骨架")
     parser.add_argument("--template", required=True, help="模板路径")
     parser.add_argument("--slug", required=True, help="方案 slug")
-    parser.add_argument("--working-draft", required=True, help="working draft 路径")
+    parser.add_argument("--working-draft", required=True, help="working draft 目录路径")
     parser.add_argument("--state", help="状态文件路径；若提供则同步写入最小 checkpoint")
     parser.add_argument("--write", action="store_true", help="实际写入 working draft / state")
     args = parser.parse_args()
@@ -160,23 +157,22 @@ def main() -> int:
         return 1
 
     fingerprint = compute_template_fingerprint(template_markdown, headings)
-    working_draft = Path(args.working_draft).resolve()
+    working_dir = Path(args.working_draft).resolve()
     output = {
         "template_path": str(template_path),
         "template_fingerprint": fingerprint,
         "slot_count": len(headings),
-        "slot_titles": [item["title"] for item in headings],
-        "working_draft_path": str(working_draft),
+        "slots": [{"slot": item["slot"], "title": item["title"]} for item in headings],
+        "working_draft_path": str(working_dir),
     }
 
     if args.write:
-        working_draft.parent.mkdir(parents=True, exist_ok=True)
-        working_draft.write_text(build_working_draft(template_path, headings, args.slug), encoding="utf-8")
+        create_working_directory(working_dir, headings)
         if args.state:
             update_state(
                 state_path=Path(args.state).resolve(),
                 template_path=template_path,
-                working_draft=working_draft,
+                working_draft=working_dir,
                 headings=headings,
                 fingerprint=fingerprint,
             )

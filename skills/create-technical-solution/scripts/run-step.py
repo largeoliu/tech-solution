@@ -26,14 +26,16 @@
   python /path/to/run-step.py --state <状态文件> --complete --summary "成员选定" \\
     --member SYSTEMS_ARCHITECT --member DOMAIN_EXPERT
 
-  # 完成创作型步骤（step 7/8/10）
-  python /path/to/run-step.py --state <状态文件> --complete --summary "WD-CTX 完成" \\
-    --content-file /tmp/wd-ctx.md
+  # 完成创作型步骤（step 7/8）
+  python /path/to/run-step.py --state <状态文件> --complete --summary "WD-CTX 完成" <<'HEREDOC'
+  <WD-CTX 内容>
+  HEREDOC
 
-  # 完成创作型步骤（step 9，多文件）
-  python /path/to/run-step.py --state <状态文件> --complete --summary "专家分析完成" \\
-    --content-file /tmp/wd-exp-SYSTEMS_ARCHITECT.md \\
-    --content-file /tmp/wd-exp-DOMAIN_EXPERT.md
+  # 完成创作型步骤（step 9，按槽位）
+  python /path/to/run-step.py --state <状态文件> --complete --summary "专家分析完成" <<'HEREDOC'
+  ---BLOCK:WD-EXP-SLOT-01
+  <专家分析内容>
+  HEREDOC
 """
 
 from __future__ import annotations
@@ -250,21 +252,20 @@ def run_validator(state_path: Path, step: int, write_receipt: bool = False) -> t
 
 def upsert_block_in_process(
     state_path: Path,
-    working_draft_path: Path,
+    working_dir: Path,
     block_name: str,
-    content_path: Path,
+    content: str,
     summary: str,
     require_receipt_step: int | None,
 ) -> tuple[int, str]:
     module = load_upsert_draft_block_module()
     try:
-        payload = module.upsert_block(
-            working_draft_path=working_draft_path,
+        payload = module.upsert_with_sync(
+            working_dir=working_dir,
             state_path=state_path,
-            block_name=block_name,
-            content_path=content_path,
+            block_updates=[(block_name, content)],
             summary=summary,
-            require_receipt_step=require_receipt_step,
+            require_receipt_step=require_receipt_step or 0,
         )
     except SystemExit as exc:
         return 1, str(exc)
@@ -273,7 +274,7 @@ def upsert_block_in_process(
 
 def upsert_blocks_in_process(
     state_path: Path,
-    working_draft_path: Path,
+    working_dir: Path,
     summary: str,
     block_updates: list[tuple[str, str]],
     *,
@@ -281,18 +282,15 @@ def upsert_blocks_in_process(
 ) -> tuple[int, str]:
     module = load_upsert_draft_block_module()
     original_state_text = state_path.read_text(encoding="utf-8")
-    original_draft_text = working_draft_path.read_text(encoding="utf-8")
     state = load_state(state_path)
     try:
         if validate_step is not None:
             require_receipt(state, expected_step=validate_step)
-        updated_markdown = module.render_updated_markdown(
-            working_draft_path=working_draft_path,
-            block_updates=block_updates,
-        )
-        module.apply_block_updates_to_state(state, block_updates, summary)
+        slots = state.get("slots") or []
+        for block_name, content in block_updates:
+            module.write_working_draft_file(working_dir, block_name, content, slots)
+        module.sync_state_for_blocks(state, block_updates, summary)
         refresh_receipt(state)
-        working_draft_path.write_text(updated_markdown, encoding="utf-8")
         dump_yaml(state_path, state)
         if validate_step is not None:
             passed, validator_output = run_validator(
@@ -304,19 +302,11 @@ def upsert_blocks_in_process(
                 raise RuntimeError(f"步骤 {validate_step} 验证失败:\n{validator_output}")
     except SystemExit as exc:
         try:
-            working_draft_path.write_text(original_draft_text, encoding="utf-8")
-        except Exception:
-            pass
-        try:
             state_path.write_text(original_state_text, encoding="utf-8")
         except Exception:
             pass
         return 1, str(exc)
     except Exception as exc:
-        try:
-            working_draft_path.write_text(original_draft_text, encoding="utf-8")
-        except Exception:
-            pass
         try:
             state_path.write_text(original_state_text, encoding="utf-8")
         except Exception:
@@ -325,7 +315,7 @@ def upsert_blocks_in_process(
         return exit_code, f"批量写入失败，已回滚: {exc}"
     return 0, json.dumps(
         {
-            "working_draft_path": str(working_draft_path),
+            "working_dir": str(working_dir),
             "blocks": [name for name, _content in block_updates],
             "current_step": state.get("current_step"),
             "gate_receipt_step": state.get("gate_receipt", {}).get("step"),
@@ -583,7 +573,7 @@ def complete_step_3(state_path: Path, summary: str, **_: Any) -> tuple[int, str]
     return 0, f"✅ 步骤 3 完成。模板已读取，working draft 已创建。\n{stdout}"
 
 
-FULL_REQUIRED_ARTIFACTS = ["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN"]
+FULL_REQUIRED_ARTIFACTS = ["WD-CTX", "WD-TASK", "WD-EXP-*", "WD-SYN-*"]
 
 
 def complete_step_4(
@@ -665,67 +655,37 @@ def complete_step_6(state_path: Path, summary: str, **_: Any) -> tuple[int, str]
     return 0, f"✅ 步骤 6 完成。repowiki {status}，已推进到步骤 7。"
 
 
-def _resolve_content_block(step: int, content_files: list[str]) -> list[tuple[str, Path]]:
-    """根据步骤和文件名推断 block 名称。返回 [(block_name, file_path), ...]。"""
-    pairs: list[tuple[str, Path]] = []
-    for fpath in content_files:
-        p = Path(fpath)
-        name_lower = p.stem.lower()
-        if step == 7 or "wd-ctx" in name_lower or "ctx" in name_lower:
-            pairs.append(("WD-CTX", p))
-        elif step == 8 or "wd-task" in name_lower or "task" in name_lower:
-            pairs.append(("WD-TASK", p))
-        elif step == 9 or "wd-exp" in name_lower or "exp" in name_lower:
-            match = re.search(r"(?:wd-?exp-?)(.+?)(?:\.md)?$", p.stem, re.IGNORECASE)
-            member = match.group(1).upper().replace("-", "_") if match else p.stem.upper()
-            pairs.append((f"WD-EXP-{member}", p))
-        elif step == 10 or "wd-syn" in name_lower or "syn" in name_lower:
-            block = default_block_for_step(10) or "WD-SYN"
-            pairs.append((block, p))
-        else:
-            block = default_block_for_step(step) or "WD-CTX"
-            pairs.append((block, p))
-    return pairs
-
-
 def complete_creative_step(
     state_path: Path,
     summary: str,
     step: int,
-    content_files: list[str],
+    stdin_content: str | None,
     snapshot: RuntimeSnapshot | None = None,
     **_: Any,
 ) -> tuple[int, str]:
-    """处理步骤 7/8/9/10 的创作型步骤。"""
-    if not content_files:
-        return 1, f"步骤 {step} 需要 --content-file 参数。请先将内容写入临时文件。"
+    """处理步骤 7/8/9/10 的创作型步骤。内容通过 stdin 传入。"""
+    if not stdin_content:
+        return 1, f"步骤 {step} 需要通过 stdin 传入内容。"
     snapshot = snapshot or load_runtime_snapshot(state_path)
     assert snapshot is not None
-    state = snapshot.state
-    draft_path = str(state.get("working_draft_path") or "")
-    if not draft_path and step != 3:
-        return 1, "working_draft_path 为空，请确保步骤 3 已完成。"
-    abs_draft = snapshot.working_draft_path
+    working_dir = snapshot.working_draft_path
 
-    blocks = _resolve_content_block(step, content_files)
-    block_updates: list[tuple[str, Path]] = []
-    for block_name, content_path in blocks:
-        if not content_path.exists():
-            return 1, f"内容文件不存在: {content_path}"
-        block_updates.append((block_name, content_path))
+    module = load_upsert_draft_block_module()
+    block_updates = module.parse_stdin_blocks(stdin_content, step)
+    if not block_updates:
+        return 1, f"步骤 {step} 传入的内容为空。"
 
-    normalized_updates = [(block_name, content_path.read_text(encoding="utf-8").strip()) for block_name, content_path in block_updates]
     code, output = upsert_blocks_in_process(
         state_path,
-        abs_draft,
+        working_dir,
         summary,
-        normalized_updates,
+        block_updates,
         validate_step=step,
     )
     if code != 0:
-        return code, f"upsert-draft-block.py 失败:\n{output}"
+        return code, f"写入 working draft 失败:\n{output}"
 
-    results = [f"  ✓ {block_name} 已写入 working draft" for block_name, _content_path in block_updates]
+    results = [f"  ✓ {block_name} 已写入 working draft" for block_name, _body in block_updates]
     detail = "\n".join(results)
     new_snapshot = load_runtime_snapshot(state_path)
     new_step = new_snapshot.current_step
@@ -788,6 +748,7 @@ def complete_step(args: argparse.Namespace) -> int:
 
     step = snapshot.current_step
 
+    stdin_content = getattr(args, '_stdin_content', None)
     dispatch = {
         1: lambda: complete_step_1(state_path, summary, args.slug),
         2: lambda: complete_step_2(state_path, summary),
@@ -798,10 +759,10 @@ def complete_step(args: argparse.Namespace) -> int:
         ),
         5: lambda: complete_step_5(state_path, summary, members=args.member),
         6: lambda: complete_step_6(state_path, summary),
-        7: lambda: complete_creative_step(state_path, summary, 7, args.content_file or [], snapshot=snapshot),
-        8: lambda: complete_creative_step(state_path, summary, 8, args.content_file or [], snapshot=snapshot),
-        9: lambda: complete_creative_step(state_path, summary, 9, args.content_file or [], snapshot=snapshot),
-        10: lambda: complete_creative_step(state_path, summary, 10, args.content_file or [], snapshot=snapshot),
+        7: lambda: complete_creative_step(state_path, summary, 7, stdin_content, snapshot=snapshot),
+        8: lambda: complete_creative_step(state_path, summary, 8, stdin_content, snapshot=snapshot),
+        9: lambda: complete_creative_step(state_path, summary, 9, stdin_content, snapshot=snapshot),
+        10: lambda: complete_creative_step(state_path, summary, 10, stdin_content, snapshot=snapshot),
         11: lambda: complete_step_11(state_path, summary, snapshot=snapshot),
         12: lambda: complete_step_12(state_path, summary, snapshot=snapshot),
     }
@@ -840,9 +801,13 @@ def main() -> int:
     parser.add_argument("--slug", help="步骤 1: 方案 slug")
     parser.add_argument("--solution-type", help="步骤 4: 方案类型")
     parser.add_argument("--member", action="append", default=[], help="步骤 5: 参与成员（可重复）")
-    parser.add_argument("--content-file", action="append", default=[], help="步骤 7/8/9/10: 内容文件路径（可重复）")
 
     args = parser.parse_args()
+
+    if not sys.stdin.isatty():
+        args._stdin_content = sys.stdin.read()
+    else:
+        args._stdin_content = None
 
     if args.complete and args.emit_scaffold:
         parser.error("--emit-scaffold 与 --complete 不能同时使用。")

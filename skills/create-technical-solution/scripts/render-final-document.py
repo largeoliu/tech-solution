@@ -47,45 +47,21 @@ def extract_slot_headings(markdown: str) -> list[str]:
     return [title for level, title in headings if level == slot_level]
 
 
-def extract_named_block(markdown: str, heading: str) -> str:
-    pattern = re.compile(rf"^\s*##\s+{re.escape(heading)}\s*$", re.MULTILINE)
-    match = pattern.search(markdown)
-    if not match:
-        return ""
-    start = match.end()
-    next_match = re.search(r"^\s*##\s+.+$", markdown[start:], re.MULTILINE)
-    end = start + next_match.start() if next_match else len(markdown)
-    return markdown[start:end].strip()
-
-
-def normalize_syn_heading(title: str) -> str:
-    normalized = normalize_text(title)
-    return re.sub(r"^槽位：\s*", "", normalized)
-
-
-def extract_syn_sections(block: str) -> dict[str, str]:
-    headings = list(re.finditer(r"^\s*###\s+(.+?)\s*$", block, re.MULTILINE))
-    sections: dict[str, str] = {}
-    for index, match in enumerate(headings):
-        title = normalize_syn_heading(match.group(1))
-        start = match.end()
-        end = headings[index + 1].start() if index + 1 < len(headings) else len(block)
-        body = block[start:end].strip()
-        sections[title] = body
-    return sections
-
-
 def render_from_draft(state_path: Path) -> str:
     state = load_yaml(state_path)
     draft_value = str(state.get("working_draft_path") or "").strip()
     if not draft_value:
         raise SystemExit("working_draft_path 为空，无法从 draft 渲染最终文档。")
-    repo_root = state_path.parent.parent.parent.parent
+    repo_root = state_path.resolve()
+    if repo_root.name == "meta.yaml":
+        repo_root = repo_root.parents[4]
+    else:
+        repo_root = repo_root.parents[3]
     draft_path = Path(draft_value)
     if not draft_path.is_absolute():
         draft_path = (repo_root / draft_value).resolve()
-    if not draft_path.exists():
-        raise SystemExit(f"working draft 不存在: {draft_path}")
+    if not draft_path.is_dir():
+        raise SystemExit(f"working draft 目录不存在: {draft_path}")
 
     template_value = str(state.get("template_path") or "").strip()
     template_path = Path(template_value)
@@ -94,13 +70,15 @@ def render_from_draft(state_path: Path) -> str:
     if not template_path.exists():
         raise SystemExit(f"模板不存在: {template_path}")
 
-    draft_content = draft_path.read_text(encoding="utf-8")
-    syn_block_name = "WD-SYN"
-    syn_block = extract_named_block(draft_content, syn_block_name)
-    if not syn_block:
-        raise SystemExit(f"{syn_block_name} 区块不存在，无法渲染最终文档。")
+    slots = state.get("slots") or []
+    sections: dict[str, str] = {}
+    for slot_info in slots:
+        slot_id = slot_info.get("slot", "")
+        title = slot_info.get("title", "")
+        syn_path = draft_path / "slots" / slot_id / "synthesis.md"
+        if syn_path.exists() and syn_path.stat().st_size > 0:
+            sections[title] = syn_path.read_text(encoding="utf-8").strip()
 
-    sections = extract_syn_sections(syn_block)
     template_content = template_path.read_text(encoding="utf-8")
     expected_slots = extract_slot_headings(template_content)
     lines: list[str] = []
@@ -131,7 +109,11 @@ def render_final_document(
     if not final_document_value:
         raise SystemExit("final_document_path 为空，必须先在步骤 1 生成最终文档路径。")
 
-    repo_root = state_path.parent.parent.parent.parent
+    resolved_state = state_path.resolve()
+    if resolved_state.name == "meta.yaml":
+        repo_root = resolved_state.parents[4]
+    else:
+        repo_root = resolved_state.parents[3]
     final_document_path = (repo_root / final_document_value).resolve()
     allowed_root = (repo_root / str(state.get("solution_root") or ".architecture/technical-solutions")).resolve()
     if allowed_root not in final_document_path.parents:

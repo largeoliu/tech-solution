@@ -55,6 +55,7 @@ ALLOWED_TOP_LEVEL_FIELDS = {
     "can_enter_step_12",
     "absorption_check_passed",
     "cleanup_allowed",
+    "slots",
 }
 
 SUMMARY_MAX_LEN = 120
@@ -71,7 +72,6 @@ ARTIFACT_REPAIR_STEP = {
     "WD-CTX": 7,
     "WD-TASK": 8,
     "WD-EXP-*": 9,
-    "WD-SYN": 10,
     "final_document": 11,
 }
 
@@ -225,7 +225,7 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
     if code == "repowiki_not_consumed":
         return "回到步骤 7，实际读取并引用 repowiki，再把来源条目写入 WD-CTX。"
     if code == "invalid_working_draft_path":
-        return "回到步骤 3，重新生成 .architecture/.state/create-technical-solution/[slug].working.md。"
+        return "回到步骤 3，重新生成 .architecture/.state/create-technical-solution/[slug]/ 目录。"
     if code == "invalid_final_document_path":
         return "回到步骤 1 或 11，把 final_document_path 固定到 .architecture/technical-solutions/[slug].md。"
     if code == "final_document_headings_mismatch":
@@ -364,8 +364,12 @@ class GateValidator:
         self.state = state
         self.state_path = state_path or Path("state.yaml")
         self.state_dir = self.state_path.parent.resolve()
-        self.arch_root = self.state_dir.parents[1] if len(self.state_dir.parents) >= 2 else self.state_dir
-        self.repo_root = self.arch_root.parent if self.arch_root.name == ".architecture" else self.state_dir.parent
+        resolved = self.state_path.resolve()
+        if resolved.name == "meta.yaml":
+            self.repo_root = resolved.parents[4]
+        else:
+            self.repo_root = self.state_dir.parents[3] if len(self.state_dir.parents) >= 3 else self.state_dir.parent
+        self.arch_root = self.repo_root / ".architecture" if (self.repo_root / ".architecture").exists() else self.repo_root
 
     def checkpoint(self, step_num: int, errors: list[dict[str, Any]]) -> dict[str, Any]:
         checkpoints = self.state.get("checkpoints", {})
@@ -646,7 +650,7 @@ class GateValidator:
         if not draft_path or not slug:
             return
         expected_relative = working_draft_relative_path(slug)
-        valid = draft_path == (self.repo_root / expected_relative).resolve() and draft_path.name.endswith(".working.md")
+        valid = draft_path == (self.repo_root / expected_relative).resolve() and draft_path.is_dir()
         valid = valid and not Path(raw_path).is_absolute()
         require(
             valid,
@@ -748,66 +752,97 @@ class GateValidator:
     def check_working_draft_block(self, artifact: str, errors: list[dict[str, Any]], step_num: int) -> None:
         draft_path = self.working_draft_path()
         require(
-            draft_path is not None and draft_path.exists(),
+            draft_path is not None and draft_path.is_dir(),
             errors,
             code="missing_working_draft_path",
-            message=f"步骤 {step_num}: working draft 不存在",
+            message=f"步骤 {step_num}: working draft 目录不存在",
             step=step_num,
                         field="working_draft_path",
             recommended_rollback_step=3,
             recommended_repair_step=3,
         )
-        if not draft_path or not draft_path.exists():
+        if not draft_path or not draft_path.is_dir():
             return
-        content = read_markdown(draft_path)
-        if artifact == "WD-EXP-*":
-            present = re.search(r"^\s*#{2,6}\s+WD-EXP-[A-Z0-9_-]+\b", content, re.MULTILINE) is not None
-        else:
-            present = re.search(rf"^\s*#{{2,6}}\s+{re.escape(artifact)}\b", content, re.MULTILINE) is not None
+        target_file = self._resolve_artifact_file(draft_path, artifact)
+        present = target_file is not None and target_file.exists() and target_file.stat().st_size > 0
         if not present:
             checkpoint_step = ARTIFACT_REPAIR_STEP.get(artifact, step_num)
+            if artifact.startswith("WD-EXP-"):
+                checkpoint_step = 9
+            elif artifact.startswith("WD-SYN-"):
+                checkpoint_step = 10
             prior_checkpoint = self.checkpoint(checkpoint_step, errors)
             overwritten = False
             if artifact == "WD-CTX":
                 overwritten = prior_checkpoint.get("wd_ctx_written") is True
             elif artifact == "WD-TASK":
                 overwritten = prior_checkpoint.get("wd_task_written") is True
-            elif artifact in {"WD-SYN", "WD-SYN-LIGHT"}:
+            elif artifact.startswith("WD-SYN"):
                 overwritten = prior_checkpoint.get("wd_syn_written") is True
             code = "draft_block_overwritten" if overwritten else "missing_working_draft_block"
             add_issue(
                 errors,
                 make_issue(
                     code=code,
-                    message=f"步骤 {step_num}: working draft 缺少 {artifact} 区块",
+                    message=f"步骤 {step_num}: working draft 缺少 {artifact}",
                     step=step_num,
                                         field="produced_artifacts",
                     missing_artifacts=[artifact],
-                    recommended_rollback_step=ARTIFACT_REPAIR_STEP.get(artifact, step_num),
-                    recommended_repair_step=ARTIFACT_REPAIR_STEP.get(artifact, step_num),
+                    recommended_rollback_step=checkpoint_step,
+                    recommended_repair_step=checkpoint_step,
                 ),
             )
 
+    def _resolve_artifact_file(self, working_dir: Path, artifact: str) -> Optional[Path]:
+        if artifact == "WD-CTX":
+            return working_dir / "ctx.md"
+        if artifact == "WD-TASK":
+            return working_dir / "task.md"
+        exp_match = re.match(r"^WD-EXP-(SLOT-\d+)$", artifact)
+        if exp_match:
+            return working_dir / "slots" / exp_match.group(1) / "experts.md"
+        syn_match = re.match(r"^WD-SYN-(SLOT-\d+)$", artifact)
+        if syn_match:
+            return working_dir / "slots" / syn_match.group(1) / "synthesis.md"
+        if artifact == "WD-EXP-*":
+            slots_dir = working_dir / "slots"
+            if slots_dir.is_dir():
+                for slot_dir in sorted(slots_dir.iterdir()):
+                    exp = slot_dir / "experts.md"
+                    if exp.exists() and exp.stat().st_size > 0:
+                        return exp
+            return None
+        if artifact in {"WD-SYN", "WD-SYN-LIGHT"}:
+            slots_dir = working_dir / "slots"
+            if slots_dir.is_dir():
+                for slot_dir in sorted(slots_dir.iterdir()):
+                    syn = slot_dir / "synthesis.md"
+                    if syn.exists() and syn.stat().st_size > 0:
+                        return syn
+            return None
+        return None
+
     def check_block_state_sync(self, artifact: str, errors: list[dict[str, Any]], step_num: int) -> None:
         draft_path = self.working_draft_path()
-        if not draft_path or not draft_path.exists():
+        if not draft_path or not draft_path.is_dir():
             return
-        content = read_markdown(draft_path)
-        if artifact == "WD-EXP-*":
-            present = re.search(r"^\s*#{2,6}\s+WD-EXP-[A-Z0-9_-]+\b", content, re.MULTILINE) is not None
-        else:
-            present = re.search(rf"^\s*#{{2,6}}\s+{re.escape(artifact)}\b", content, re.MULTILINE) is not None
+        target_file = self._resolve_artifact_file(draft_path, artifact)
+        present = target_file is not None and target_file.exists() and target_file.stat().st_size > 0
         if not present:
             return
 
         checkpoint_step = ARTIFACT_REPAIR_STEP.get(artifact, step_num)
+        if artifact.startswith("WD-EXP-"):
+            checkpoint_step = 9
+        elif artifact.startswith("WD-SYN-"):
+            checkpoint_step = 10
         checkpoint = self.checkpoint(checkpoint_step, errors)
         expected_field = {
             "WD-CTX": "wd_ctx_written",
             "WD-TASK": "wd_task_written",
-            "WD-SYN": "wd_syn_written",
-            "WD-SYN-LIGHT": "wd_syn_written",
         }.get(artifact)
+        if artifact.startswith("WD-SYN-"):
+            expected_field = "wd_syn_written"
         checkpoint_ok = checkpoint.get(expected_field) is True if expected_field else True
         artifact_ok = artifact in self.state.get("produced_artifacts", [])
         if not artifact_ok or not checkpoint_ok:
@@ -826,14 +861,16 @@ class GateValidator:
 
     def check_task_slots_cover_template(self, errors: list[dict[str, Any]], step_num: int) -> None:
         draft_path = self.working_draft_path()
-        if not draft_path or not draft_path.exists():
+        if not draft_path or not draft_path.is_dir():
             return
         headings = [item["title"] for item in self.template_headings()]
-        content = read_markdown(draft_path)
-        block = extract_named_block(content, "WD-TASK")
-        if not block:
+        task_path = draft_path / "task.md"
+        if not task_path.exists():
             return
-        actual_headings = [normalize_task_heading(title) for title in extract_block_headings(block)]
+        content = read_markdown(task_path)
+        if not content.strip():
+            return
+        actual_headings = [normalize_task_heading(title) for title in extract_block_headings(content)]
         if any(title.startswith("CTX-") for title in actual_headings):
             add_issue(
                 errors,
@@ -900,14 +937,30 @@ class GateValidator:
 
     def check_wd_syn_quality(self, errors: list[dict[str, Any]], step_num: int) -> None:
         draft_path = self.working_draft_path()
-        if not draft_path or not draft_path.exists():
+        if not draft_path or not draft_path.is_dir():
             return
-        content = read_markdown(draft_path)
-        if "## WD-SYN" not in content:
+        slots_dir = draft_path / "slots"
+        if not slots_dir.is_dir():
             return
-        block = extract_named_block(content, "WD-SYN")
         template_titles = [item["title"] for item in self.template_headings()]
-        actual_titles = [normalize_syn_heading(title) for title in extract_block_headings(block)]
+        state_slots = self.state.get("slots") or []
+        slot_title_map = {s.get("slot", ""): s.get("title", "") for s in state_slots}
+        actual_titles: list[str] = []
+        missing: list[str] = []
+        for slot_info in state_slots:
+            slot_id = slot_info.get("slot", "")
+            slot_title = slot_info.get("title", "")
+            syn_path = slots_dir / slot_id / "synthesis.md"
+            if not syn_path.exists() or syn_path.stat().st_size == 0:
+                continue
+            actual_titles.append(slot_title)
+            slot_content = read_markdown(syn_path)
+            if not target_capability_present(slot_content):
+                if "#### 目标能力" not in missing:
+                    missing.append("#### 目标能力")
+            for fragment in missing_wd_syn_slot_fragments(slot_content, slot_title):
+                if fragment not in missing:
+                    missing.append(fragment)
         if actual_titles != template_titles:
             add_issue(
                 errors,
@@ -922,17 +975,6 @@ class GateValidator:
                     details={"expected_slots": template_titles, "actual_slots": actual_titles},
                 ),
             )
-        missing: list[str] = []
-        for title in template_titles:
-            slot_block = extract_syn_slot_block(block, title)
-            if not slot_block:
-                continue
-            if not target_capability_present(slot_block):
-                if "#### 目标能力" not in missing:
-                    missing.append("#### 目标能力")
-            for fragment in missing_wd_syn_slot_fragments(slot_block, title):
-                if fragment not in missing:
-                    missing.append(fragment)
         if missing:
             add_issue(
                 errors,
@@ -1028,7 +1070,10 @@ class GateValidator:
         if step_num >= 8:
             self.check_block_state_sync("WD-TASK", errors, step_num)
         if step_num >= 10:
-            self.check_block_state_sync("WD-SYN", errors, step_num)
+            for slot_info in self.state.get("slots") or []:
+                slot_id = slot_info.get("slot", "")
+                if slot_id:
+                    self.check_block_state_sync(f"WD-SYN-{slot_id}", errors, step_num)
 
     def step_1(self, errors: list[dict[str, Any]]) -> None:
         self.check_state_shape(errors, 1)
@@ -1150,8 +1195,11 @@ class GateValidator:
         )
         self.check_working_draft_block("WD-CTX", errors, 9)
         self.check_working_draft_block("WD-TASK", errors, 9)
-        for member in self.selected_members():
-            self.check_working_draft_block(f"WD-EXP-{member.upper()}", errors, 9)
+        state_slots = self.state.get("slots") or []
+        for slot_info in state_slots:
+            slot_id = slot_info.get("slot", "")
+            if slot_id:
+                self.check_working_draft_block(f"WD-EXP-{slot_id}", errors, 9)
 
     def step_10(self, errors: list[dict[str, Any]]) -> None:
         self.common(10, errors)
@@ -1168,7 +1216,11 @@ class GateValidator:
         )
         self.check_working_draft_block("WD-CTX", errors, 10)
         self.check_working_draft_block("WD-TASK", errors, 10)
-        self.check_working_draft_block("WD-SYN", errors, 10)
+        state_slots = self.state.get("slots") or []
+        for slot_info in state_slots:
+            slot_id = slot_info.get("slot", "")
+            if slot_id:
+                self.check_working_draft_block(f"WD-SYN-{slot_id}", errors, 10)
         self.check_wd_syn_quality(errors, 10)
 
     def step_11(self, errors: list[dict[str, Any]]) -> None:
@@ -1186,7 +1238,11 @@ class GateValidator:
         )
         self.check_working_draft_block("WD-CTX", errors, 11)
         self.check_working_draft_block("WD-TASK", errors, 11)
-        self.check_working_draft_block("WD-SYN", errors, 11)
+        state_slots = self.state.get("slots") or []
+        for slot_info in state_slots:
+            slot_id = slot_info.get("slot", "")
+            if slot_id:
+                self.check_working_draft_block(f"WD-SYN-{slot_id}", errors, 11)
         self.check_wd_syn_quality(errors, 11)
         self.check_final_document_not_premature(errors, 11)
         checkpoint = self.checkpoint(11, errors)

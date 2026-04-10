@@ -132,11 +132,17 @@ def workflow_default_block(step_id: int) -> str | None:
 
 
 def slug_from_state_path(state_path: Path) -> str:
-    return state_path.name.rsplit(".", 1)[0]
+    resolved = state_path.resolve()
+    if resolved.name == "meta.yaml":
+        return resolved.parent.name
+    return resolved.name.rsplit(".", 1)[0]
 
 
 def repo_root_from_state_path(state_path: Path) -> Path:
-    return state_path.resolve().parents[3]
+    resolved = state_path.resolve()
+    if resolved.name == "meta.yaml":
+        return resolved.parents[4]
+    return resolved.parents[3]
 
 
 def state_root_from_repo_root(repo_root: Path) -> Path:
@@ -144,7 +150,7 @@ def state_root_from_repo_root(repo_root: Path) -> Path:
 
 
 def working_draft_relative_path(slug: str) -> Path:
-    return STATE_ROOT / f"{slug}.working.md"
+    return STATE_ROOT / slug
 
 
 def final_document_relative_path(slug: str) -> Path:
@@ -206,38 +212,55 @@ def render_run_step_command(
         return [f'{base} --complete --summary "<成员选定>" --member <MEMBER_ID> [--member ...]']
     if step == 7:
         return [
-            "# 先将 WD-CTX 内容写入临时文件，然后：",
-            f'{base} --complete --summary "<WD-CTX 完成>" --content-file /tmp/wd-ctx.md',
+            f'{base} --complete --summary "<WD-CTX 完成>" <<\'HEREDOC\'',
+            "<WD-CTX 内容>",
+            "HEREDOC",
         ]
     if step == 8:
         return [
-            "# 先将 WD-TASK 内容写入临时文件，然后：",
-            f'{base} --complete --summary "<WD-TASK 完成>" --content-file /tmp/wd-task.md',
+            f'{base} --complete --summary "<WD-TASK 完成>" <<\'HEREDOC\'',
+            "<WD-TASK 内容>",
+            "HEREDOC",
         ]
     if step == 9:
-        members: list[str] = []
+        slot_ids: list[str] = []
         if isinstance(state, dict):
-            checkpoints = state.get("checkpoints", {})
-            if isinstance(checkpoints, dict):
-                step5 = checkpoints.get("step-5", {})
-                if isinstance(step5, dict):
-                    raw_members = step5.get("selected_members", [])
-                    if isinstance(raw_members, list):
-                        members = [str(item) for item in raw_members if str(item).strip()]
-        if members:
-            files = " ".join(f"--content-file /tmp/wd-exp-{member}.md" for member in members)
-            return [
-                "# 为每位专家生成内容文件，然后一次性提交：",
-                f'{base} --complete --summary "<专家分析完成>" {files}',
-            ]
+            for s in state.get("slots") or []:
+                sid = s.get("slot", "")
+                if sid:
+                    slot_ids.append(sid)
+        if not slot_ids:
+            slot_ids = ["SLOT-01"]
+        block_lines = []
+        for sid in slot_ids:
+            block_lines.append(f"---BLOCK:WD-EXP-{sid}")
+            block_lines.append("")
+            block_lines.append("<专家分析内容>")
+            block_lines.append("")
         return [
-            "# 为每位专家生成内容文件，然后一次性提交：",
-            f'{base} --complete --summary "<专家分析完成>" --content-file /tmp/wd-exp-<MEMBER>.md',
+            f'{base} --complete --summary "<专家分析完成>" <<\'HEREDOC\'',
+            *block_lines,
+            "HEREDOC",
         ]
     if step == 10:
+        slot_ids_syn: list[str] = []
+        if isinstance(state, dict):
+            for s in state.get("slots") or []:
+                sid = s.get("slot", "")
+                if sid:
+                    slot_ids_syn.append(sid)
+        if not slot_ids_syn:
+            slot_ids_syn = ["SLOT-01"]
+        syn_lines = []
+        for sid in slot_ids_syn:
+            syn_lines.append(f"---BLOCK:WD-SYN-{sid}")
+            syn_lines.append("")
+            syn_lines.append("<收敛内容>")
+            syn_lines.append("")
         return [
-            "# 先将 WD-SYN 内容写入临时文件，然后：",
-            f'{base} --complete --summary "<收敛完成>" --content-file /tmp/wd-syn.md',
+            f'{base} --complete --summary "<收敛完成>" <<\'HEREDOC\'',
+            *syn_lines,
+            "HEREDOC",
         ]
     return [f'{base} --complete --summary "{summary_placeholder}"']
 
@@ -256,6 +279,6 @@ def render_repair_command(
     )
     for line in commands:
         stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
+        if stripped and not stripped.startswith("#") and not stripped.startswith("---BLOCK:"):
             return stripped
     return commands[-1]
