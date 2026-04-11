@@ -94,19 +94,6 @@ GATE_REPAIR_STEP = {
     "can_enter_step_12": 11,
 }
 
-VALID_STEP4_SIGNALS = {
-    "introduces-core-capability",
-    "cross-system",
-    "boundary-redraw",
-    "high-compat-risk",
-    "split-or-migrate",
-    "cross-module",
-    "existing-asset-refactor",
-    "medium-compat-risk",
-    "single-module",
-    "low-compat-risk",
-}
-
 CTX_HEADING_PATTERN = re.compile(r"^\s*###\s+(CTX-\d+)\s*$", re.MULTILINE)
 CTX_REQUIRED_FIELDS = ("来源:", "结论或约束:", "适用槽位:", "可信度或缺口:")
 
@@ -145,6 +132,17 @@ def extract_syn_slot_block(block: str, title: str) -> str:
     next_match = re.search(r"^\s*###\s+槽位：\s*.+$", block[match.end():], re.MULTILINE)
     end = match.end() + next_match.start() if next_match else len(block)
     return block[start:end].strip()
+
+
+def _extract_task_slot_section(content: str, title: str) -> str:
+    pattern = re.compile(rf"^\s*###\s+{re.escape(title)}\s*$", re.MULTILINE)
+    match = pattern.search(content)
+    if not match:
+        return ""
+    start = match.start()
+    next_match = re.search(r"^\s*###\s+", content[match.end():], re.MULTILINE)
+    end = match.end() + next_match.start() if next_match else len(content)
+    return content[start:end]
 
 def normalize_text(value: str) -> str:
     return " ".join(str(value).replace("\xa0", " ").split())
@@ -662,7 +660,7 @@ class GateValidator:
         if not draft_path or not draft_path.is_dir():
             return
         ctx_path = draft_path / "ctx.md"
-        if not ctx_path.exists() or ctx_path.stat().st_size == 0:
+        if not ctx_path.exists():
             return
         content = read_markdown(ctx_path)
         entries = extract_ctx_entries(content)
@@ -964,7 +962,7 @@ class GateValidator:
         if not draft_path or not draft_path.is_dir():
             return
         target_file = self._resolve_artifact_file(draft_path, artifact)
-        present = target_file is not None and target_file.exists() and target_file.stat().st_size > 0
+        present = target_file is not None and target_file.exists()
         if not present:
             checkpoint_step = ARTIFACT_REPAIR_STEP.get(artifact, step_num)
             if artifact.startswith("WD-EXP-"):
@@ -1009,7 +1007,7 @@ class GateValidator:
             if slots_dir.is_dir():
                 for slot_dir in sorted(slots_dir.iterdir()):
                     exp = slot_dir / "experts.md"
-                    if exp.exists() and exp.stat().st_size > 0:
+                    if exp.exists():
                         return exp
             return None
         if artifact in {"WD-SYN", "WD-SYN-SLOT-*"}:
@@ -1017,7 +1015,7 @@ class GateValidator:
             if slots_dir.is_dir():
                 for slot_dir in sorted(slots_dir.iterdir()):
                     syn = slot_dir / "synthesis.md"
-                    if syn.exists() and syn.stat().st_size > 0:
+                    if syn.exists():
                         return syn
             return None
         return None
@@ -1027,7 +1025,7 @@ class GateValidator:
         if not draft_path or not draft_path.is_dir():
             return
         target_file = self._resolve_artifact_file(draft_path, artifact)
-        present = target_file is not None and target_file.exists() and target_file.stat().st_size > 0
+        present = target_file is not None and target_file.exists()
         if not present:
             return
 
@@ -1070,7 +1068,7 @@ class GateValidator:
         if not draft_path or not draft_path.is_dir():
             return
         target_file = self._resolve_artifact_file(draft_path, artifact)
-        if target_file is None or not target_file.exists() or target_file.stat().st_size == 0:
+        if target_file is None or not target_file.exists():
             return
         expected_path = str(entry.get("path") or "").strip()
         expected_hash = str(entry.get("content_hash") or "").strip()
@@ -1127,14 +1125,14 @@ class GateValidator:
                     code="task_slots_incomplete",
                     message=f"步骤 {step_num}: WD-TASK 必须与模板槽位一一对应且顺序一致",
                     step=step_num,
-                                        field="working_draft_path",
+                    field="working_draft_path",
                     recommended_rollback_step=8,
                     recommended_repair_step=8,
                     details={"expected_slots": headings, "actual_slots": actual_headings},
                 ),
             )
         ctx_path = draft_path / "ctx.md"
-        if not ctx_path.exists() or ctx_path.stat().st_size == 0:
+        if not ctx_path.exists():
             return
         valid_ctx_ids = set(extract_ctx_ids(read_markdown(ctx_path)))
         referenced_ctx_ids = set(extract_task_ctx_refs(content))
@@ -1152,6 +1150,28 @@ class GateValidator:
                     details={"invalid_ctx_ids": invalid_ctx_ids, "valid_ctx_ids": sorted(valid_ctx_ids)},
                 ),
             )
+        for slot_title in headings:
+            section_content = _extract_task_slot_section(content, slot_title)
+            for field_key, field_label in [
+                ("participating_experts", "参与专家:"),
+                ("expert_questions", "每位专家必答问题:"),
+                ("suggested_slot", "建议落位槽位:"),
+                ("expression_requirements", "落位表达要求:"),
+                ("blockers", "缺口或阻塞项:"),
+            ]:
+                if field_label not in section_content:
+                    add_issue(
+                        errors,
+                        make_issue(
+                            code="wd_task_field_missing",
+                            message=f"步骤 {step_num}: WD-TASK 槽位 [{slot_title}] 缺少必填字段 [{field_label}]",
+                            step=step_num,
+                            field="working_draft_path",
+                            missing_artifacts=["WD-TASK"],
+                            recommended_rollback_step=8,
+                            recommended_repair_step=8,
+                        ),
+                    )
 
     def check_skip_record(self, skipped_step: int, errors: list[dict[str, Any]], step_num: int) -> None:
         skipped_steps = self.state.get("skipped_steps", [])
@@ -1209,7 +1229,7 @@ class GateValidator:
             slot_id = slot_info.get("slot", "")
             slot_title = slot_info.get("title", "")
             syn_path = slots_dir / slot_id / "synthesis.md"
-            if not syn_path.exists() or syn_path.stat().st_size == 0:
+            if not syn_path.exists():
                 continue
             actual_titles.append(slot_title)
             slot_content = read_markdown(syn_path)
