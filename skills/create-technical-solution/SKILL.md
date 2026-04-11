@@ -97,7 +97,7 @@ compatibility:
 - 每步完成后写入 `checkpoints.step-N` 并追加 `completed_steps`
 - 回退时从 `completed_steps` 移除受影响步骤，重置 `current_step`
 - **state / draft 职责固定**：state 只保留 `current_step`、`completed_steps`、`required_artifacts`、`produced_artifacts`、gate flags、路径字段，最小 checkpoint、cleanup 状态
-- **正文只允许写入 working draft**：`WD-CTX`、`WD-TASK`、`WD-EXP-SLOT-*`、`WD-SYN-SLOT-*`、`WD-IMPACT-*` 一律只存在于 working draft；共享上下文、专家判断、收敛结论、详细设计正文不得写进 state
+- **正文只允许写入 working draft**：`WD-CTX`、`WD-TASK`、`WD-EXP-SLOT-*`、`WD-SYN-SLOT-*` 一律只存在于 working draft；共享上下文、专家判断、收敛结论、详细设计正文不得写进 state
 - **checkpoint 必须结构化且瘦身**：`checkpoints.step-N.summary` 只能写流程摘要，不得复述正文
 - **流程摘要只允许描述**：本步是否完成/跳过、写入了什么区块、区块数量/槽位数量、下一步 gate 是否齐备
 - **严禁手写 produced_artifacts**：必须以 `run-step.py` 在块写入后的同步结果为准，不得口头宣称某个 `WD-*` 已存在
@@ -159,12 +159,12 @@ step 8 必须按当前模板的真实槽位逐项生成任务单，不得只按"
 - 下游步骤只能消费已经写入 working draft 目录的稳定文件；未写入的文件视为不存在，不得预支后续结论
 - 展示层可以只给摘要，但 `WD-*` 中间产物必须保留完整字段、证据追溯、阻塞条件、冲突处理和失效标记，不得因展示层精简而减配
 - working draft 只保存稳定、可复用、可回退的结论，不保存 scratchpad、原始推理片段或临时口径
-- 回退或重进时，必须先写 `WD-IMPACT-[n]`；已失效内容必须显式标注作废范围，无可复用内容时 `保持有效内容` 写 `无`
+- 回退或重进时，直接回到最早受影响步骤重新执行；无需写变更影响文件
 - 状态文件中的 `required_artifacts` 与 `produced_artifacts` 是流程推进的唯一产物依据；不得以口头描述替代产物存在性
 - 凡 `required_artifacts` 未齐、`pending_questions` 未清空、`absorption_check_passed = false`、或存在未解决阻塞槽位时，禁止清理 working draft 和状态文件
 
 ## 回退规则
-收到用户变更后先写 `WD-IMPACT-[n]`，再回到最早受影响步骤：
+收到用户变更后，回到最早受影响步骤重新执行：
 | 触发变更 | 回退到 |
 |---|---|
 | 主题/目标/非目标/影响范围 | 步骤 1 |

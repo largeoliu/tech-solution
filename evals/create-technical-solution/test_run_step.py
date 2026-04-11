@@ -1169,6 +1169,31 @@ class TestRunStepBehavior:
         assert run_step.main() == 0
         assert captured["state_path"] == workspace["state_path"].resolve()
 
+    def test_main_help_hides_internal_low_level_flags(
+        self,
+        workspace: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(
+            "sys.argv",
+            ["run-step.py", "--state", str(workspace["state_path"]), "--help"],
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_step.main()
+
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        assert "--advance" in output
+        assert "--complete" in output
+        assert "--emit-scaffold" in output
+        assert "--prepare" not in output
+        assert "--mark-step-card-read" not in output
+        assert "--solution-type" not in output
+        assert "--member" not in output
+        assert "--slug" not in output
+
     def test_emit_scaffold_does_not_mutate_state_or_draft(
         self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]
     ) -> None:

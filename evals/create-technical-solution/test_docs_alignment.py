@@ -111,6 +111,17 @@ def test_no_top_level_run_step_wrapper_exists() -> None:
     assert not wrapper.exists()
 
 
+def test_run_step_script_docstring_avoids_low_level_public_flags() -> None:
+    text = "\n".join(
+        read("skills/create-technical-solution/scripts/run-step.py").splitlines()[:40]
+    )
+
+    assert "--mark-step-card-read" not in text
+    assert "--solution-type" not in text
+    assert "--member" not in text
+    assert "--slug" not in text
+
+
 def test_docs_cover_runtime_doctor_contract() -> None:
     ref_text = read("skills/create-technical-solution/REFERENCE.md")
     skill_text = read("skills/create-technical-solution/SKILL.md")

@@ -975,7 +975,7 @@ class GateValidator:
                     if exp.exists() and exp.stat().st_size > 0:
                         return exp
             return None
-        if artifact in {"WD-SYN", "WD-SYN-LIGHT", "WD-SYN-SLOT-*"}:
+        if artifact in {"WD-SYN", "WD-SYN-SLOT-*"}:
             slots_dir = working_dir / "slots"
             if slots_dir.is_dir():
                 for slot_dir in sorted(slots_dir.iterdir()):

@@ -4,39 +4,24 @@
 # ///
 """统一步骤编排器：封装验证、状态推进和 step card 加载，降低 Agent 协调负荷。
 
-三种操作模式：
+公共操作模式：
   status  ：查看当前步骤、验证状态、step card 操作指引
-  advance ：高层推进当前步骤，自动步骤可直接推进，创作步骤返回业务任务
-  complete：完成当前步骤并推进（兼容低层协议）
+  advance ：高层推进当前步骤；自动步骤直接推进，业务/创作步骤返回提交契约
+  complete：提交当前步骤业务内容或创作内容，并在通过校验后推进
 
-用法示例：
+公共用法示例：
   # 查看当前状态
   python /path/to/run-step.py --state <状态文件>
 
-  # 完成全自动步骤
-  python /path/to/run-step.py --state <状态文件> --complete --summary "前置文件检查通过"
+  # 进入当前步骤（空状态、自动步骤、业务步骤、创作步骤统一走这个入口）
+  python /path/to/run-step.py --state <状态文件> --advance
 
-  # 完成半自动步骤（step 1）
-  python /path/to/run-step.py --state <状态文件> --complete --summary "定题完成" --slug my-feature
-
-  # 完成半自动步骤（step 4）
-  python /path/to/run-step.py --state <状态文件> --complete --summary "类型判定" \\
-    --solution-type "新功能方案"
-
-  # 完成半自动步骤（step 5）
-  python /path/to/run-step.py --state <状态文件> --complete --summary "成员选定" \\
-    --member SYSTEMS_ARCHITECT --member DOMAIN_EXPERT
-
-  # 完成创作型步骤（step 7/8）
-  python /path/to/run-step.py --state <状态文件> --complete --summary "WD-CTX 完成" <<'HEREDOC'
-  <WD-CTX 内容>
+  # 提交业务 JSON 或创作正文
+  python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> --summary "<步骤完成>" <<'HEREDOC'
+  {"title": "方案标题"}
   HEREDOC
 
-  # 完成创作型步骤（step 9，按槽位）
-  python /path/to/run-step.py --state <状态文件> --complete --summary "专家分析完成" <<'HEREDOC'
-  ---BLOCK:WD-EXP-SLOT-01
-  <专家分析内容>
-  HEREDOC
+低层 flags 仅供脚本、测试、调试使用，不属于公共主路径。
 """
 
 from __future__ import annotations
@@ -757,14 +742,12 @@ def require_step_card_read(state: dict[str, Any], step: int) -> tuple[bool, str]
     if step < 2:
         return True, ""
     entry = state.get("step_cards_read", {})
-    if not isinstance(entry, dict):
-        return False, f"步骤 {step} 尚未登记 step card 已读。请先执行 --mark-step-card-read。"
-    record = entry.get(str(step))
+    record = entry.get(str(step)) if isinstance(entry, dict) else None
     if not isinstance(record, dict):
-        return False, f"步骤 {step} 尚未登记 step card 已读。请先执行 --mark-step-card-read。"
+        return False, f"步骤 {step} 尚未登记 step card 已读。请重新执行 --advance。"
     current_hash = step_card_hash(step)
     if str(record.get("card_hash") or "") != current_hash:
-        return False, f"步骤 {step} 的 step card 已更新，请重新执行 --mark-step-card-read。"
+        return False, f"步骤 {step} 的 step card 已更新。请重新执行 --advance 以刷新。"
     return True, ""
 
 
@@ -941,7 +924,7 @@ def complete_step_4(
         if isinstance(candidate, str):
             solution_type = candidate.strip() or None
     if not solution_type:
-        return 1, "步骤 4 需要 --solution-type 参数。"
+        return 1, '步骤 4 需要业务 JSON 字段 "solution_type"。'
     code, stdout = advance_state_step_in_process(
         state_path=state_path,
         step=4,
@@ -972,7 +955,7 @@ def complete_step_5(
         if isinstance(selected, list):
             members = [str(item).strip() for item in selected if str(item).strip()]
     if not members:
-        return 1, "步骤 5 需要至少一个 --member 参数。"
+        return 1, '步骤 5 需要业务 JSON 字段 "selected_members"，且至少包含一个成员。'
     members_json = json.dumps(members)
     code, stdout = advance_state_step_in_process(
         state_path=state_path,
@@ -1442,10 +1425,10 @@ def main() -> int:
     )
     parser.add_argument("--state", required=True, help="状态文件路径")
     parser.add_argument("--advance", action="store_true", help="高层推进当前步骤")
-    parser.add_argument("--prepare", action="store_true", help="为当前步骤生成一次性 ticket")
+    parser.add_argument("--prepare", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--complete", action="store_true", help="完成当前步骤并推进")
     parser.add_argument(
-        "--mark-step-card-read", action="store_true", help="登记当前步骤 step card 已阅读"
+        "--mark-step-card-read", action="store_true", help=argparse.SUPPRESS
     )
     parser.add_argument(
         "--emit-scaffold", action="store_true", help="输出当前步骤 scaffold 到 stdout"
@@ -1453,11 +1436,11 @@ def main() -> int:
     parser.add_argument("--summary", help="步骤完成摘要（--complete 时必需）")
 
     # 步骤特定参数
-    parser.add_argument("--slug", help="步骤 1: 方案 slug")
-    parser.add_argument("--solution-type", help="步骤 4: 方案类型")
-    parser.add_argument("--ticket", help="--prepare 生成的一次性 ticket")
+    parser.add_argument("--slug", help=argparse.SUPPRESS)
+    parser.add_argument("--solution-type", help=argparse.SUPPRESS)
+    parser.add_argument("--ticket", help="当前步骤的一次性凭证（从 --advance 返回值中获取）")
     parser.add_argument(
-        "--member", action="append", default=[], help="步骤 5: 参与成员（可重复）"
+        "--member", action="append", default=[], help=argparse.SUPPRESS
     )
 
     args = parser.parse_args()

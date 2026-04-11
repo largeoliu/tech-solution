@@ -18,6 +18,3 @@ blocks:
   WD-SYN-SLOT:
     type: pattern
     heading_pattern: WD-SYN-SLOT-\d+
-  WD-SYN-LIGHT:
-    type: singleton
-    heading: WD-SYN-LIGHT
