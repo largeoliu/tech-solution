@@ -466,14 +466,12 @@ class TestScripts:
         vs.dump_state(workspace["state_path"], state)
 
         snapshot = rs.load_runtime_snapshot(workspace["state_path"])
-        canonical = protocol_runtime.canonical_repo_paths_for_slug(
-            repo_root=workspace["repo"],
-            slug="sample-solution",
-        )
+        canonical_strs = protocol_runtime.canonical_state_paths_for_slug("sample-solution")
 
-        assert snapshot.working_draft_path == canonical["working_draft_path"]
-        assert snapshot.template_path == canonical["template_path"]
-        assert snapshot.final_document_path == canonical["final_document_path"]
+        repo = workspace["repo"]
+        assert snapshot.working_draft_path == (repo / canonical_strs["working_draft_path"]).resolve()
+        assert snapshot.template_path == (repo / canonical_strs["template_path"]).resolve()
+        assert snapshot.final_document_path == (repo / canonical_strs["final_document_path"]).resolve()
 
     def test_initialize_state_starts_with_empty_question_queue(self, workspace: dict[str, Path]) -> None:
         iss.initialize_state(
@@ -871,7 +869,6 @@ class TestValidator:
 
     def test_step_7_requires_repowiki_consumption_when_exists(self, workspace: dict[str, Path]) -> None:
         workspace["working_draft_path"].mkdir(parents=True, exist_ok=True)
-        (workspace["working_draft_path"] / "ctx.md").write_text("", encoding="utf-8")
         state = make_state(workspace, current_step=7, completed_steps=[1, 2, 3, 4, 5, 6], produced_artifacts=["WD-CTX"])
         state["checkpoints"]["step-6"]["repowiki_exists"] = True
         state["checkpoints"]["step-6"]["repowiki_source_count"] = 0
@@ -989,7 +986,7 @@ class TestValidator:
     def test_step_10_requires_wd_syn_per_slot(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
         for index in range(2, 5):
-            (slot_dir(workspace, index) / "synthesis.md").write_text("", encoding="utf-8")
+            (slot_dir(workspace, index) / "synthesis.md").unlink(missing_ok=True)
         state = make_state(workspace)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
@@ -1111,7 +1108,7 @@ class TestValidator:
 
     def test_step_11_detects_overwritten_wd_ctx(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
-        (workspace["working_draft_path"] / "ctx.md").write_text("", encoding="utf-8")
+        (workspace["working_draft_path"] / "ctx.md").unlink(missing_ok=True)
         state = make_state(workspace, current_step=11)
         validator = make_validator(state, workspace)
         errors: list[dict] = []
