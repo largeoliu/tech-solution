@@ -479,28 +479,6 @@ def format_step_failure(
     return "\n".join(lines)
 
 
-def upsert_block_in_process(
-    state_path: Path,
-    working_dir: Path,
-    block_name: str,
-    content: str,
-    summary: str,
-    require_receipt_step: int | None,
-) -> tuple[int, str]:
-    module = load_upsert_draft_block_module()
-    try:
-        payload = module.upsert_with_sync(
-            working_dir=working_dir,
-            state_path=state_path,
-            block_updates=[(block_name, content)],
-            summary=summary,
-            require_receipt_step=require_receipt_step or 0,
-        )
-    except SystemExit as exc:
-        return 1, str(exc)
-    return 0, json.dumps(payload, ensure_ascii=False, indent=2)
-
-
 def upsert_blocks_in_process(
     state_path: Path,
     working_dir: Path,
@@ -695,7 +673,6 @@ def extract_template_snapshot_in_process(
 
     fingerprint = module.compute_template_fingerprint(template_markdown, headings)
     working_draft = (repo_root / draft_path).resolve()
-    module.create_working_directory(working_draft, headings)
     try:
         module.update_state(
             state_path=state_path.resolve(),
@@ -999,7 +976,6 @@ def complete_step_5(
         field=["members_checked=true"],
         field_json=[
             f"selected_members={members_json}",
-            f"selected_member_count={len(members)}",
         ],
         state_fields=None,
         state_fields_json=None,
@@ -1031,6 +1007,7 @@ def complete_step_6(state_path: Path, summary: str, **_: Any) -> tuple[int, str]
         field=[
             "repowiki_checked=true",
             f"repowiki_exists={'true' if repowiki_exists else 'false'}",
+            f"repowiki_path={repowiki_path}",
         ],
         field_json=[f"repowiki_source_count={source_count}"],
         state_fields=None,

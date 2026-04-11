@@ -70,20 +70,6 @@ def compute_template_fingerprint(markdown: str, headings: list[dict[str, Any]]) 
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def create_working_directory(working_dir: Path, headings: list[dict[str, Any]]) -> None:
-    working_dir.mkdir(parents=True, exist_ok=True)
-    (working_dir / "ctx.md").write_text("", encoding="utf-8")
-    (working_dir / "task.md").write_text("", encoding="utf-8")
-    slots_dir = working_dir / "slots"
-    slots_dir.mkdir(parents=True, exist_ok=True)
-    for item in headings:
-        slot_id = item["slot"]
-        slot_dir = slots_dir / slot_id
-        slot_dir.mkdir(parents=True, exist_ok=True)
-        (slot_dir / "experts.md").write_text("", encoding="utf-8")
-        (slot_dir / "synthesis.md").write_text("", encoding="utf-8")
-
-
 def update_state(
     *,
     state_path: Path,
@@ -171,7 +157,6 @@ def main() -> int:
     }
 
     if args.write:
-        create_working_directory(working_dir, headings)
         if args.state:
             update_state(
                 state_path=Path(args.state).resolve(),
