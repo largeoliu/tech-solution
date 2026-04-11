@@ -23,10 +23,15 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from protocol_runtime import compute_state_fingerprint, dump_yaml as dump_state, iso_now, load_yaml as load_state
 from protocol_runtime import (
+    DEFAULT_MEMBERS_PATH,
+    DEFAULT_PRINCIPLES_PATH,
+    DEFAULT_TEMPLATE_PATH,
     SOLUTION_ROOT,
     repo_root_from_state_path,
     final_document_relative_path,
     render_repair_command,
+    resolve_repo_path,
+    slug_from_state_path,
     working_draft_relative_path,
 )
 from quality_checks import placeholder_hits, repeated_slot_groups
@@ -200,15 +205,6 @@ def extract_ctx_entries(markdown: str) -> list[dict[str, Any]]:
     return entries
 
 
-def resolve_path(value: Any, base: Path) -> Optional[Path]:
-    if not value or not str(value).strip():
-        return None
-    path = Path(str(value))
-    if path.is_absolute():
-        return path
-    return (base / path).resolve()
-
-
 def extract_ctx_ids(text: str) -> list[str]:
     return re.findall(r"^###\s+(CTX-\d+)\s*$", text, flags=re.MULTILINE)
 
@@ -375,6 +371,23 @@ def build_repair_plan(
     state: Optional[dict[str, Any]] = None,
 ) -> list[dict[str, Any]]:
     plan: dict[int, dict[str, Any]] = {}
+
+    def classify_action(issue: dict[str, Any], repair_step: int) -> str:
+        code = str(issue.get("code") or "")
+        if code == "invalid_gate_receipt":
+            return "refresh_ticket"
+        if code in {"final_document_not_rendered_via_script", "step_order_violation"} and repair_step == 11:
+            return "rerender_final_document"
+        if repair_step == 3:
+            return "rebuild_from_step_3"
+        if repair_step == 7:
+            return "rebuild_from_step_7"
+        if repair_step == 8:
+            return "rebuild_from_step_8"
+        if repair_step == 10:
+            return "rollback_to_step_10"
+        return f"rebuild_from_step_{repair_step}"
+
     for issue in issues:
         repair_step = issue.get("recommended_repair_step")
         if repair_step is None:
@@ -391,13 +404,11 @@ def build_repair_plan(
             },
         )
         code = issue["code"]
+        entry["action_type"] = classify_action(issue, int(repair_step))
         if code in {"missing_artifact", "missing_working_draft_block", "draft_block_overwritten"}:
-            entry["action_type"] = "rerun_run_step"
             for missing in issue.get("missing_artifacts", []):
                 if missing not in entry["expected_artifacts_after_fix"]:
                     entry["expected_artifacts_after_fix"].append(missing)
-        else:
-            entry["action_type"] = "rerun_run_step"
         if state_path is not None:
             entry["script_command"] = render_repair_command(
                 state_path=state_path,
@@ -455,22 +466,48 @@ class GateValidator:
         return checkpoint
 
     def template_path(self) -> Optional[Path]:
-        return resolve_path(self.state.get("template_path"), self.repo_root)
+        return resolve_repo_path(
+            self.repo_root,
+            self.state.get("template_path"),
+            default_relative=DEFAULT_TEMPLATE_PATH,
+        )
 
     def members_path(self) -> Optional[Path]:
-        return resolve_path(self.state.get("members_path"), self.repo_root)
+        return resolve_repo_path(
+            self.repo_root,
+            self.state.get("members_path"),
+            default_relative=DEFAULT_MEMBERS_PATH,
+        )
 
     def principles_path(self) -> Optional[Path]:
-        return resolve_path(self.state.get("principles_path"), self.repo_root)
+        return resolve_repo_path(
+            self.repo_root,
+            self.state.get("principles_path"),
+            default_relative=DEFAULT_PRINCIPLES_PATH,
+        )
 
     def solution_root_path(self) -> Optional[Path]:
-        return resolve_path(self.state.get("solution_root"), self.repo_root)
+        return resolve_repo_path(
+            self.repo_root,
+            self.state.get("solution_root"),
+            default_relative=SOLUTION_ROOT,
+        )
 
     def working_draft_path(self) -> Optional[Path]:
-        return resolve_path(self.state.get("working_draft_path"), self.repo_root)
+        slug = str(self.state.get("slug") or "").strip() or slug_from_state_path(self.state_path)
+        return resolve_repo_path(
+            self.repo_root,
+            self.state.get("working_draft_path"),
+            default_relative=working_draft_relative_path(slug),
+        )
 
     def final_document_path(self) -> Optional[Path]:
-        return resolve_path(self.state.get("final_document_path"), self.repo_root)
+        slug = str(self.state.get("slug") or "").strip() or slug_from_state_path(self.state_path)
+        return resolve_repo_path(
+            self.repo_root,
+            self.state.get("final_document_path"),
+            default_relative=final_document_relative_path(slug),
+        )
 
     def template_headings(self) -> list[dict[str, Any]]:
         template_path = self.template_path()

@@ -62,22 +62,9 @@ def test_reference_doc_matches_current_validator_json_contract() -> None:
     assert "artifact_write_hint" not in text
     assert "working_draft_context_hint" not in text
 
-    assert "--write-pass-receipt" in text
-    assert "gate_receipt" in text
-    assert "repair_plan" in text
-    assert "issues" in text
-    assert "summary" in text
-    assert "summary.recommended_repair_sequence" in text
-    assert "summary.recommended_rollback_step" in text
-    assert "summary.missing_artifacts" in text
-    assert "summary.skip_instead_of_retry" in text
-    assert "repair_plan[].step" in text
-    assert "repair_plan[].action_type" in text
-    assert "repair_plan[].script_command" in text
-    assert "repair_plan[].depends_on_steps" in text
-    assert "repair_plan[].expected_artifacts_after_fix" in text
-    assert "repair_plan[].revalidate_step" in text
-    assert "issues[*].repair_guidance" in text
+    assert "run-step.py" in text
+    assert "结构化 JSON payload" in text
+    assert "对外只消费 `run-step.py`" in text
 
 
 def test_docs_cover_emit_scaffold_read_only_contract() -> None:
@@ -126,25 +113,8 @@ def test_docs_cover_runtime_doctor_contract() -> None:
     ref_text = read("skills/create-technical-solution/REFERENCE.md")
     skill_text = read("skills/create-technical-solution/SKILL.md")
 
-    assert "runtime_doctor.py" in ref_text
-    assert "dry-run" in ref_text
-    assert "--apply-safe-fixes" in ref_text
-    assert "结构性" in ref_text
-    assert "step" in ref_text
-    assert "apply_safe_fixes" in ref_text
-    assert "passed" in ref_text
-    assert "summary" in ref_text
-    assert "issues" in ref_text
-    assert "repair_plan" in ref_text
-    assert "safe_fixes" in ref_text
-    assert "state_path" in ref_text
-    assert "mutated" in ref_text
-
-    assert "runtime_doctor.py" in skill_text
-    assert "dry-run" in skill_text
-    assert "--apply-safe-fixes" in skill_text
-    assert "结构性" in skill_text
-    assert "不是主执行路径" in skill_text
+    assert "runtime_doctor.py" not in ref_text
+    assert "runtime_doctor.py" not in skill_text
 
 
 def test_step_docs_drop_stale_completion_checks_language() -> None:
@@ -180,13 +150,38 @@ def test_skill_doc_references_current_repair_fields() -> None:
     assert "completion_checks" not in text
     assert "retry_command" not in text
 
-    assert "repair_plan[].step" in text
-    assert "repair_plan[].action_type" in text
-    assert "repair_plan[].depends_on_steps" in text
-    assert "repair_plan[].expected_artifacts_after_fix" in text
-    assert "repair_plan[].script_command" in text
-    assert "summary.recommended_repair_sequence" in text
-    assert "summary.recommended_rollback_step" in text
-    assert "summary.missing_artifacts" in text
-    assert "summary.skip_instead_of_retry" in text
-    assert "issues[*].repair_guidance" in text
+    assert "run-step.py" in text
+    assert "结构化 JSON payload" in text
+    assert "恢复动作" in text or "修复动作" in text
+
+
+def test_creative_step_docs_require_structured_payload_not_block_markers() -> None:
+    paths = [
+        "skills/create-technical-solution/steps/07-构建共享上下文.md",
+        "skills/create-technical-solution/steps/08-生成模板任务单.md",
+        "skills/create-technical-solution/steps/09-组织专家按模板逐槽位分析.md",
+        "skills/create-technical-solution/steps/10-按模板逐槽位协作收敛.md",
+    ]
+
+    for path in paths:
+        text = read(path)
+        assert "结构化 JSON payload" in text, path
+        assert "---BLOCK:" not in text, path
+        assert "block body" not in text, path
+
+
+def test_skill_doc_drops_public_mark_step_and_prepare_flags() -> None:
+    text = read("skills/create-technical-solution/SKILL.md")
+
+    assert "--mark-step-card-read" not in text
+    assert "--prepare" not in text
+    assert "through stdin/heredoc" not in text
+
+
+def test_reference_doc_drops_public_dual_path_language() -> None:
+    text = read("skills/create-technical-solution/REFERENCE.md")
+
+    assert "低层接口，仅保留给测试、内部调试和兼容路径" not in text
+    assert "validate-state.py --format json" not in text
+    assert "runtime_doctor.py" not in text
+    assert "结构化 JSON payload" in text

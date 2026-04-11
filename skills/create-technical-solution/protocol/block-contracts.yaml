@@ -3,12 +3,36 @@ blocks:
   WD-CTX:
     type: singleton
     heading: WD-CTX
+    input_schema:
+      type: array
+      item_schema: ctx_entry
+      required_fields:
+        - id
+        - source
+        - conclusion
+        - applicable_slots
+        - confidence
   WD-TASK:
     type: singleton
     heading: WD-TASK
+    input_schema:
+      type: array
+      item_schema: slot_task
+      required_fields:
+        - slot
+        - required_ctx
   WD-EXP-SLOT:
     type: pattern
     heading_pattern: WD-EXP-SLOT-\d+
+    input_schema:
+      type: array
+      item_schema: slot_analysis
+      required_fields:
+        - slot
+        - decision_type
+        - rationale
+        - evidence_refs
+        - open_questions
     required_sections:
       - 参与槽位
       - 决策类型
@@ -18,3 +42,13 @@ blocks:
   WD-SYN-SLOT:
     type: pattern
     heading_pattern: WD-SYN-SLOT-\d+
+    input_schema:
+      type: array
+      item_schema: slot_synthesis
+      required_fields:
+        - slot
+        - target_capability
+        - comparisons
+        - selected_path
+        - selected_writeup
+        - evidence_refs

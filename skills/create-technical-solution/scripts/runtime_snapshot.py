@@ -13,6 +13,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from protocol_runtime import (
+    DEFAULT_TEMPLATE_PATH,
     final_document_relative_path,
     load_yaml,
     repo_root_from_state_path,
@@ -20,9 +21,6 @@ from protocol_runtime import (
     slug_from_state_path,
     working_draft_relative_path,
 )
-
-
-DEFAULT_TEMPLATE_PATH = Path(".architecture/templates/technical-solution-template.md")
 
 
 @dataclass(frozen=True)

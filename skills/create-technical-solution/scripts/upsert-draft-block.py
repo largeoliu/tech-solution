@@ -48,6 +48,137 @@ def _default_block_for_step(step: int) -> str | None:
     return {7: "WD-CTX", 8: "WD-TASK"}.get(step)
 
 
+def render_ctx_payload(entries: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for index, entry in enumerate(entries, start=1):
+        ctx_id = str(entry.get("id") or f"CTX-{index:02d}").strip() or f"CTX-{index:02d}"
+        source = str(entry.get("source") or "").strip()
+        conclusion = str(entry.get("conclusion") or "").strip()
+        confidence = str(entry.get("confidence") or "").strip()
+        applicable_slots = entry.get("applicable_slots") or []
+        if not isinstance(applicable_slots, list):
+            raise ValueError("WD-CTX applicable_slots 必须是数组。")
+        slots_text = ", ".join(str(item).strip() for item in applicable_slots if str(item).strip())
+        lines.extend(
+            [
+                f"### {ctx_id}",
+                f"来源: {source}",
+                f"结论或约束: {conclusion}",
+                f"适用槽位: {slots_text}",
+                f"可信度或缺口: {confidence}",
+                "",
+            ]
+        )
+    return "\n".join(lines).strip()
+
+
+def render_task_payload(entries: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for entry in entries:
+        slot = str(entry.get("slot") or "").strip()
+        required_ctx = entry.get("required_ctx") or []
+        if not slot:
+            raise ValueError("WD-TASK slot 不能为空。")
+        if not isinstance(required_ctx, list):
+            raise ValueError("WD-TASK required_ctx 必须是数组。")
+        ctx_text = ", ".join(str(item).strip() for item in required_ctx if str(item).strip())
+        lines.extend(
+            [
+                f"### {slot}",
+                f"必须消费的共享上下文: {ctx_text}",
+                "",
+            ]
+        )
+    return "\n".join(lines).strip()
+
+
+def _slot_id_for_title(slots: list[dict[str, Any]], title: str) -> str:
+    normalized = title.strip()
+    for slot in slots:
+        if str(slot.get("title") or "").strip() == normalized:
+            return str(slot.get("slot") or "").strip()
+    raise ValueError(f"未找到槽位标题对应的 state.slots 记录: {title}")
+
+
+def render_exp_payload(entries: list[dict[str, Any]], slots: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    rendered: list[tuple[str, str]] = []
+    for entry in entries:
+        slot_title = str(entry.get("slot") or "").strip()
+        if not slot_title:
+            raise ValueError("WD-EXP payload 缺少 slot。")
+        slot_id = _slot_id_for_title(slots, slot_title)
+        evidence_refs = entry.get("evidence_refs") or []
+        open_questions = entry.get("open_questions") or []
+        if not isinstance(evidence_refs, list) or not isinstance(open_questions, list):
+            raise ValueError("WD-EXP evidence_refs/open_questions 必须是数组。")
+        body = "\n".join(
+            [
+                "### 参与槽位",
+                f"- {slot_title}",
+                "",
+                "### 决策类型",
+                f"- {str(entry.get('decision_type') or '').strip()}",
+                "",
+                "### 核心理由",
+                f"- {str(entry.get('rationale') or '').strip()}",
+                "",
+                "### 关键证据引用",
+                *[f"- {str(item).strip()}" for item in evidence_refs if str(item).strip()],
+                "",
+                "### 未决点",
+                *([f"- {str(item).strip()}" for item in open_questions if str(item).strip()] or ["- 无"]),
+            ]
+        ).strip()
+        rendered.append((f"WD-EXP-{slot_id}", body))
+    return rendered
+
+
+def render_syn_payload(entries: list[dict[str, Any]], slots: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    rendered: list[tuple[str, str]] = []
+    for entry in entries:
+        slot_title = str(entry.get("slot") or "").strip()
+        if not slot_title:
+            raise ValueError("WD-SYN payload 缺少 slot。")
+        slot_id = _slot_id_for_title(slots, slot_title)
+        comparisons = entry.get("comparisons") or []
+        evidence_refs = entry.get("evidence_refs") or []
+        if not isinstance(comparisons, list) or not isinstance(evidence_refs, list):
+            raise ValueError("WD-SYN comparisons/evidence_refs 必须是数组。")
+        table_lines = [
+            "| 路径 | 可行性 | 关键证据 | 选择理由 |",
+            "|------|--------|----------|----------|",
+        ]
+        for item in comparisons:
+            if not isinstance(item, dict):
+                raise ValueError("WD-SYN comparisons 数组元素必须是对象。")
+            table_lines.append(
+                "| {path} | {feasibility} | {evidence} | {reason} |".format(
+                    path=str(item.get("path") or "").strip(),
+                    feasibility=str(item.get("feasibility") or "").strip(),
+                    evidence=str(item.get("evidence") or "").strip(),
+                    reason=str(item.get("reason") or "").strip(),
+                )
+            )
+        body = "\n".join(
+            [
+                f"### 槽位：{slot_title}",
+                "#### 目标能力",
+                f"- {str(entry.get('target_capability') or '').strip()}",
+                "#### 候选方案对比",
+                *table_lines,
+                "#### 选定路径",
+                f"- 路径: {str(entry.get('selected_path') or '').strip()}",
+                f"- 选定写法: {str(entry.get('selected_writeup') or '').strip()}",
+                f"- 关键证据引用: {', '.join(str(item).strip() for item in evidence_refs if str(item).strip())}",
+                f"- 建议落位槽位: {slot_title}",
+                f"- 模板承载缺口: {str(entry.get('template_gap') or '无').strip()}",
+                f"- 未决问题: {str(entry.get('open_question') or '无').strip()}",
+            ]
+        ).strip()
+        rendered.append((f"WD-SYN-{slot_id}", body))
+    return rendered
+
+
 def validate_body(block_name: str, content: str) -> None:
     body = content.strip()
     if not body:

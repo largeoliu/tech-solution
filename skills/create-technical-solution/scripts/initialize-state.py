@@ -18,13 +18,11 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from protocol_runtime import (
-    SOLUTION_ROOT,
+    build_canonical_state_payload,
     dump_yaml,
-    final_document_relative_path,
     iso_now,
     load_yaml,
     refresh_receipt,
-    working_draft_relative_path,
 )
 
 
@@ -47,6 +45,7 @@ def initialize_state(
     next_step: int | None,
 ) -> dict[str, Any]:
     state = load_or_create_state(state_path)
+    canonical = build_canonical_state_payload(state_path=state_path, slug=slug)
 
     checkpoints = state.setdefault("checkpoints", {})
     if not isinstance(checkpoints, dict):
@@ -58,12 +57,10 @@ def initialize_state(
         "scope_ready": True,
         "completed_at": iso_now(),
     }
-    state["solution_root"] = str(SOLUTION_ROOT)
-    state["working_draft_path"] = str(working_draft_relative_path(slug))
-    state["final_document_path"] = str(final_document_relative_path(slug))
-    state.setdefault("members_path", ".architecture/members.yml")
-    state.setdefault("principles_path", ".architecture/principles.md")
-    state.setdefault("template_path", ".architecture/templates/technical-solution-template.md")
+    for key, value in canonical.items():
+        if key in {"slug", "current_step"}:
+            continue
+        state[key] = value
     pending_questions = state.setdefault("pending_questions", [])
     if not isinstance(pending_questions, list):
         state["pending_questions"] = []
@@ -86,6 +83,9 @@ def initialize_state(
     return {
         "slug": slug,
         "solution_root": state["solution_root"],
+        "template_path": state["template_path"],
+        "members_path": state["members_path"],
+        "principles_path": state["principles_path"],
         "working_draft_path": state["working_draft_path"],
         "final_document_path": state["final_document_path"],
         "current_step": state.get("current_step"),

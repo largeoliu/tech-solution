@@ -31,6 +31,8 @@ fc = load_script("finalize-cleanup")
 iss = load_script("initialize-state")
 rfd = load_script("render-final-document")
 udb = load_script("upsert-draft-block")
+rs = load_script("runtime_snapshot")
+protocol_runtime = load_script("protocol_runtime")
 
 
 TEMPLATE = """# 技术方案文档
@@ -415,6 +417,64 @@ class TestScripts:
         assert state["checkpoints"]["step-1"]["scope_ready"] is True
         assert state["gate_receipt"]["step"] == 2
 
+    def test_initialize_state_uses_canonical_runtime_paths(self, workspace: dict[str, Path]) -> None:
+        iss.initialize_state(
+            state_path=workspace["state_path"],
+            slug="sample-solution",
+            summary="完成；slug=sample-solution；paths=1；gate: step-2 ready",
+            next_step=2,
+        )
+
+        state = vs.load_state(workspace["state_path"])
+        canonical = protocol_runtime.build_canonical_state_payload(
+            state_path=workspace["state_path"],
+            slug="sample-solution",
+        )
+
+        assert state["solution_root"] == canonical["solution_root"]
+        assert state["template_path"] == canonical["template_path"]
+        assert state["members_path"] == canonical["members_path"]
+        assert state["principles_path"] == canonical["principles_path"]
+        assert state["working_draft_path"] == canonical["working_draft_path"]
+        assert state["final_document_path"] == canonical["final_document_path"]
+
+    def test_initialize_state_returns_canonical_paths_in_result(self, workspace: dict[str, Path]) -> None:
+        result = iss.initialize_state(
+            state_path=workspace["state_path"],
+            slug="sample-solution",
+            summary="完成；slug=sample-solution；paths=1；gate: step-2 ready",
+            next_step=2,
+        )
+
+        canonical = protocol_runtime.build_canonical_state_payload(
+            state_path=workspace["state_path"],
+            slug="sample-solution",
+        )
+
+        assert result["template_path"] == canonical["template_path"]
+        assert result["members_path"] == canonical["members_path"]
+        assert result["principles_path"] == canonical["principles_path"]
+        assert result["solution_root"] == canonical["solution_root"]
+        assert result["working_draft_path"] == canonical["working_draft_path"]
+        assert result["final_document_path"] == canonical["final_document_path"]
+
+    def test_runtime_snapshot_uses_canonical_defaults_for_missing_paths(self, workspace: dict[str, Path]) -> None:
+        state = {
+            "current_step": 3,
+            "checkpoints": {},
+        }
+        vs.dump_state(workspace["state_path"], state)
+
+        snapshot = rs.load_runtime_snapshot(workspace["state_path"])
+        canonical = protocol_runtime.canonical_repo_paths_for_slug(
+            repo_root=workspace["repo"],
+            slug="sample-solution",
+        )
+
+        assert snapshot.working_draft_path == canonical["working_draft_path"]
+        assert snapshot.template_path == canonical["template_path"]
+        assert snapshot.final_document_path == canonical["final_document_path"]
+
     def test_initialize_state_starts_with_empty_question_queue(self, workspace: dict[str, Path]) -> None:
         iss.initialize_state(
             state_path=workspace["state_path"],
@@ -559,6 +619,108 @@ class TestScripts:
 
 
 class TestValidator:
+    def test_build_repair_plan_uses_typed_action_for_ticket_refresh(self, workspace: dict[str, Path]) -> None:
+        issues = [
+            vs.make_issue(
+                code="invalid_gate_receipt",
+                message="receipt 已失效",
+                step=9,
+                field="gate_receipt.state_fingerprint",
+                recommended_rollback_step=9,
+                recommended_repair_step=9,
+            )
+        ]
+
+        plan = vs.build_repair_plan(
+            issues,
+            state_path=workspace["state_path"],
+            state=make_state(workspace, current_step=9),
+        )
+
+        assert plan[0]["action_type"] == "refresh_ticket"
+        assert plan[0]["revalidate_step"] == 9
+
+    def test_build_repair_plan_uses_typed_action_for_wd_rebuild(self, workspace: dict[str, Path]) -> None:
+        issues = [
+            vs.make_issue(
+                code="missing_artifact",
+                message="缺少 WD-CTX",
+                step=7,
+                field="produced_artifacts",
+                missing_artifacts=["WD-CTX"],
+                recommended_rollback_step=7,
+                recommended_repair_step=7,
+            )
+        ]
+
+        plan = vs.build_repair_plan(
+            issues,
+            state_path=workspace["state_path"],
+            state=make_state(workspace, current_step=7, completed_steps=[1, 2, 3, 4, 5, 6]),
+        )
+
+        assert plan[0]["action_type"] == "rebuild_from_step_7"
+        assert plan[0]["expected_artifacts_after_fix"] == ["WD-CTX"]
+
+    def test_build_repair_plan_uses_typed_action_for_final_document_rerender(self, workspace: dict[str, Path]) -> None:
+        issues = [
+            vs.make_issue(
+                code="final_document_not_rendered_via_script",
+                message="最终文档不是脚本生成",
+                step=11,
+                field="checkpoints.step-11.rendered_via_script",
+                recommended_rollback_step=11,
+                recommended_repair_step=11,
+            )
+        ]
+
+        plan = vs.build_repair_plan(
+            issues,
+            state_path=workspace["state_path"],
+            state=make_state(workspace, current_step=11),
+        )
+
+        assert plan[0]["action_type"] == "rerender_final_document"
+
+    def test_build_repair_plan_uses_step8_rebuild_for_task_slot_mismatch(self, workspace: dict[str, Path]) -> None:
+        issues = [
+            vs.make_issue(
+                code="task_slots_incomplete",
+                message="WD-TASK 与模板槽位不一致",
+                step=8,
+                field="working_draft_path",
+                recommended_rollback_step=8,
+                recommended_repair_step=8,
+            )
+        ]
+
+        plan = vs.build_repair_plan(
+            issues,
+            state_path=workspace["state_path"],
+            state=make_state(workspace, current_step=8),
+        )
+
+        assert plan[0]["action_type"] == "rebuild_from_step_8"
+
+    def test_build_repair_plan_uses_step3_rebuild_for_template_truth_mismatch(self, workspace: dict[str, Path]) -> None:
+        issues = [
+            vs.make_issue(
+                code="state_slots_out_of_sync",
+                message="state.slots 与模板不一致",
+                step=9,
+                field="slots",
+                recommended_rollback_step=3,
+                recommended_repair_step=3,
+            )
+        ]
+
+        plan = vs.build_repair_plan(
+            issues,
+            state_path=workspace["state_path"],
+            state=make_state(workspace, current_step=9),
+        )
+
+        assert plan[0]["action_type"] == "rebuild_from_step_3"
     def test_validator_rejects_receipt_lagging_current_step(self, workspace: dict[str, Path]) -> None:
         state = make_state(workspace, current_step=11)
         state["gate_receipt"] = {"step": 5, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}

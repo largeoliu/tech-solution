@@ -55,6 +55,8 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from protocol_runtime import (
+    build_canonical_state_payload,
+    canonical_step_defs,
     SOLUTION_ROOT,
     compute_artifact_fingerprint,
     dump_yaml,
@@ -144,20 +146,7 @@ def allowed_block_pattern_for_step(step: int) -> str | None:
     return None
 
 
-STEP_DEFS: dict[int, dict[str, Any]] = {
-    1: {"mode": "business", "artifact": None},
-    2: {"mode": "automatic", "artifact": None},
-    3: {"mode": "automatic", "artifact": None},
-    4: {"mode": "business", "artifact": None},
-    5: {"mode": "business", "artifact": None},
-    6: {"mode": "automatic", "artifact": None},
-    7: {"mode": "creative", "artifact": "WD-CTX"},
-    8: {"mode": "creative", "artifact": "WD-TASK"},
-    9: {"mode": "creative", "artifact": "WD-EXP-SLOT-*"},
-    10: {"mode": "creative", "artifact": "WD-SYN-SLOT-*"},
-    11: {"mode": "automatic", "artifact": None},
-    12: {"mode": "automatic", "artifact": None},
-}
+STEP_DEFS: dict[int, dict[str, Any]] = canonical_step_defs()
 
 
 def step_mode(step: int) -> str:
@@ -221,6 +210,53 @@ def quality_contract_for_step(step: int) -> list[str]:
     return contracts.get(step, [])
 
 
+def structured_output_shape_for_step(step: int) -> dict[str, Any]:
+    if step == 7:
+        return {
+            "type": "array",
+            "item_schema": "ctx_entry",
+            "required_fields": [
+                "id",
+                "source",
+                "conclusion",
+                "applicable_slots",
+                "confidence",
+            ],
+        }
+    if step == 8:
+        return {
+            "type": "array",
+            "item_schema": "slot_task",
+            "required_fields": ["slot", "required_ctx"],
+        }
+    if step == 9:
+        return {
+            "type": "array",
+            "item_schema": "slot_analysis",
+            "required_fields": [
+                "slot",
+                "decision_type",
+                "rationale",
+                "evidence_refs",
+                "open_questions",
+            ],
+        }
+    if step == 10:
+        return {
+            "type": "array",
+            "item_schema": "slot_synthesis",
+            "required_fields": [
+                "slot",
+                "target_capability",
+                "comparisons",
+                "selected_path",
+                "selected_writeup",
+                "evidence_refs",
+            ],
+        }
+    return {"type": "contract_list", "items": quality_contract_for_step(step)}
+
+
 def auto_summary_for_step(step: int) -> str:
     summaries = {
         2: "自动推进：前置文件检查通过",
@@ -233,17 +269,7 @@ def auto_summary_for_step(step: int) -> str:
 
 
 def build_initial_state_payload(state_path: Path, *, slug: str | None = None) -> dict[str, Any]:
-    resolved_slug = (slug or state_path.stem or "solution").strip() or "solution"
-    return {
-        "slug": resolved_slug,
-        "current_step": 1,
-        "solution_root": str(SOLUTION_ROOT),
-        "members_path": ".architecture/members.yml",
-        "principles_path": ".architecture/principles.md",
-        "template_path": ".architecture/templates/technical-solution-template.md",
-        "working_draft_path": str(working_draft_relative_path(resolved_slug)),
-        "final_document_path": str(final_document_relative_path(resolved_slug)),
-    }
+    return build_canonical_state_payload(state_path=state_path, slug=slug)
 
 
 def ensure_initial_state(state_path: Path, *, slug: str | None = None) -> dict[str, Any]:
@@ -428,11 +454,20 @@ def format_step_failure(
     payload = _load_json_payload(raw_output)
     repair_plan = payload.get("repair_plan") if isinstance(payload, dict) else None
     if isinstance(repair_plan, list) and repair_plan:
+        actions = [
+            str(item.get("action_type") or "").strip()
+            for item in repair_plan
+            if isinstance(item, dict) and str(item.get("action_type") or "").strip()
+        ]
         commands = [
             str(item.get("script_command") or "").strip()
             for item in repair_plan
             if isinstance(item, dict) and str(item.get("script_command") or "").strip()
         ]
+        if actions:
+            lines.append("恢复动作：")
+            for action in actions:
+                lines.append(f"- {action}")
         if commands:
             lines.append("修复路径：")
             for command in commands:
@@ -1026,7 +1061,32 @@ def complete_creative_step(
     working_dir = snapshot.working_draft_path
 
     module = load_upsert_draft_block_module()
-    block_updates = module.parse_stdin_blocks(stdin_content, step)
+    if step == 7:
+        try:
+            payload = parse_json_array_payload(stdin_content, label="步骤 7 结构化内容")
+            block_updates = [("WD-CTX", module.render_ctx_payload(payload))]
+        except ValueError as exc:
+            return 1, str(exc)
+    elif step == 8:
+        try:
+            payload = parse_json_array_payload(stdin_content, label="步骤 8 结构化内容")
+            block_updates = [("WD-TASK", module.render_task_payload(payload))]
+        except ValueError as exc:
+            return 1, str(exc)
+    elif step == 9:
+        try:
+            payload = parse_json_array_payload(stdin_content, label="步骤 9 结构化内容")
+            block_updates = module.render_exp_payload(payload, snapshot.state.get("slots") or [])
+        except ValueError as exc:
+            return 1, str(exc)
+    elif step == 10:
+        try:
+            payload = parse_json_array_payload(stdin_content, label="步骤 10 结构化内容")
+            block_updates = module.render_syn_payload(payload, snapshot.state.get("slots") or [])
+        except ValueError as exc:
+            return 1, str(exc)
+    else:
+        block_updates = module.parse_stdin_blocks(stdin_content, step)
     if not block_updates:
         return 1, f"步骤 {step} 传入的内容为空。"
 
@@ -1242,8 +1302,8 @@ def build_creative_entry_response(state_path: Path, step: int) -> dict[str, Any]
         "step": step,
         "artifact": step_def.get("artifact"),
         "business_task": business_task_for_step(step),
-        "required_output_shape": quality_contract_for_step(step),
-        "next_action": "submit_business_content",
+        "required_output_shape": structured_output_shape_for_step(step),
+        "next_action": "submit_structured_payload",
         "current_step": int(state.get("current_step") or step),
     }
 
@@ -1255,7 +1315,7 @@ def build_business_entry_response(state_path: Path, step: int) -> dict[str, Any]
         "step": step,
         "artifact": None,
         "business_task": business_task_for_step(step),
-        "required_output_shape": quality_contract_for_step(step),
+        "required_output_shape": structured_output_shape_for_step(step),
         "next_action": "submit_business_content",
         "current_step": int(state.get("current_step") or step),
     }
@@ -1272,6 +1332,24 @@ def parse_business_payload(stdin_content: str | None) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("stdin 业务内容必须是 JSON 对象。")
     return payload
+
+
+def parse_json_array_payload(stdin_content: str | None, *, label: str) -> list[dict[str, Any]]:
+    raw = str(stdin_content or "").strip()
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label} 不是合法 JSON: {exc}") from exc
+    if not isinstance(payload, list):
+        raise ValueError(f"{label} 必须是 JSON 数组。")
+    normalized: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise ValueError(f"{label} 数组元素必须是 JSON 对象。")
+        normalized.append(item)
+    return normalized
 
 
 def advance_step(state_path: Path) -> dict[str, Any]:

@@ -18,7 +18,20 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from protocol_runtime import dump_yaml, iso_now, load_yaml, refresh_receipt, repo_root_from_state_path, require_receipt
+from protocol_runtime import (
+    DEFAULT_TEMPLATE_PATH,
+    SOLUTION_ROOT,
+    dump_yaml,
+    final_document_relative_path,
+    iso_now,
+    load_yaml,
+    refresh_receipt,
+    repo_root_from_state_path,
+    require_receipt,
+    resolve_repo_path,
+    slug_from_state_path,
+    working_draft_relative_path,
+)
 from quality_checks import placeholder_hits, repeated_slot_groups
 
 
@@ -62,20 +75,25 @@ def strip_slot_heading(content: str, title: str) -> str:
 
 def render_from_draft(state_path: Path) -> str:
     state = load_yaml(state_path)
-    draft_value = str(state.get("working_draft_path") or "").strip()
-    if not draft_value:
-        raise SystemExit("working_draft_path 为空，无法从 draft 渲染最终文档。")
     repo_root = repo_root_from_state_path(state_path)
-    draft_path = Path(draft_value)
-    if not draft_path.is_absolute():
-        draft_path = (repo_root / draft_value).resolve()
+    slug = str(state.get("slug") or "").strip() or slug_from_state_path(state_path)
+    draft_path = resolve_repo_path(
+        repo_root,
+        state.get("working_draft_path"),
+        default_relative=working_draft_relative_path(slug),
+    )
+    if draft_path is None:
+        raise SystemExit("working_draft_path 为空，无法从 draft 渲染最终文档。")
     if not draft_path.is_dir():
         raise SystemExit(f"working draft 目录不存在: {draft_path}")
 
-    template_value = str(state.get("template_path") or "").strip()
-    template_path = Path(template_value)
-    if not template_path.is_absolute():
-        template_path = (repo_root / template_value).resolve()
+    template_path = resolve_repo_path(
+        repo_root,
+        state.get("template_path"),
+        default_relative=DEFAULT_TEMPLATE_PATH,
+    )
+    if template_path is None:
+        raise SystemExit("template_path 为空，无法渲染最终文档。")
     if not template_path.exists():
         raise SystemExit(f"模板不存在: {template_path}")
 
@@ -117,13 +135,22 @@ def render_final_document(
 ) -> dict[str, Any]:
     state = load_yaml(state_path)
     require_receipt(state, expected_step=11)
-    final_document_value = str(state.get("final_document_path") or "").strip()
-    if not final_document_value:
-        raise SystemExit("final_document_path 为空，必须先在步骤 1 生成最终文档路径。")
-
     repo_root = repo_root_from_state_path(state_path)
-    final_document_path = (repo_root / final_document_value).resolve()
-    allowed_root = (repo_root / str(state.get("solution_root") or ".architecture/technical-solutions")).resolve()
+    slug = str(state.get("slug") or "").strip() or slug_from_state_path(state_path)
+    final_document_path = resolve_repo_path(
+        repo_root,
+        state.get("final_document_path"),
+        default_relative=final_document_relative_path(slug),
+    )
+    if final_document_path is None:
+        raise SystemExit("final_document_path 为空，必须先在步骤 1 生成最终文档路径。")
+    allowed_root = resolve_repo_path(
+        repo_root,
+        state.get("solution_root"),
+        default_relative=SOLUTION_ROOT,
+    )
+    if allowed_root is None:
+        raise SystemExit("solution_root 为空，无法校验最终文档目录。")
     if allowed_root not in final_document_path.parents:
         raise SystemExit(f"final_document_path 必须位于 {allowed_root} 下，当前为 {final_document_path}")
 
@@ -136,8 +163,11 @@ def render_final_document(
     if placeholder_findings:
         raise SystemExit(f"最终文档仍含占位内容: {', '.join(placeholder_findings)}")
 
-    draft_value = str(state.get("working_draft_path") or "").strip()
-    draft_path = (repo_root / draft_value).resolve() if draft_value else None
+    draft_path = resolve_repo_path(
+        repo_root,
+        state.get("working_draft_path"),
+        default_relative=working_draft_relative_path(slug),
+    )
     if draft_path and draft_path.is_dir():
         slot_blocks: dict[str, str] = {}
         for slot_info in state.get("slots") or []:

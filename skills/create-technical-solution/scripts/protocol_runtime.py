@@ -16,6 +16,24 @@ RUN_STEP_SCRIPT = Path(__file__).resolve().parent / "run-step.py"
 VALIDATE_STATE_SCRIPT = Path(__file__).resolve().parent / "validate-state.py"
 SOLUTION_ROOT = Path(".architecture/technical-solutions")
 STATE_ROOT = Path(".architecture/.state/create-technical-solution")
+DEFAULT_TEMPLATE_PATH = Path(".architecture/templates/technical-solution-template.md")
+DEFAULT_MEMBERS_PATH = Path(".architecture/members.yml")
+DEFAULT_PRINCIPLES_PATH = Path(".architecture/principles.md")
+
+CANONICAL_STEP_DEFS: dict[int, dict[str, Any]] = {
+    1: {"mode": "business", "artifact": None},
+    2: {"mode": "automatic", "artifact": None},
+    3: {"mode": "automatic", "artifact": None},
+    4: {"mode": "business", "artifact": None},
+    5: {"mode": "business", "artifact": None},
+    6: {"mode": "automatic", "artifact": None},
+    7: {"mode": "creative", "artifact": "WD-CTX"},
+    8: {"mode": "creative", "artifact": "WD-TASK"},
+    9: {"mode": "creative", "artifact": "WD-EXP-SLOT-*"},
+    10: {"mode": "creative", "artifact": "WD-SYN-SLOT-*"},
+    11: {"mode": "automatic", "artifact": None},
+    12: {"mode": "automatic", "artifact": None},
+}
 
 
 def iso_now() -> str:
@@ -195,6 +213,42 @@ def final_document_relative_path(slug: str) -> Path:
     return SOLUTION_ROOT / f"{slug}.md"
 
 
+def canonical_state_paths_for_slug(slug: str) -> dict[str, str]:
+    return {
+        "solution_root": str(SOLUTION_ROOT),
+        "members_path": str(DEFAULT_MEMBERS_PATH),
+        "principles_path": str(DEFAULT_PRINCIPLES_PATH),
+        "template_path": str(DEFAULT_TEMPLATE_PATH),
+        "working_draft_path": str(working_draft_relative_path(slug)),
+        "final_document_path": str(final_document_relative_path(slug)),
+    }
+
+
+def canonical_repo_paths_for_slug(*, repo_root: Path, slug: str) -> dict[str, Path]:
+    relative_paths = canonical_state_paths_for_slug(slug)
+    resolved: dict[str, Path] = {}
+    for key, value in relative_paths.items():
+        path = resolve_repo_path(repo_root, value)
+        if path is None:
+            raise SystemExit(f"无法解析 canonical 路径: {key}={value}")
+        resolved[key] = path
+    return resolved
+
+
+def build_canonical_state_payload(*, state_path: Path, slug: str | None = None) -> dict[str, Any]:
+    resolved_slug = (slug or state_path.stem or "solution").strip() or "solution"
+    payload = {
+        "slug": resolved_slug,
+        "current_step": 1,
+    }
+    payload.update(canonical_state_paths_for_slug(resolved_slug))
+    return payload
+
+
+def canonical_step_defs() -> dict[int, dict[str, Any]]:
+    return {step: dict(defn) for step, defn in CANONICAL_STEP_DEFS.items()}
+
+
 def working_draft_path_for_slug(*, repo_root: Path, slug: str) -> Path:
     return (repo_root / working_draft_relative_path(slug)).resolve()
 
@@ -268,7 +322,9 @@ def render_run_step_command(
             return [advance_line]
         return [
             f'{base} --complete --ticket <ticket> --summary "<WD-CTX 完成>" <<\'HEREDOC\'',
-            "<WD-CTX 内容>",
+            '[',
+            '  {"id": "CTX-01", "source": "src/module.py", "conclusion": "复用现有入口", "applicable_slots": ["1.1 需求概述"], "confidence": "已验证"}',
+            ']',
             "HEREDOC",
         ]
     if step == 8:
@@ -276,51 +332,47 @@ def render_run_step_command(
             return [advance_line]
         return [
             f'{base} --complete --ticket <ticket> --summary "<WD-TASK 完成>" <<\'HEREDOC\'',
-            "<WD-TASK 内容>",
+            '[',
+            '  {"slot": "1.1 需求概述", "required_ctx": ["CTX-01"]}',
+            ']',
             "HEREDOC",
         ]
     if step == 9:
         if not has_current_ticket:
             return [advance_line]
-        slot_ids: list[str] = []
-        if isinstance(state, dict):
-            for s in state.get("slots") or []:
-                sid = s.get("slot", "")
-                if sid:
-                    slot_ids.append(sid)
-        if not slot_ids:
-            slot_ids = ["SLOT-01"]
-        block_lines = []
-        for sid in slot_ids:
-            block_lines.append(f"---BLOCK:WD-EXP-{sid}")
-            block_lines.append("")
-            block_lines.append("<专家分析内容>")
-            block_lines.append("")
         return [
             f'{base} --complete --ticket <ticket> --summary "<专家分析完成>" <<\'HEREDOC\'',
-            *block_lines,
+            '[',
+            '  {',
+            '    "slot": "2.1 方案设计",',
+            '    "decision_type": "改造",',
+            '    "rationale": "复用现有骨架并补齐专家分析。",',
+            '    "evidence_refs": ["CTX-01"],',
+            '    "open_questions": ["无"]',
+            '  }',
+            ']',
             "HEREDOC",
         ]
     if step == 10:
         if not has_current_ticket:
             return [advance_line]
-        slot_ids_syn: list[str] = []
-        if isinstance(state, dict):
-            for s in state.get("slots") or []:
-                sid = s.get("slot", "")
-                if sid:
-                    slot_ids_syn.append(sid)
-        if not slot_ids_syn:
-            slot_ids_syn = ["SLOT-01"]
-        syn_lines = []
-        for sid in slot_ids_syn:
-            syn_lines.append(f"---BLOCK:WD-SYN-{sid}")
-            syn_lines.append("")
-            syn_lines.append("<收敛内容>")
-            syn_lines.append("")
         return [
             f'{base} --complete --ticket <ticket> --summary "<收敛完成>" <<\'HEREDOC\'',
-            *syn_lines,
+            '[',
+            '  {',
+            '    "slot": "2.1 方案设计",',
+            '    "target_capability": "收敛 2.1 方案设计 的最终写法。",',
+            '    "comparisons": [',
+            '      {"path": "复用", "feasibility": "❌", "evidence": "CTX-01", "reason": "不足"},',
+            '      {"path": "改造", "feasibility": "✅", "evidence": "CTX-01", "reason": "推荐"}',
+            '    ],',
+            '    "selected_path": "改造",',
+            '    "selected_writeup": "在 2.1 方案设计 位置补齐内容。",',
+            '    "evidence_refs": ["CTX-01"],',
+            '    "template_gap": "无",',
+            '    "open_question": "无"',
+            '  }',
+            ']',
             "HEREDOC",
         ]
     if step in {11, 12}:

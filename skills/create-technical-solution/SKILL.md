@@ -70,12 +70,10 @@ compatibility:
 | 空状态 / 步骤 1 entry | `python /path/to/run-step.py --state <状态文件> --advance` |
 | 业务决策步骤 entry（1、4、5） | `python /path/to/run-step.py --state <状态文件> --advance` |
 | 创作步骤 entry（7、8、9、10） | `python /path/to/run-step.py --state <状态文件> --advance` |
-| 业务/创作步骤提交正文 | `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> --summary "..." <<'HEREDOC' ... HEREDOC` |
-
-低层 flags（`--mark-step-card-read`、`--prepare`）保留给脚本内部、测试和调试；不再作为主流程文档入口。
+| 业务/创作步骤提交正文 | `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> --summary "..." <<'HEREDOC' <JSON payload> HEREDOC` |
 
 ## 状态文件初始化
-只能通过 `run-step.py --advance` 进入空状态初始化与步骤 1。它会在 state 缺失时自动创建最小 state、返回步骤 1 的业务输入 contract，并在提交步骤 1 正文后写入 checkpoint 与路径；不得再手工 `cp templates/_template.yaml` 后补 YAML，也不得把空状态初始化理解成公开的 `--prepare` 流程。
+只能通过 `run-step.py --advance` 进入空状态初始化与步骤 1。它会在 state 缺失时自动创建最小 state、返回步骤 1 的业务输入 contract，并在提交步骤 1 正文后写入 checkpoint 与路径；不得再手工 `cp templates/_template.yaml` 后补 YAML，也不得把空状态初始化理解成第二条公开流程。
 
 ## 运行入口与内部脚本
 - `python /path/to/run-step.py --state <状态文件> [--advance | --complete --ticket <ticket> --summary "..." ...]`
@@ -83,15 +81,14 @@ compatibility:
 - `python /path/to/run-step.py --state <状态文件> --emit-scaffold`
   - 同一入口下的只读辅助模式；仅输出 scaffold 到 `stdout`，不是第二条写入路径，也不会替代 `--complete`
   - `--emit-scaffold 与 --complete 不能同时使用`
-- `python /path/to/runtime_doctor.py --state <状态文件> [--step N] [--apply-safe-fixes]`
-  - 运行时 repair helper，不是主执行路径；默认 `dry-run`，只有 `--apply-safe-fixes` 才允许做结构性安全修复（规范目录、旧 draft 路径/状态迁移、语义安全的 receipt 修复）
 - 其他脚本（如 `initialize-state.py`、`extract-template-snapshot.py`、`upsert-draft-block.py`、`advance-state-step.py`、`render-final-document.py`、`finalize-cleanup.py`）
   - 仅保留给 `run-step.py`、测试与内部兼容流程使用；不再作为用户公开操作入口
-- 创作型步骤通过 stdin/heredoc 传入内容
-  - Step 7/8: 整体 stdin 作为单个 block body
-  - Step 9: 按 `---BLOCK:WD-EXP-SLOT-XX` 标记分隔多个槽位的专家分析
-  - Step 10: 按 `---BLOCK:WD-SYN-SLOT-XX` 标记分隔多个槽位的收敛结果
-  - 不得在 block body 中包含 `## WD-*` 或 draft 容器标题
+- 创作型步骤（7、8、9、10）统一通过 stdin/heredoc 提交结构化 JSON payload
+- Step 7: CTX entry 数组
+- Step 8: slot task 数组
+- Step 9: slot analysis 数组
+- Step 10: slot synthesis 数组
+- Markdown 只允许由脚本渲染到 working draft；模型不得手写 WD block 正文
 
 ## 状态更新规则
 - 每步完成后写入 `checkpoints.step-N` 并追加 `completed_steps`
@@ -109,7 +106,7 @@ compatibility:
 - **所有写状态动作都要求 receipt**：`run-step.py` 在进入当前步骤前必须先完成 validator 门禁并刷新 receipt；不得绕过该流程直接写 state、draft、final document 或 cleanup 结果
 - **receipt 必须跟随 current_step 原子刷新**：任何 mutating script 成功后都必须把 `gate_receipt.step` 刷新到最新 `current_step`；若 `receipt.step` 落后于 `current_step`，视为非法状态，必须停下修复，不能继续写 draft、render 或 cleanup
 - **working draft 只能文件级写入**：step 7/8/9/10 只能通过 `run-step.py` 的受控写入路径更新对应文件，禁止整份覆盖 draft 目录
-- **block body 不得带块级标题**：通过 stdin 传入的内容只允许是区块体内容；如果包含 `## WD-*` 或 draft 容器标题，视为无效输入
+- **创作步骤不得提交 Markdown 正文**：通过 stdin 传入的只能是结构化 JSON payload；如果直接提交 `## WD-*`、draft 容器标题或手写区块正文，视为无效输入
 - **state 中路径必须相对化**：`solution_root` 固定为 `.architecture/technical-solutions`，`working_draft_path` 固定为 `.architecture/.state/create-technical-solution/[slug]`（目录）；不得把绝对路径写回 state
 - **最终文档目录固定**：`final_document_path` 只能位于 `.architecture/technical-solutions/`，不得写入 `docs/`、项目根目录或其他自定义目录
 - **目录策略固定为双读单写**：可以读取历史 `.architecture/solutions/`，但本次流程的新 working draft 统一写入 `.architecture/.state/create-technical-solution/`，最终文档统一写入 `.architecture/technical-solutions/`

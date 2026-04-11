@@ -8,12 +8,74 @@
 - `solution_root` 固定采用双读单写策略：兼容读取历史 `.architecture/solutions/`，但新 working draft 统一写入 `.architecture/.state/create-technical-solution/[slug]/`，最终文档统一写入 `.architecture/technical-solutions/`。
 - `meta.yaml` 只保留流程控制字段、路径字段、gate flags、最小 checkpoint 与 cleanup 状态；不得承载正文。
 - `checkpoints.step-N.summary` 只能写单行流程摘要，不得复述 CTX、专家分析、收敛结论或详细设计正文。
+- step 7/8/9/10 的 canonical 输入格式是 **结构化 JSON payload**，Markdown 只作为脚本渲染产物落到 working draft。
 
 - **共享上下文（WD-CTX）**：默认只保留 `上下文编号`、`来源`、`结论或约束`、`适用槽位`、`可信度或缺口`（必填）；仅当涉及新增、拆分、迁移、平行建设或职责转移时，才补充 `资产类型`、`资产标识`、`位置`、`当前职责`、`当前能力`、`可扩展点`、`已知限制`、`调用方/依赖方`、`相关证据路径`；若结论为"未发现候选"，还必须补 `搜索范围`、`搜索关键词`、`已排除目录或对象`、`未发现结论`
 - **模板任务单（WD-TASK）**：只保留 `槽位标识`、`必须消费的共享上下文`、`参与专家`、`每位专家必答问题`、`建议落位槽位`、`落位表达要求`、`缺口或阻塞项`（必填）；不重复抄写 CTX 事实详情，统一通过 CTX 编号引用
 - **专家分析（WD-EXP-SLOT-*）**：默认只保留 `参与槽位`、`决策类型`、`核心理由`、`关键证据引用`、`未决点`（必填）；每个槽位文件内再按专家小节展开；仅 `新建` 时强制补充不可复用 / 不可改造证据说明
 - **协作收敛（WD-SYN-SLOT-*）**：
   `目标能力`、`候选方案对比`、`选定路径`、`选定写法`、`关键证据引用`、`建议落位槽位`、`模板承载缺口`、`未决问题`
+
+## 结构化提交示例
+
+### Step 7: WD-CTX payload
+
+```json
+[
+  {
+    "id": "CTX-01",
+    "source": "services/a.py, models/a.py",
+    "conclusion": "需求概述沿用现有入口。",
+    "applicable_slots": ["1.1 需求概述", "1.2 核心目标"],
+    "confidence": "已验证"
+  }
+]
+```
+
+### Step 8: WD-TASK payload
+
+```json
+[
+  {
+    "slot": "1.1 需求概述",
+    "required_ctx": ["CTX-01"]
+  }
+]
+```
+
+### Step 9: WD-EXP-SLOT-* payload
+
+```json
+[
+  {
+    "slot": "2.1 方案设计",
+    "decision_type": "改造",
+    "rationale": "复用现有骨架并补齐专家分析。",
+    "evidence_refs": ["CTX-01"],
+    "open_questions": ["无"]
+  }
+]
+```
+
+### Step 10: WD-SYN-SLOT-* payload
+
+```json
+[
+  {
+    "slot": "2.1 方案设计",
+    "target_capability": "收敛 2.1 方案设计 的最终写法。",
+    "comparisons": [
+      {"path": "复用", "feasibility": "❌", "evidence": "CTX-01", "reason": "不足"},
+      {"path": "改造", "feasibility": "✅", "evidence": "CTX-01", "reason": "推荐"}
+    ],
+    "selected_path": "改造",
+    "selected_writeup": "在 2.1 方案设计 位置补齐内容。",
+    "evidence_refs": ["CTX-01"],
+    "template_gap": "无",
+    "open_question": "无"
+  }
+]
+```
 ## WD-SYN-SLOT-* 示例
 
 ### 示例1：数据方案收敛
@@ -99,34 +161,7 @@ python /path/to/run-step.py --state <状态文件路径> --complete --ticket <ti
 
 此时的 `ticket` 来自前一次 `--advance` 返回或写入的 `pending_ticket`。若发 ticket 后 state、working draft、final document 或提交 block 范围发生变化，旧 ticket 会失效，必须重新执行 `--advance`。
 
-`--prepare`、`--mark-step-card-read` 属于低层接口，仅保留给测试、内部调试和兼容路径，不再作为主流程说明。
-
-若需要调试或测试内部 validator，可直接运行 `validate-state.py --format json`，但这属于内部诊断接口，不是公开执行入口。
-
-### validate-state.py JSON contract（当前实现）
-
-- **失败 payload** 顶层键：`step`、`passed`、`summary`、`repair_plan`、`issues`
-- **通过 payload** 顶层键：`step`、`passed`、`summary`
-- 仅当传入 `--write-pass-receipt` 时，通过 payload 才会额外包含 `gate_receipt`
-
-`summary`（由 `build_summary(...)` 生成）当前包含：
-- `summary.error_count`
-- `summary.recommended_rollback_step`
-- `summary.recommended_repair_sequence`
-- `summary.missing_artifacts`
-- `summary.skip_instead_of_retry`
-
-`repair_plan`（由 `build_repair_plan(...)` 生成）当前每项字段：
-- `repair_plan[].step`
-- `repair_plan[].action_type`
-- `repair_plan[].script_command`
-- `repair_plan[].depends_on_steps`
-- `repair_plan[].expected_artifacts_after_fix`
-- `repair_plan[].revalidate_step`
-
-`issues[*]` 继续沿用 `make_issue(...)` 产出的标准字段，并包含 `issues[*].repair_guidance`。
-
-Agent 收到失败 JSON 后，优先消费 `repair_plan[]` 与 `summary.recommended_repair_sequence`，再结合 `summary.recommended_rollback_step`、`summary.missing_artifacts`、`summary.skip_instead_of_retry` 与 `issues[*].repair_guidance` 做修复。
+失败后继续使用 `python /path/to/run-step.py --state <状态文件路径>` 或 `--advance`。对外只消费 `run-step.py` 返回的恢复动作，不直接调用 validator 或其他内部脚本。
 
 ### run-step.py --emit-scaffold
 
@@ -136,23 +171,5 @@ Agent 收到失败 JSON 后，优先消费 `repair_plan[]` 与 `summary.recommen
 - 不修改 state
 - 不修改 working draft
 - 不修改 receipt
-- `--emit-scaffold 与 --complete 不能同时使用`；同理也不能与 `--advance` 或 `--prepare` 同时使用
+- `--emit-scaffold 与 --complete 不能同时使用`；同理也不能与 `--advance` 同时使用
 - scaffold 步骤选择遵循当前 auto-skip 语义（`light` 的 8/9/10、`moderate` 的 9/10 会映射到 step-10 scaffold）
-
-### runtime_doctor.py（运行时修复助手）
-
-- `runtime_doctor.py` 是运行时 repair helper，不是主执行路径；主路径仍是 `run-step.py`
-- 默认 `dry-run`，仅诊断和给出 `safe_fixes` 计划
-- 只有显式传 `--apply-safe-fixes` 才会修改文件
-- safe fixes 仅限结构性修复：规范目录创建、旧 working draft 路径/状态迁移、以及仅在语义安全时的 receipt 修复
-
-`runtime_doctor.py --format json` 当前 payload 顶层键：
-- `step`
-- `apply_safe_fixes`
-- `passed`
-- `summary`
-- `issues`
-- `repair_plan`
-- `safe_fixes`
-- `state_path`
-- `mutated`
