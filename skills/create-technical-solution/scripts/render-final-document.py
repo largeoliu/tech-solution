@@ -103,7 +103,7 @@ def render_from_draft(state_path: Path) -> str:
         slot_id = slot_info.get("slot", "")
         title = slot_info.get("title", "")
         syn_path = draft_path / "slots" / slot_id / "synthesis.md"
-        if syn_path.exists() and syn_path.stat().st_size > 0:
+        if syn_path.exists():
             sections[title] = strip_slot_heading(
                 syn_path.read_text(encoding="utf-8"),
                 title,
@@ -174,7 +174,7 @@ def render_final_document(
             slot_id = slot_info.get("slot", "")
             title = slot_info.get("title", "")
             syn_path = draft_path / "slots" / slot_id / "synthesis.md"
-            if title and syn_path.exists() and syn_path.stat().st_size > 0:
+            if title and syn_path.exists():
                 slot_blocks[title] = syn_path.read_text(encoding="utf-8")
         repeated_groups = repeated_slot_groups(slot_blocks)
         if repeated_groups:
