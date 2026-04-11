@@ -23,20 +23,20 @@ from protocol_runtime import dump_yaml, load_yaml, refresh_receipt, repo_root_fr
 def sync_artifacts(working_dir: Path, slots: list[dict[str, Any]]) -> list[str]:
     artifacts: list[str] = []
     ctx_path = working_dir / "ctx.md"
-    if ctx_path.exists() and ctx_path.stat().st_size > 0:
+    if ctx_path.exists():
         artifacts.append("WD-CTX")
     task_path = working_dir / "task.md"
-    if task_path.exists() and task_path.stat().st_size > 0:
+    if task_path.exists():
         artifacts.append("WD-TASK")
     for slot_info in slots:
         slot_id = slot_info.get("slot", "")
         if not slot_id:
             continue
         exp_path = working_dir / "slots" / slot_id / "experts.md"
-        if exp_path.exists() and exp_path.stat().st_size > 0:
+        if exp_path.exists():
             artifacts.append(f"WD-EXP-{slot_id}")
         syn_path = working_dir / "slots" / slot_id / "synthesis.md"
-        if syn_path.exists() and syn_path.stat().st_size > 0:
+        if syn_path.exists():
             artifacts.append(f"WD-SYN-{slot_id}")
     return artifacts
 
