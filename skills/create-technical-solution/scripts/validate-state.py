@@ -24,10 +24,12 @@ if str(SCRIPTS_DIR) not in sys.path:
 from protocol_runtime import compute_state_fingerprint, dump_yaml as dump_state, iso_now, load_yaml as load_state
 from protocol_runtime import (
     SOLUTION_ROOT,
+    repo_root_from_state_path,
     final_document_relative_path,
     render_repair_command,
     working_draft_relative_path,
 )
+from quality_checks import placeholder_hits, repeated_slot_groups
 from wd_syn_contract import missing_slot_fragments as missing_wd_syn_slot_fragments
 from wd_syn_contract import target_capability_present
 
@@ -40,6 +42,8 @@ ALLOWED_TOP_LEVEL_FIELDS = {
     "required_artifacts",
     "produced_artifacts",
     "pending_questions",
+    "step_cards_read",
+    "artifact_registry",
     "gate_receipt",
     "pending_ticket",
     "solution_root",
@@ -98,6 +102,9 @@ VALID_STEP4_SIGNALS = {
     "low-compat-risk",
 }
 
+CTX_HEADING_PATTERN = re.compile(r"^\s*###\s+(CTX-\d+)\s*$", re.MULTILINE)
+CTX_REQUIRED_FIELDS = ("来源:", "结论或约束:", "适用槽位:", "可信度或缺口:")
+
 
 def extract_named_block(markdown: str, heading: str) -> str:
     pattern = re.compile(rf"^\s*##\s+{re.escape(heading)}\s*$", re.MULTILINE)
@@ -136,6 +143,10 @@ def extract_syn_slot_block(block: str, title: str) -> str:
 
 def normalize_text(value: str) -> str:
     return " ".join(str(value).replace("\xa0", " ").split())
+
+
+def file_content_hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def extract_slot_headings(markdown: str, slot_level: Optional[int] = None) -> list[dict[str, Any]]:
@@ -178,6 +189,17 @@ def read_markdown(path: Path) -> str:
         return ""
 
 
+def extract_ctx_entries(markdown: str) -> list[dict[str, Any]]:
+    matches = list(CTX_HEADING_PATTERN.finditer(markdown))
+    entries: list[dict[str, Any]] = []
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(markdown)
+        body = markdown[start:end].strip()
+        entries.append({"ctx_id": match.group(1), "body": body})
+    return entries
+
+
 def resolve_path(value: Any, base: Path) -> Optional[Path]:
     if not value or not str(value).strip():
         return None
@@ -185,6 +207,14 @@ def resolve_path(value: Any, base: Path) -> Optional[Path]:
     if path.is_absolute():
         return path
     return (base / path).resolve()
+
+
+def extract_ctx_ids(text: str) -> list[str]:
+    return re.findall(r"^###\s+(CTX-\d+)\s*$", text, flags=re.MULTILINE)
+
+
+def extract_task_ctx_refs(text: str) -> list[str]:
+    return re.findall(r"CTX-\d+", text)
 
 
 def parse_iso_datetime(value: Any) -> Optional[datetime]:
@@ -210,6 +240,10 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
         return "删除 state 中的正文型或冗余字段，仅保留最小流程控制字段后重试。"
     if code == "verbose_summary":
         return "将 checkpoints.step-N.summary 改为单行短摘要，只写流程结果、区块数量和 gate 状态。"
+    if code == "summary_too_long":
+        return "压缩 checkpoints.step-N.summary，只保留单行结果、数量和 gate，不要展开细节。"
+    if code == "summary_contains_forbidden_content":
+        return "summary 里不要写 CTX 编号、WD-EXP、Markdown 标题、表格或正文内容，只保留流程摘要。"
     if code == "missing_step1_scope":
         return "回到步骤 1，通过 run-step.py 重新完成定题并写入 slug 与最终文档路径。"
     if code == "missing_artifact":
@@ -220,8 +254,12 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
     if code == "missing_working_draft_block":
         artifact = issue.get("missing_artifacts", ["未知产物"])[0]
         return f"将 {artifact} 真正写入 working draft，对应正文不得只留在 state 摘要中。"
+    if code == "state_slots_out_of_sync":
+        return "不要手改 state.slots 或槽位计数，回到步骤 3 重新同步模板快照，再从步骤 8/9/10 重建对应 working draft。"
     if code == "task_slots_incomplete":
         return "回到步骤 8，按当前模板真实槽位补齐 WD-TASK。"
+    if code == "task_ctx_reference_invalid":
+        return "回到步骤 8，修正 WD-TASK 中绑定的 CTX 编号，确保只引用 WD-CTX 里真实存在的 CTX-XX。"
     if code == "step_skipped_without_checkpoint":
         return "回到对应步骤流，通过 run-step.py 让跳步记录按协议自动落盘。"
     if code == "repowiki_not_consumed":
@@ -234,6 +272,16 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
         return "回到步骤 11，按当前模板顺序重生成最终文档。"
     if code == "step_order_violation":
         return "回到步骤 10，先把 WD-SYN-SLOT-* 落盘，再进入步骤 11。"
+    if code == "artifact_registry_mismatch":
+        return "草稿文件被流程外改写；回到对应步骤通过 run-step.py 重新写入并刷新登记。"
+    if code == "wd_ctx_structure_invalid":
+        return "回到步骤 7，把 WD-CTX 改成按 `### CTX-XX` 递增编号的结构化条目，并补齐来源、结论或约束、适用槽位、可信度或缺口。"
+    if code == "wd_ctx_count_mismatch":
+        return "回到步骤 7，通过 run-step.py 重写 WD-CTX，并让 checkpoints.step-7.ctx_count 与实际 CTX 条目数保持一致且大于 0。"
+    if code == "placeholder_content_detected":
+        return "删除占位语句或模板残留，改成真实技术结论、真实地址/资料和可执行写法后重试。"
+    if code == "wd_syn_slots_too_similar":
+        return "回到步骤 10，按槽位重做差异化收敛，避免把同一套 boilerplate 复制到多个槽位。"
     if code == "cleanup_attempt_before_validation":
         return "步骤 12 必须先通过门禁，再通过 run-step.py 完成清理步骤。"
     return "修复对应状态字段或草稿区块后重试。"
@@ -361,16 +409,16 @@ def build_repair_plan(
     return [plan[key] for key in sorted(plan)]
 
 
+def working_draft_repair_step(step_num: int) -> int:
+    return 3 if step_num < 7 else 7
+
+
 class GateValidator:
     def __init__(self, state: dict[str, Any], state_path: Optional[Path] = None):
         self.state = state
         self.state_path = state_path or Path("state.yaml")
         self.state_dir = self.state_path.parent.resolve()
-        resolved = self.state_path.resolve()
-        if resolved.name == "meta.yaml":
-            self.repo_root = resolved.parents[4]
-        else:
-            self.repo_root = resolved.parents[3] if len(resolved.parents) >= 4 else self.state_dir.parent
+        self.repo_root = repo_root_from_state_path(self.state_path)
         self.arch_root = self.repo_root / ".architecture" if (self.repo_root / ".architecture").exists() else self.repo_root
 
     def checkpoint(self, step_num: int, errors: list[dict[str, Any]]) -> dict[str, Any]:
@@ -544,16 +592,103 @@ class GateValidator:
         )
         if not summary.strip():
             return
-        if len(summary) > SUMMARY_MAX_LEN or any(pattern.search(summary) for pattern in SUMMARY_FORBIDDEN_PATTERNS):
+        if len(summary) > SUMMARY_MAX_LEN:
             add_issue(
                 errors,
                 make_issue(
-                    code="verbose_summary",
-                    message=f"步骤 {step_num}: summary 必须为单行流程摘要，不得承载正文",
+                    code="summary_too_long",
+                    message=f"步骤 {step_num}: summary 长度超限，必须压缩为单行流程摘要",
                     step=step_num,
                                         field=f"checkpoints.step-{step_num}.summary",
                     recommended_rollback_step=step_num,
                     recommended_repair_step=step_num,
+                    details={"max_length": SUMMARY_MAX_LEN, "actual_length": len(summary)},
+                ),
+            )
+        forbidden_hits = [pattern.pattern for pattern in SUMMARY_FORBIDDEN_PATTERNS if pattern.search(summary)]
+        if forbidden_hits:
+            add_issue(
+                errors,
+                make_issue(
+                    code="summary_contains_forbidden_content",
+                    message=f"步骤 {step_num}: summary 必须为单行流程摘要，不得包含正文或 Markdown 结构",
+                    step=step_num,
+                                        field=f"checkpoints.step-{step_num}.summary",
+                    recommended_rollback_step=step_num,
+                    recommended_repair_step=step_num,
+                    details={"forbidden_patterns": forbidden_hits},
+                ),
+            )
+
+    def check_wd_ctx_contract(self, errors: list[dict[str, Any]], step_num: int) -> None:
+        draft_path = self.working_draft_path()
+        if not draft_path or not draft_path.is_dir():
+            return
+        ctx_path = draft_path / "ctx.md"
+        if not ctx_path.exists() or ctx_path.stat().st_size == 0:
+            return
+        content = read_markdown(ctx_path)
+        entries = extract_ctx_entries(content)
+        checkpoint = self.checkpoint(7, errors)
+        expected_count = checkpoint.get("ctx_count")
+        if not entries:
+            add_issue(
+                errors,
+                make_issue(
+                    code="wd_ctx_structure_invalid",
+                    message=f"步骤 {step_num}: WD-CTX 必须按 `### CTX-XX` 输出结构化条目",
+                    step=step_num,
+                    field="working_draft_path",
+                    missing_artifacts=["WD-CTX"],
+                    recommended_rollback_step=7,
+                    recommended_repair_step=7,
+                ),
+            )
+            return
+        expected_ids = [f"CTX-{index:02d}" for index in range(1, len(entries) + 1)]
+        actual_ids = [entry["ctx_id"] for entry in entries]
+        if actual_ids != expected_ids:
+            add_issue(
+                errors,
+                make_issue(
+                    code="wd_ctx_structure_invalid",
+                    message=f"步骤 {step_num}: WD-CTX 编号必须从 CTX-01 连续递增",
+                    step=step_num,
+                    field="working_draft_path",
+                    missing_artifacts=["WD-CTX"],
+                    recommended_rollback_step=7,
+                    recommended_repair_step=7,
+                    details={"expected_ctx_ids": expected_ids, "actual_ctx_ids": actual_ids},
+                ),
+            )
+        for entry in entries:
+            missing_fields = [field for field in CTX_REQUIRED_FIELDS if field not in entry["body"]]
+            if missing_fields:
+                add_issue(
+                    errors,
+                    make_issue(
+                        code="wd_ctx_structure_invalid",
+                        message=f"步骤 {step_num}: {entry['ctx_id']} 缺少必填字段",
+                        step=step_num,
+                        field="working_draft_path",
+                        missing_artifacts=["WD-CTX"],
+                        recommended_rollback_step=7,
+                        recommended_repair_step=7,
+                        details={"ctx_id": entry["ctx_id"], "missing_fields": missing_fields},
+                    ),
+                )
+        if not isinstance(expected_count, int) or expected_count <= 0 or expected_count != len(entries):
+            add_issue(
+                errors,
+                make_issue(
+                    code="wd_ctx_count_mismatch",
+                    message=f"步骤 {step_num}: checkpoints.step-7.ctx_count 必须与实际 CTX 条目数一致",
+                    step=step_num,
+                    field="checkpoints.step-7.ctx_count",
+                    missing_artifacts=["WD-CTX"],
+                    recommended_rollback_step=7,
+                    recommended_repair_step=7,
+                    details={"expected_ctx_count": expected_count, "actual_ctx_count": len(entries)},
                 ),
             )
 
@@ -751,8 +886,34 @@ class GateValidator:
                 recommended_repair_step=3,
             )
 
+    def check_state_slots_contract(self, errors: list[dict[str, Any]], step_num: int) -> None:
+        template_slots = self.template_headings()
+        if not template_slots:
+            return
+        state_slots = self.state.get("slots") or []
+        current_headings = [normalize_text(item.get("title", "")) for item in template_slots if normalize_text(item.get("title", ""))]
+        state_titles = [normalize_text(item.get("title", "")) for item in state_slots if normalize_text(item.get("title", ""))]
+        if state_titles == current_headings:
+            return
+        add_issue(
+            errors,
+            make_issue(
+                code="state_slots_out_of_sync",
+                message=f"步骤 {step_num}: state.slots 与当前模板槽位不一致",
+                step=step_num,
+                field="slots",
+                recommended_rollback_step=3,
+                recommended_repair_step=3,
+                details={
+                    "expected_titles": current_headings,
+                    "actual_titles": state_titles,
+                },
+            ),
+        )
+
     def check_working_draft_block(self, artifact: str, errors: list[dict[str, Any]], step_num: int) -> None:
         draft_path = self.working_draft_path()
+        repair_step = working_draft_repair_step(step_num)
         require(
             draft_path is not None and draft_path.is_dir(),
             errors,
@@ -760,8 +921,8 @@ class GateValidator:
             message=f"步骤 {step_num}: working draft 目录不存在",
             step=step_num,
                         field="working_draft_path",
-            recommended_rollback_step=3,
-            recommended_repair_step=3,
+            recommended_rollback_step=repair_step,
+            recommended_repair_step=repair_step,
         )
         if not draft_path or not draft_path.is_dir():
             return
@@ -861,6 +1022,43 @@ class GateValidator:
                 ),
             )
 
+    def check_artifact_registry(self, artifact: str, errors: list[dict[str, Any]], step_num: int) -> None:
+        registry = self.state.get("artifact_registry")
+        if not isinstance(registry, dict):
+            return
+        entry = registry.get(artifact)
+        if not isinstance(entry, dict):
+            return
+        draft_path = self.working_draft_path()
+        if not draft_path or not draft_path.is_dir():
+            return
+        target_file = self._resolve_artifact_file(draft_path, artifact)
+        if target_file is None or not target_file.exists() or target_file.stat().st_size == 0:
+            return
+        expected_path = str(entry.get("path") or "").strip()
+        expected_hash = str(entry.get("content_hash") or "").strip()
+        actual_relative = target_file.relative_to(self.repo_root).as_posix()
+        actual_hash = file_content_hash(target_file)
+        if expected_path != actual_relative or expected_hash != actual_hash:
+            add_issue(
+                errors,
+                make_issue(
+                    code="artifact_registry_mismatch",
+                    message=f"步骤 {step_num}: {artifact} 与 artifact_registry 记录不一致，疑似流程外改写",
+                    step=step_num,
+                    field="artifact_registry",
+                    missing_artifacts=[artifact],
+                    recommended_rollback_step=ARTIFACT_REPAIR_STEP.get(artifact, step_num),
+                    recommended_repair_step=ARTIFACT_REPAIR_STEP.get(artifact, step_num),
+                    details={
+                        "expected_path": expected_path,
+                        "actual_path": actual_relative,
+                        "expected_hash": expected_hash,
+                        "actual_hash": actual_hash,
+                    },
+                ),
+            )
+
     def check_task_slots_cover_template(self, errors: list[dict[str, Any]], step_num: int) -> None:
         draft_path = self.working_draft_path()
         if not draft_path or not draft_path.is_dir():
@@ -896,6 +1094,25 @@ class GateValidator:
                     recommended_rollback_step=8,
                     recommended_repair_step=8,
                     details={"expected_slots": headings, "actual_slots": actual_headings},
+                ),
+            )
+        ctx_path = draft_path / "ctx.md"
+        if not ctx_path.exists() or ctx_path.stat().st_size == 0:
+            return
+        valid_ctx_ids = set(extract_ctx_ids(read_markdown(ctx_path)))
+        referenced_ctx_ids = set(extract_task_ctx_refs(content))
+        invalid_ctx_ids = sorted(referenced_ctx_ids - valid_ctx_ids)
+        if invalid_ctx_ids:
+            add_issue(
+                errors,
+                make_issue(
+                    code="task_ctx_reference_invalid",
+                    message=f"步骤 {step_num}: WD-TASK 引用了 WD-CTX 中不存在的上下文编号",
+                    step=step_num,
+                    field="working_draft_path",
+                    recommended_rollback_step=8,
+                    recommended_repair_step=8,
+                    details={"invalid_ctx_ids": invalid_ctx_ids, "valid_ctx_ids": sorted(valid_ctx_ids)},
                 ),
             )
 
@@ -949,6 +1166,8 @@ class GateValidator:
         slot_title_map = {s.get("slot", ""): s.get("title", "") for s in state_slots}
         actual_titles: list[str] = []
         missing: list[str] = []
+        placeholder_findings: list[dict[str, Any]] = []
+        slot_blocks: dict[str, str] = {}
         for slot_info in state_slots:
             slot_id = slot_info.get("slot", "")
             slot_title = slot_info.get("title", "")
@@ -957,12 +1176,16 @@ class GateValidator:
                 continue
             actual_titles.append(slot_title)
             slot_content = read_markdown(syn_path)
+            slot_blocks[slot_title] = slot_content
             if not target_capability_present(slot_content):
                 if "#### 目标能力" not in missing:
                     missing.append("#### 目标能力")
             for fragment in missing_wd_syn_slot_fragments(slot_content, slot_title):
                 if fragment not in missing:
                     missing.append(fragment)
+            hits = placeholder_hits(slot_content)
+            if hits:
+                placeholder_findings.append({"slot": slot_title, "hits": hits})
         if actual_titles != template_titles:
             add_issue(
                 errors,
@@ -989,6 +1212,35 @@ class GateValidator:
                     recommended_rollback_step=10,
                     recommended_repair_step=10,
                     details={"missing_fragments": missing},
+                ),
+            )
+        if placeholder_findings:
+            add_issue(
+                errors,
+                make_issue(
+                    code="placeholder_content_detected",
+                    message=f"步骤 {step_num}: WD-SYN-SLOT-* 含占位内容，不能进入成稿",
+                    step=step_num,
+                    field="working_draft_path",
+                    missing_artifacts=["WD-SYN-SLOT-*"],
+                    recommended_rollback_step=10,
+                    recommended_repair_step=10,
+                    details={"placeholder_findings": placeholder_findings},
+                ),
+            )
+        repeated_groups = repeated_slot_groups(slot_blocks)
+        if repeated_groups:
+            add_issue(
+                errors,
+                make_issue(
+                    code="wd_syn_slots_too_similar",
+                    message=f"步骤 {step_num}: 多个 WD-SYN-SLOT-* 内容过于相似，疑似复制粘贴 boilerplate",
+                    step=step_num,
+                    field="working_draft_path",
+                    missing_artifacts=["WD-SYN-SLOT-*"],
+                    recommended_rollback_step=10,
+                    recommended_repair_step=10,
+                    details={"similar_groups": repeated_groups},
                 ),
             )
 
@@ -1026,6 +1278,21 @@ class GateValidator:
                     recommended_rollback_step=11,
                     recommended_repair_step=11,
                     details={"expected_headings": expected_titles, "actual_headings": actual_titles},
+                ),
+            )
+        hits = placeholder_hits(read_markdown(final_document))
+        if hits:
+            add_issue(
+                errors,
+                make_issue(
+                    code="placeholder_content_detected",
+                    message=f"步骤 {step_num}: 最终文档仍含模板占位内容",
+                    step=step_num,
+                    field="final_document_path",
+                    missing_artifacts=["final_document"],
+                    recommended_rollback_step=10 if step_num == 12 else 11,
+                    recommended_repair_step=10 if step_num == 12 else 11,
+                    details={"placeholder_hits": hits},
                 ),
             )
 
@@ -1067,10 +1334,13 @@ class GateValidator:
             self.check_prerequisite_files(errors, step_num)
         if step_num >= 4:
             self.check_template_loaded(errors, step_num)
+            self.check_state_slots_contract(errors, step_num)
         if step_num >= 7:
             self.check_block_state_sync("WD-CTX", errors, step_num)
+            self.check_artifact_registry("WD-CTX", errors, step_num)
         if step_num >= 8:
             self.check_block_state_sync("WD-TASK", errors, step_num)
+            self.check_artifact_registry("WD-TASK", errors, step_num)
         if step_num >= 10:
             for slot_info in self.state.get("slots") or []:
                 slot_id = slot_info.get("slot", "")
@@ -1166,6 +1436,7 @@ class GateValidator:
             recommended_repair_step=7,
         )
         self.check_working_draft_block("WD-CTX", errors, 7)
+        self.check_wd_ctx_contract(errors, 7)
 
     def step_8(self, errors: list[dict[str, Any]]) -> None:
         self.common(8, errors)
@@ -1201,7 +1472,9 @@ class GateValidator:
         for slot_info in state_slots:
             slot_id = slot_info.get("slot", "")
             if slot_id:
-                self.check_working_draft_block(f"WD-EXP-{slot_id}", errors, 9)
+                artifact = f"WD-EXP-{slot_id}"
+                self.check_working_draft_block(artifact, errors, 9)
+                self.check_artifact_registry(artifact, errors, 9)
 
     def step_10(self, errors: list[dict[str, Any]]) -> None:
         self.common(10, errors)
@@ -1222,7 +1495,9 @@ class GateValidator:
         for slot_info in state_slots:
             slot_id = slot_info.get("slot", "")
             if slot_id:
-                self.check_working_draft_block(f"WD-SYN-{slot_id}", errors, 10)
+                artifact = f"WD-SYN-{slot_id}"
+                self.check_working_draft_block(artifact, errors, 10)
+                self.check_artifact_registry(artifact, errors, 10)
         self.check_wd_syn_quality(errors, 10)
 
     def step_11(self, errors: list[dict[str, Any]]) -> None:

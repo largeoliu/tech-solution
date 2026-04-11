@@ -3,6 +3,8 @@ completed_steps: []
 required_artifacts: []
 produced_artifacts: []
 pending_questions: []
+step_cards_read: {}
+artifact_registry: {}
 gate_receipt:
   step: 0
   state_fingerprint: ""

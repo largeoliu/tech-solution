@@ -17,7 +17,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from protocol_runtime import dump_yaml, load_yaml, refresh_receipt, require_receipt
+from protocol_runtime import dump_yaml, load_yaml, refresh_receipt, repo_root_from_state_path, require_receipt
 
 
 def sync_artifacts(working_dir: Path, slots: list[dict[str, Any]]) -> list[str]:
@@ -46,16 +46,9 @@ def resolve_path(value: Any, base: Path) -> Path:
     return path if path.is_absolute() else (base / path).resolve()
 
 
-def _repo_root_from_state_path(state_path: Path) -> Path:
-    resolved = state_path.resolve()
-    if resolved.name == "meta.yaml":
-        return resolved.parents[4]
-    return resolved.parents[3]
-
-
 def sync_artifacts_in_state(state_path: Path, require_receipt_step: int | None = None) -> list[str]:
     state = load_yaml(state_path)
-    repo_root = _repo_root_from_state_path(state_path)
+    repo_root = repo_root_from_state_path(state_path)
     draft_path = resolve_path(state.get("working_draft_path") or "", repo_root)
     if not draft_path.is_dir():
         raise SystemExit(f"working draft 目录不存在: {draft_path}")
@@ -71,7 +64,7 @@ def sync_artifacts_in_state(state_path: Path, require_receipt_step: int | None =
 
 def main() -> int:
     if not os.environ.get("__CTS_INTERNAL_CALL"):
-        print("❌ 本脚本不可直接调用。请使用 run-step.py --prepare / --complete --ticket。", file=sys.stderr)
+        print("❌ 本脚本不可直接调用。请使用 run-step.py --advance / --complete --ticket。", file=sys.stderr)
         sys.exit(1)
     parser = argparse.ArgumentParser(description="从 working draft 目录反推产物列表并可回写状态")
     parser.add_argument("--working-dir", required=True, help="working draft 目录路径")

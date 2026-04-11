@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -18,7 +19,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from protocol_runtime import dump_yaml, iso_now, load_yaml, refresh_receipt, require_receipt
+from protocol_runtime import dump_yaml, iso_now, load_yaml, refresh_receipt, repo_root_from_state_path, require_receipt
 
 BLOCK_MARKER_RE = re.compile(r"^---BLOCK:(.+)$", re.MULTILINE)
 
@@ -184,6 +185,34 @@ def update_counts(state: dict[str, Any], block_name: str, content: str) -> None:
         )
 
 
+def sync_artifact_registry(
+    state: dict[str, Any],
+    state_path: Path,
+    working_dir: Path,
+    slots: list[dict[str, Any]],
+    block_updates: list[tuple[str, str]],
+) -> None:
+    registry = state.setdefault("artifact_registry", {})
+    if not isinstance(registry, dict):
+        registry = {}
+        state["artifact_registry"] = registry
+    repo_root = state_path_to_repo_root(state_path)
+    for block_name, _content in block_updates:
+        target = resolve_file_for_block(working_dir, block_name, slots)
+        if not target.exists():
+            continue
+        registry[block_name] = {
+            "path": target.relative_to(repo_root).as_posix(),
+            "content_hash": hashlib.sha256(target.read_bytes()).hexdigest(),
+            "written_at": iso_now(),
+            "writer": "run-step",
+        }
+
+
+def state_path_to_repo_root(state_path: Path) -> Path:
+    return repo_root_from_state_path(state_path)
+
+
 def sync_state_for_blocks(state: dict[str, Any], block_updates: list[tuple[str, str]], summary: str) -> None:
     for block_name, _content in block_updates:
         sync_state_for_block(state, block_name, summary)
@@ -207,6 +236,7 @@ def upsert_with_sync(
         write_working_draft_file(working_dir, block_name, content, slots)
         written.append(block_name)
     sync_state_for_blocks(state, block_updates, summary)
+    sync_artifact_registry(state, state_path, working_dir, slots, block_updates)
     refresh_receipt(state)
     dump_yaml(state_path, state)
     return {
@@ -219,7 +249,7 @@ def upsert_with_sync(
 
 def main() -> int:
     if not os.environ.get("__CTS_INTERNAL_CALL"):
-        print("❌ 本脚本不可直接调用。请使用 run-step.py --prepare / --complete --ticket。", file=sys.stderr)
+        print("❌ 本脚本不可直接调用。请使用 run-step.py --advance / --complete --ticket。", file=sys.stderr)
         sys.exit(1)
     parser = argparse.ArgumentParser(description="按 block 安全更新 working draft 目录")
     parser.add_argument("--working-dir", required=True, help="working draft 目录路径")

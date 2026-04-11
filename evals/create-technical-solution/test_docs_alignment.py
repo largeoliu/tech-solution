@@ -106,6 +106,11 @@ def test_skill_doc_keeps_run_step_as_only_supported_public_entry() -> None:
     assert "run-step.py" in text
 
 
+def test_no_top_level_run_step_wrapper_exists() -> None:
+    wrapper = ROOT / "skills" / "create-technical-solution" / "run-step.py"
+    assert not wrapper.exists()
+
+
 def test_docs_cover_runtime_doctor_contract() -> None:
     ref_text = read("skills/create-technical-solution/REFERENCE.md")
     skill_text = read("skills/create-technical-solution/SKILL.md")

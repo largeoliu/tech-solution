@@ -138,7 +138,7 @@ def advance_state_step(
 
 def main() -> int:
     if not os.environ.get("__CTS_INTERNAL_CALL"):
-        print("❌ 本脚本不可直接调用。请使用 run-step.py --prepare / --complete --ticket。", file=sys.stderr)
+        print("❌ 本脚本不可直接调用。请使用 run-step.py --advance / --complete --ticket。", file=sys.stderr)
         sys.exit(1)
     parser = argparse.ArgumentParser(description="推进状态文件中的步骤和 checkpoint")
     parser.add_argument("--state", required=True, help="状态文件路径")

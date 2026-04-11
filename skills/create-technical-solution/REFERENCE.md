@@ -80,19 +80,28 @@ python /path/to/run-step.py --state <状态文件路径>
 
 `run-step.py` 内部会调用 validator；若门禁失败，不应结束流程，而应先补齐缺失的 working draft 区块、修正状态字段或重建最终文档，再重新检查。
 
-真正写入前必须再执行一次：
+标准主路径优先使用：
 
 ```bash
-python /path/to/run-step.py --state <状态文件路径> --prepare
+python /path/to/run-step.py --state <状态文件路径> --advance
 ```
 
-`--prepare` 会写入一次性 `pending_ticket`，绑定当前步骤、state fingerprint、artifact fingerprint 与允许写入的 block pattern。随后必须使用：
+`--advance` 会根据当前步骤自动推进：
+
+- 空状态时自动初始化步骤 1，并返回 `business_task`、`required_output_shape`、`next_action`
+- 自动步骤（2、3、6、11、12）在一次调用内完成
+- 业务决策步骤（1、4、5）会自动完成 entry，并在返回 payload 中给出 `business_task`、`required_output_shape`、`next_action`
+- 创作步骤（7、8、9、10）会自动完成 entry，并在返回 payload 中给出 `artifact`、`business_task`、`required_output_shape`、`next_action`
+
+只有业务决策步骤或创作步骤真正提交正文时，才使用显式提交：
 
 ```bash
 python /path/to/run-step.py --state <状态文件路径> --complete --ticket <ticket> --summary "..."
 ```
 
-若 prepare 之后 state、working draft、final document 或提交 block 范围发生变化，旧 ticket 会失效，必须重新 `--prepare`。
+此时的 `ticket` 来自前一次 `--advance` 返回或写入的 `pending_ticket`。若发 ticket 后 state、working draft、final document 或提交 block 范围发生变化，旧 ticket 会失效，必须重新执行 `--advance`。
+
+`--prepare`、`--mark-step-card-read` 属于低层接口，仅保留给测试、内部调试和兼容路径，不再作为主流程说明。
 
 若需要调试或测试内部 validator，可直接运行 `validate-state.py --format json`，但这属于内部诊断接口，不是公开执行入口。
 
@@ -129,7 +138,7 @@ Agent 收到失败 JSON 后，优先消费 `repair_plan[]` 与 `summary.recommen
 - 不修改 state
 - 不修改 working draft
 - 不修改 receipt
-- `--emit-scaffold 与 --complete 不能同时使用`；同理也不能与 `--prepare` 同时使用
+- `--emit-scaffold 与 --complete 不能同时使用`；同理也不能与 `--advance` 或 `--prepare` 同时使用
 - scaffold 步骤选择遵循当前 auto-skip 语义（`light` 的 8/9/10、`moderate` 的 9/10 会映射到 step-10 scaffold）
 
 ### runtime_doctor.py（运行时修复助手）

@@ -18,7 +18,8 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from protocol_runtime import dump_yaml, iso_now, load_yaml, refresh_receipt, require_receipt
+from protocol_runtime import dump_yaml, iso_now, load_yaml, refresh_receipt, repo_root_from_state_path, require_receipt
+from quality_checks import placeholder_hits, repeated_slot_groups
 
 
 def count_absorbed_slots(markdown: str) -> int:
@@ -64,11 +65,7 @@ def render_from_draft(state_path: Path) -> str:
     draft_value = str(state.get("working_draft_path") or "").strip()
     if not draft_value:
         raise SystemExit("working_draft_path 为空，无法从 draft 渲染最终文档。")
-    repo_root = state_path.resolve()
-    if repo_root.name == "meta.yaml":
-        repo_root = repo_root.parents[4]
-    else:
-        repo_root = repo_root.parents[3]
+    repo_root = repo_root_from_state_path(state_path)
     draft_path = Path(draft_value)
     if not draft_path.is_absolute():
         draft_path = (repo_root / draft_value).resolve()
@@ -124,11 +121,7 @@ def render_final_document(
     if not final_document_value:
         raise SystemExit("final_document_path 为空，必须先在步骤 1 生成最终文档路径。")
 
-    resolved_state = state_path.resolve()
-    if resolved_state.name == "meta.yaml":
-        repo_root = resolved_state.parents[4]
-    else:
-        repo_root = resolved_state.parents[3]
+    repo_root = repo_root_from_state_path(state_path)
     final_document_path = (repo_root / final_document_value).resolve()
     allowed_root = (repo_root / str(state.get("solution_root") or ".architecture/technical-solutions")).resolve()
     if allowed_root not in final_document_path.parents:
@@ -138,6 +131,25 @@ def render_final_document(
         content = content_path.read_text(encoding="utf-8")
     else:
         content = render_from_draft(state_path)
+
+    placeholder_findings = placeholder_hits(content)
+    if placeholder_findings:
+        raise SystemExit(f"最终文档仍含占位内容: {', '.join(placeholder_findings)}")
+
+    draft_value = str(state.get("working_draft_path") or "").strip()
+    draft_path = (repo_root / draft_value).resolve() if draft_value else None
+    if draft_path and draft_path.is_dir():
+        slot_blocks: dict[str, str] = {}
+        for slot_info in state.get("slots") or []:
+            slot_id = slot_info.get("slot", "")
+            title = slot_info.get("title", "")
+            syn_path = draft_path / "slots" / slot_id / "synthesis.md"
+            if title and syn_path.exists() and syn_path.stat().st_size > 0:
+                slot_blocks[title] = syn_path.read_text(encoding="utf-8")
+        repeated_groups = repeated_slot_groups(slot_blocks)
+        if repeated_groups:
+            raise SystemExit("WD-SYN-SLOT-* 内容过于相似，拒绝生成最终文档。")
+
     final_document_path.parent.mkdir(parents=True, exist_ok=True)
     final_document_path.write_text(content, encoding="utf-8")
 
@@ -173,7 +185,7 @@ def render_final_document(
 
 def main() -> int:
     if not os.environ.get("__CTS_INTERNAL_CALL"):
-        print("❌ 本脚本不可直接调用。请使用 run-step.py --prepare / --complete --ticket。", file=sys.stderr)
+        print("❌ 本脚本不可直接调用。请使用 run-step.py --advance / --complete --ticket。", file=sys.stderr)
         sys.exit(1)
     parser = argparse.ArgumentParser(description="步骤 11 的唯一合法成稿路径")
     parser.add_argument("--state", required=True, help="状态文件路径")

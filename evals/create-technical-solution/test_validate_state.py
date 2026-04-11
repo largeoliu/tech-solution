@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import shutil
 import subprocess
 from pathlib import Path
@@ -114,6 +115,7 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
         "completed_steps": [1, 2, 3, 4, 5, 6, 7, 8],
         "skipped_steps": [],
         "pending_questions": [],
+        "artifact_registry": {},
         "required_artifacts": ["WD-CTX", "WD-TASK", "WD-EXP-*"] + syn_artifacts,
         "produced_artifacts": ["WD-CTX", "WD-TASK"] + syn_artifacts,
         "gate_receipt": {"step": 10, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"},
@@ -168,7 +170,33 @@ def make_validator(state: dict, workspace: dict[str, Path]):
 def write_good_draft(workspace: dict[str, Path]) -> None:
     working_dir = workspace["working_draft_path"]
     working_dir.mkdir(parents=True, exist_ok=True)
-    (working_dir / "ctx.md").write_text("### CTX-01\n来源: code\n", encoding="utf-8")
+    (working_dir / "ctx.md").write_text(
+        """### CTX-01
+来源: services/a.py, models/a.py
+结论或约束: 需求概述已在现有流程中有入口。
+适用槽位: 1.1 需求概述
+可信度或缺口: 已验证
+
+### CTX-02
+来源: services/b.py, models/b.py
+结论或约束: 核心目标依赖现有审核规则扩展。
+适用槽位: 1.2 核心目标
+可信度或缺口: 已验证
+
+### CTX-03
+来源: services/c.py, repositories/c.py
+结论或约束: 方案设计需要复用既有配置结构。
+适用槽位: 2.1 方案设计
+可信度或缺口: 已验证
+
+### CTX-04
+来源: tests/d.py, docs/d.md
+结论或约束: 风险与验证应覆盖回归与灰度检查。
+适用槽位: 2.2 风险与验证
+可信度或缺口: 已验证
+""",
+        encoding="utf-8",
+    )
     (working_dir / "task.md").write_text(
         """### 1.1 需求概述
 必须消费的共享上下文: CTX-01
@@ -195,6 +223,23 @@ def write_good_draft(workspace: dict[str, Path]) -> None:
             make_wd_syn_block(title),
             encoding="utf-8",
         )
+
+
+def register_artifacts(state: dict, workspace: dict[str, Path]) -> None:
+    registry = {}
+    for artifact, relative in {
+        "WD-CTX": ".architecture/.state/create-technical-solution/sample-solution/ctx.md",
+        "WD-TASK": ".architecture/.state/create-technical-solution/sample-solution/task.md",
+    }.items():
+        path = workspace["repo"] / relative
+        if path.exists():
+            registry[artifact] = {
+                "path": relative,
+                "content_hash": vs.hashlib.sha256(path.read_bytes()).hexdigest(),
+                "written_at": "2026-04-08T09:31:00",
+                "writer": "run-step",
+            }
+    state["artifact_registry"] = registry
 
 
 def make_wd_syn_block(title: str) -> str:
@@ -236,7 +281,46 @@ class TestStateBoundary:
         validator = make_validator(state, workspace)
         errors: list[dict] = []
         validator.step_7(errors)
-        assert any(error["code"] == "verbose_summary" for error in errors)
+        assert any(error["code"] == "summary_contains_forbidden_content" for error in errors)
+
+    def test_validator_rejects_summary_that_is_too_long(self, workspace: dict[str, Path]) -> None:
+        state = make_state(workspace)
+        state["checkpoints"]["step-7"]["summary"] = (
+            "完成；写入 WD-CTX；"
+            + "这是一段被故意拉长的流程摘要，用来验证长度超限时应该返回专门的错误码而不是和正文混在一起。" * 3
+        )
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_7(errors)
+
+        assert any(error["code"] == "summary_too_long" for error in errors)
+
+    def test_step_7_rejects_unstructured_wd_ctx(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].mkdir(parents=True, exist_ok=True)
+        (workspace["working_draft_path"] / "ctx.md").write_text(
+            "这是自由文本总结，不是结构化 CTX 条目。\n已有实现很多，但没有按协议编号。\n",
+            encoding="utf-8",
+        )
+        state = make_state(workspace, current_step=7, completed_steps=[1, 2, 3, 4, 5, 6], produced_artifacts=["WD-CTX"])
+        state["can_enter_step_8"] = True
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_7(errors)
+
+        assert any(error["code"] == "wd_ctx_structure_invalid" for error in errors)
+
+    def test_step_7_rejects_ctx_count_mismatch(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(workspace, current_step=7, completed_steps=[1, 2, 3, 4, 5, 6], produced_artifacts=["WD-CTX"])
+        state["checkpoints"]["step-7"]["ctx_count"] = 0
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_7(errors)
+
+        assert any(error["code"] == "wd_ctx_count_mismatch" for error in errors)
 
     def test_step_2_requires_step_1_scope(self, workspace: dict[str, Path]) -> None:
         state = make_state(workspace)
@@ -245,6 +329,74 @@ class TestStateBoundary:
         errors: list[dict] = []
         validator.step_2(errors)
         assert any(error["code"] == "missing_step1_scope" for error in errors)
+
+    def test_step_11_missing_working_draft_repairs_from_step_7(
+        self, workspace: dict[str, Path]
+    ) -> None:
+        state = make_state(workspace, current_step=11)
+        state["completed_steps"] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        state["can_enter_step_11"] = True
+        state["working_draft_path"] = ".architecture/.state/create-technical-solution/missing-solution"
+        state["gate_receipt"] = {
+            "step": 11,
+            "state_fingerprint": "",
+            "validated_at": "2026-04-08T09:31:00",
+        }
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_11(errors)
+
+        missing_draft = next(
+            error for error in errors if error["code"] == "missing_working_draft_path"
+        )
+        assert missing_draft["recommended_rollback_step"] == 7
+        assert missing_draft["recommended_repair_step"] == 7
+
+    def test_step_10_rejects_state_slots_collapsed_away_from_template(
+        self, workspace: dict[str, Path]
+    ) -> None:
+        write_good_draft(workspace)
+        state = make_state(workspace, current_step=10)
+        state["slots"] = [
+            {"slot": "SLOT-01", "title": "一、需求背景与综合评估"},
+            {"slot": "SLOT-02", "title": "二、总体设计"},
+        ]
+        state["checkpoints"]["step-3"]["slot_count"] = 2
+        state["checkpoints"]["step-8"]["task_slot_count"] = 2
+        state["checkpoints"]["step-9"]["wd_exp_count"] = 2
+        state["checkpoints"]["step-10"]["syn_slot_count"] = 2
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_10(errors)
+
+        assert any(error["code"] == "state_slots_out_of_sync" for error in errors)
+
+    def test_step_11_rejects_state_slots_collapsed_away_from_template(
+        self, workspace: dict[str, Path]
+    ) -> None:
+        write_good_draft(workspace)
+        state = make_state(workspace, current_step=11)
+        state["completed_steps"] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        state["slots"] = [
+            {"slot": "SLOT-01", "title": "一、需求背景与综合评估"},
+            {"slot": "SLOT-02", "title": "二、总体设计"},
+        ]
+        state["checkpoints"]["step-3"]["slot_count"] = 2
+        state["checkpoints"]["step-8"]["task_slot_count"] = 2
+        state["checkpoints"]["step-9"]["wd_exp_count"] = 2
+        state["checkpoints"]["step-10"]["syn_slot_count"] = 2
+        state["gate_receipt"] = {"step": 11, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_11(errors)
+
+        assert any(error["code"] == "state_slots_out_of_sync" for error in errors)
 
 
 class TestScripts:
@@ -375,7 +527,11 @@ class TestScripts:
             check=False,
         )
         assert result.returncode != 0
-        assert "step-10" in (result.stderr or result.stdout)
+        output = result.stderr or result.stdout
+        assert (
+            "本脚本不可直接调用" in output
+            or "advance-state-step.py 不允许用于 step-10" in output
+        )
 
     def test_render_cli_rejects_content_file_flag(self, workspace: dict[str, Path]) -> None:
         workspace["content_file"].write_text(FINAL_DOC, encoding="utf-8")
@@ -395,7 +551,11 @@ class TestScripts:
             check=False,
         )
         assert result.returncode != 0
-        assert "unrecognized arguments: --content-file" in (result.stderr or result.stdout)
+        output = result.stderr or result.stdout
+        assert (
+            "本脚本不可直接调用" in output
+            or "unrecognized arguments: --content-file" in output
+        )
 
 
 class TestValidator:
@@ -616,6 +776,54 @@ class TestValidator:
         issue = next(error for error in errors if error["code"] == "missing_working_draft_block")
         assert issue["missing_fragments"] == ["#### 目标能力"]
 
+    def test_step_8_rejects_out_of_band_artifact_mutation(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(
+            workspace,
+            current_step=8,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7],
+            can_enter_step_8=True,
+        )
+        register_artifacts(state, workspace)
+        ctx_path = workspace["working_draft_path"] / "ctx.md"
+        ctx_path.write_text(ctx_path.read_text(encoding="utf-8") + "\n外部改写\n", encoding="utf-8")
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_8(errors)
+
+        assert any(error["code"] == "artifact_registry_mismatch" for error in errors)
+
+    def test_step_10_rejects_placeholder_target_capability_text(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        (slot_dir(workspace, 1) / "synthesis.md").write_text(
+            "### 槽位：1.1 需求概述\n#### 目标能力\n- 承载1.1 需求概述的技术结论\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ❌ | CTX-01 | 不足 |\n| 改造 | ✅ | CTX-01 | 推荐 |\n| 新建 | ❌ | CTX-01 | 成本高 |\n#### 选定路径\n- 路径: 改造\n- 选定写法: 在 1.1 需求概述 位置补齐内容。\n- 关键证据引用: CTX-01\n- 建议落位槽位: 1.1 需求概述\n- 模板承载缺口: 无\n- 未决问题: 无\n",
+            encoding="utf-8",
+        )
+        state = make_state(workspace)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_10(errors)
+
+        assert any(error["code"] == "placeholder_content_detected" for error in errors)
+
+    def test_step_10_rejects_overly_similar_slot_synthesis(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        duplicated = "#### 目标能力\n- 收敛统一改造结论。\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ❌ | CTX-01, CTX-02 | 现有能力不足 |\n| 改造 | ✅ | CTX-01, CTX-02, CTX-03 | 扩展现有SpotRule模型即可 |\n| 新建 | ❌ | CTX-03 | 成本高 |\n#### 选定路径\n- 路径: 改造\n- 选定写法: 扩展现有SpotRule模型，新增比例模式分支\n- 关键证据引用: CTX-01, CTX-02, CTX-03\n- 模板承载缺口: 无\n- 未决问题: 无\n"
+        for index, title in enumerate(("1.1 需求概述", "1.2 核心目标", "2.1 方案设计", "2.2 风险与验证"), start=1):
+            (slot_dir(workspace, index) / "synthesis.md").write_text(
+                f"### 槽位：{title}\n{duplicated}- 建议落位槽位: {title}\n",
+                encoding="utf-8",
+            )
+        state = make_state(workspace)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_10(errors)
+
+        assert any(error["code"] == "wd_syn_slots_too_similar" for error in errors)
+
     def test_step_10_requires_wd_syn_per_slot(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
         for index in range(2, 5):
@@ -625,6 +833,61 @@ class TestValidator:
         errors: list[dict] = []
         validator.step_10(errors)
         assert any(error["code"] == "wd_syn_slots_incomplete" for error in errors)
+
+    def test_step_8_rejects_task_ctx_reference_not_present_in_wd_ctx(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        (workspace["working_draft_path"] / "task.md").write_text(
+            "### SLOT-01: 1.1 需求概述\n\n- 绑定上下文：CTX-01、CTX-13\n- 任务：补齐内容\n- 产出：结论\n\n"
+            "### SLOT-02: 1.2 核心目标\n\n- 绑定上下文：CTX-02\n- 任务：补齐内容\n- 产出：结论\n\n"
+            "### SLOT-03: 2.1 方案设计\n\n- 绑定上下文：CTX-03\n- 任务：补齐内容\n- 产出：结论\n\n"
+            "### SLOT-04: 2.2 风险与验证\n\n- 绑定上下文：CTX-04\n- 任务：补齐内容\n- 产出：结论\n",
+            encoding="utf-8",
+        )
+        state = make_state(workspace, current_step=8, completed_steps=[1, 2, 3, 4, 5, 6, 7])
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_8(errors)
+
+        assert any(error["code"] == "task_ctx_reference_invalid" for error in errors)
+
+    def test_step_9_rejects_out_of_band_wd_exp_mutation(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(workspace, current_step=9, completed_steps=[1, 2, 3, 4, 5, 6, 7, 8])
+        exp_path = slot_dir(workspace, 1) / "experts.md"
+        original = exp_path.read_text(encoding="utf-8")
+        state["artifact_registry"]["WD-EXP-SLOT-01"] = {
+            "path": exp_path.relative_to(workspace["repo"]).as_posix(),
+            "content_hash": hashlib.sha256(original.encode("utf-8")).hexdigest(),
+            "written_at": "2026-04-11T12:00:00+00:00",
+            "writer": "run-step",
+        }
+        exp_path.write_text(original + "\n流程外改写\n", encoding="utf-8")
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_9(errors)
+
+        assert any(error["code"] == "artifact_registry_mismatch" for error in errors)
+
+    def test_step_10_rejects_out_of_band_wd_syn_mutation(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(workspace)
+        syn_path = slot_dir(workspace, 1) / "synthesis.md"
+        original = syn_path.read_text(encoding="utf-8")
+        state["artifact_registry"]["WD-SYN-SLOT-01"] = {
+            "path": syn_path.relative_to(workspace["repo"]).as_posix(),
+            "content_hash": hashlib.sha256(original.encode("utf-8")).hexdigest(),
+            "written_at": "2026-04-11T12:00:00+00:00",
+            "writer": "run-step",
+        }
+        syn_path.write_text(original + "\n流程外改写\n", encoding="utf-8")
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_10(errors)
+
+        assert any(error["code"] == "artifact_registry_mismatch" for error in errors)
 
     def test_step_11_rejects_docs_final_document_path(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
@@ -715,6 +978,20 @@ class TestValidator:
         validator.step_11(errors)
         assert any(error["code"] == "step_order_violation" for error in errors)
 
+    def test_step_12_rejects_final_document_with_template_placeholders(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        workspace["final_document_path"].write_text(
+            "# 技术方案文档\n\n## 一、背景\n\n### 1.1 需求概述\n\n*   **需求地址**\n\n### 1.2 核心目标\n\n*   **Redmine地址**\n\n## 二、设计\n\n### 2.1 方案设计\n\n> 对接三方接口文档，外部资料信息等\n\n### 2.2 风险与验证\n\n内容\n",
+            encoding="utf-8",
+        )
+        state = make_state(workspace, current_step=12, completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_12(errors)
+
+        assert any(error["code"] == "placeholder_content_detected" for error in errors)
+
 
 class TestCleanup:
     def test_render_final_document_refreshes_receipt(self, workspace: dict[str, Path]) -> None:
@@ -759,6 +1036,87 @@ class TestCleanup:
         assert payload["passed"] is True
         assert not workspace["working_draft_path"].exists()
         assert not workspace["state_path"].exists()
+
+
+class TestProjectRootResolution:
+    def test_repo_root_from_external_skill_state_path_prefers_real_project_root(
+        self, tmp_path: Path
+    ) -> None:
+        project_root = tmp_path / "ugc-project"
+        (project_root / ".architecture").mkdir(parents=True)
+        external_state = (
+            project_root
+            / ".agents"
+            / "skills"
+            / "create-technical-solution"
+            / "state"
+            / "sample-solution"
+            / "meta.yaml"
+        )
+        external_state.parent.mkdir(parents=True)
+        external_state.write_text("{}\n", encoding="utf-8")
+
+        repo_root = vs.repo_root_from_state_path(external_state)
+
+        assert repo_root == project_root.resolve()
+
+    def test_validator_resolves_architecture_paths_from_real_project_root(
+        self, tmp_path: Path
+    ) -> None:
+        project_root = tmp_path / "ugc-project"
+        arch = project_root / ".architecture"
+        template_dir = arch / "templates"
+        template_dir.mkdir(parents=True)
+        template_path = template_dir / "technical-solution-template.md"
+        template_path.write_text(TEMPLATE, encoding="utf-8")
+        (arch / "members.yml").write_text("members:\n  - id: systems_architect\n", encoding="utf-8")
+        (arch / "principles.md").write_text("# principles\n", encoding="utf-8")
+
+        external_state_path = (
+            project_root
+            / ".agents"
+            / "skills"
+            / "create-technical-solution"
+            / "state"
+            / "sample-solution"
+            / "meta.yaml"
+        )
+        external_state_path.parent.mkdir(parents=True)
+
+        state = {
+            "current_step": 4,
+            "completed_steps": [1, 2, 3],
+            "skipped_steps": [],
+            "pending_questions": [],
+            "solution_root": ".architecture/technical-solutions",
+            "template_path": ".architecture/templates/technical-solution-template.md",
+            "members_path": ".architecture/members.yml",
+            "principles_path": ".architecture/principles.md",
+            "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution",
+            "final_document_path": ".architecture/technical-solutions/sample-solution.md",
+            "slots": [{"slot": item["slot"], "title": item["title"]} for item in vs.extract_slot_headings(TEMPLATE)],
+            "checkpoints": {
+                "step-1": {"summary": "完成", "slug": "sample-solution", "scope_ready": True},
+                "step-2": {"summary": "完成", "prerequisites_checked": True},
+                "step-3": {
+                    "summary": "完成",
+                    "template_loaded": True,
+                    "template_fingerprint": vs.compute_template_fingerprint(TEMPLATE, vs.extract_slot_headings(TEMPLATE)),
+                    "slot_count": 4,
+                },
+                "step-4": {"summary": "完成", "solution_type": "新功能方案"},
+            },
+            "gate_receipt": {"step": 4, "state_fingerprint": "", "validated_at": "2026-04-11T10:00:00"},
+        }
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        external_state_path.write_text(vs.yaml.safe_dump(state, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+        validator = vs.GateValidator(state, external_state_path)
+
+        assert validator.repo_root == project_root.resolve()
+        assert validator.template_path() == template_path.resolve()
+        assert validator.members_path() == (arch / "members.yml").resolve()
+        assert validator.principles_path() == (arch / "principles.md").resolve()
 
 
 def test_installed_copy_run_step_smoke(tmp_path: Path) -> None:

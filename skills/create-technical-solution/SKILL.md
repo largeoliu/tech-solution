@@ -49,37 +49,40 @@ compatibility:
 
 ## 简化执行循环（推荐）
 
-使用 `run-step.py` 统一编排器，自动处理验证、receipt 刷新、参数推导和 step card 加载，Agent 只需关注创作工作。
+使用 `run-step.py` 统一编排器。默认只走高层入口，让脚本负责 step card 已读、门禁、ticket、receipt、状态推进；Agent 只关注业务内容。
 
-1. **查看任务**：`python /path/to/run-step.py --state <状态文件>` → 输出当前步骤、验证状态、操作指引、下一步命令
-2. **只读 scaffold**：`python /path/to/run-step.py --state <状态文件> --emit-scaffold` → 仅向 `stdout` 输出当前步骤 scaffold；不修改 state、working draft 或 receipt，且 `--emit-scaffold 与 --complete 不能同时使用`；同理也不能与 `--prepare` 同时使用；scaffold 目标步骤遵循当前 auto-skip 语义
-3. **领取 ticket**：`python /path/to/run-step.py --state <状态文件> --prepare` → 校验当前步骤 receipt 与现场指纹，写入一次性 `pending_ticket`
-4. **执行并提交**：`python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> --summary "..."` （创作型步骤通过 stdin/heredoc 传入内容）
+1. **查看任务**：`python /path/to/run-step.py --state <状态文件>` → 输出当前步骤、验证状态、修复建议、下一步命令
+2. **推进步骤**：`python /path/to/run-step.py --state <状态文件> --advance`
+   - 空状态时会自动初始化步骤 1，并返回 `business_task`、`required_output_shape`、`next_action`
+   - 自动步骤（2、3、6、11、12）会在一次调用内完成推进
+   - 业务决策步骤（1、4、5）会自动完成 entry 动作，并返回 `business_task`、`required_output_shape`、`next_action`
+   - 创作步骤（7、8、9、10）会自动完成 entry 动作，并返回 `business_task`、`artifact`、`required_output_shape`、`next_action`
+3. **只读 scaffold**：`python /path/to/run-step.py --state <状态文件> --emit-scaffold` → 仅向 `stdout` 输出当前步骤 scaffold；不修改 state、working draft 或 receipt
+4. **仅在创作步骤提交业务内容时**，才使用 `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> --summary "..."`
 5. **重复**直到步骤 12 完成
 
-各步骤的完整命令示例：
+标准主路径示例：
 
-| 步骤 | 命令 |
-|------|------|
-| 1 | `--prepare` 后 `--complete --ticket <ticket> --summary "..." --slug <slug>` |
-| 2, 3, 6 | `--prepare` 后 `--complete --ticket <ticket> --summary "..."` |
-| 4 | `--prepare` 后 `--complete --ticket <ticket> --summary "..." --solution-type "..."` |
-| 5 | `--prepare` 后 `--complete --ticket <ticket> --summary "..." --member <ID> [--member ...]` |
-| 7, 8 | `--prepare` 后 `--complete --ticket <ticket> --summary "..." <<'HEREDOC'\n...\nHEREDOC` |
-| 9 | `--prepare` 后 `--complete --ticket <ticket> --summary "..." <<'HEREDOC'\n---BLOCK:WD-EXP-SLOT-XX\n...\nHEREDOC` |
-| 10 | `--prepare` 后 `--complete --ticket <ticket> --summary "..." <<'HEREDOC'\n---BLOCK:WD-SYN-SLOT-XX\n...\nHEREDOC` |
-| 11, 12 | `--prepare` 后 `--complete --ticket <ticket> --summary "..."` |
+| 场景 | 推荐命令 |
+|------|----------|
+| 查看当前状态 | `python /path/to/run-step.py --state <状态文件>` |
+| 自动步骤推进（2、3、6、11、12） | `python /path/to/run-step.py --state <状态文件> --advance` |
+| 空状态 / 步骤 1 entry | `python /path/to/run-step.py --state <状态文件> --advance` |
+| 业务决策步骤 entry（1、4、5） | `python /path/to/run-step.py --state <状态文件> --advance` |
+| 创作步骤 entry（7、8、9、10） | `python /path/to/run-step.py --state <状态文件> --advance` |
+| 业务/创作步骤提交正文 | `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> --summary "..." <<'HEREDOC' ... HEREDOC` |
 
-全自动步骤（2、3、6、11、12）无需额外业务参数，但仍必须遵循 `--prepare` → `--complete --ticket <ticket>`。
+低层 flags（`--mark-step-card-read`、`--prepare`）保留给脚本内部、测试和调试；不再作为主流程文档入口。
 
 ## 状态文件初始化
-只能通过 `run-step.py` 完成步骤 1 初始化 `.architecture/.state/create-technical-solution/[slug].yaml`。它会在 state 缺失时自动创建文件、写入 step-1 最小 checkpoint、派生路径并刷新 receipt；不得再手工 `cp templates/_template.yaml` 后补 YAML。
+只能通过 `run-step.py --advance` 进入空状态初始化与步骤 1。它会在 state 缺失时自动创建最小 state、返回步骤 1 的业务输入 contract，并在提交步骤 1 正文后写入 checkpoint 与路径；不得再手工 `cp templates/_template.yaml` 后补 YAML，也不得把空状态初始化理解成公开的 `--prepare` 流程。
 
 ## 运行入口与内部脚本
-- `python /path/to/run-step.py --state <状态文件> [--prepare | --complete --ticket <ticket> --summary "..." ...]`
-  - 唯一受支持的对外入口。统一封装验证、receipt 刷新、参数推导、step card 加载、working draft 写入、最终文档成稿与清理
+- `python /path/to/run-step.py --state <状态文件> [--advance | --complete --ticket <ticket> --summary "..." ...]`
+  - 唯一受支持的对外入口。默认通过 `--advance` 统一封装验证、receipt 刷新、参数推导、step card 加载、working draft 写入、最终文档成稿与清理
 - `python /path/to/run-step.py --state <状态文件> --emit-scaffold`
   - 同一入口下的只读辅助模式；仅输出 scaffold 到 `stdout`，不是第二条写入路径，也不会替代 `--complete`
+  - `--emit-scaffold 与 --complete 不能同时使用`
 - `python /path/to/runtime_doctor.py --state <状态文件> [--step N] [--apply-safe-fixes]`
   - 运行时 repair helper，不是主执行路径；默认 `dry-run`，只有 `--apply-safe-fixes` 才允许做结构性安全修复（规范目录、旧 draft 路径/状态迁移、语义安全的 receipt 修复）
 - 其他脚本（如 `initialize-state.py`、`extract-template-snapshot.py`、`upsert-draft-block.py`、`advance-state-step.py`、`render-final-document.py`、`finalize-cleanup.py`）
@@ -98,8 +101,8 @@ compatibility:
 - **checkpoint 必须结构化且瘦身**：`checkpoints.step-N.summary` 只能写流程摘要，不得复述正文
 - **流程摘要只允许描述**：本步是否完成/跳过、写入了什么区块、区块数量/槽位数量、下一步 gate 是否齐备
 - **严禁手写 produced_artifacts**：必须以 `run-step.py` 在块写入后的同步结果为准，不得口头宣称某个 `WD-*` 已存在
-- **ticket 必须先领后交**：每次真正写入前都必须先 `--prepare` 生成一次性 `pending_ticket`，再用 `--complete --ticket <ticket>` 提交；不得跳过 prepare，也不得复用旧 ticket
-- **ticket 绑定现场指纹**：`pending_ticket` 会绑定当前步骤、state fingerprint、artifact fingerprint 与允许写入的 block pattern；prepare 之后若 state、working draft、final document 或提交 block 范围发生漂移，必须重新 `--prepare`
+- **ticket 由脚本主路径发放**：标准流程通过 `--advance` 自动生成一次性 `pending_ticket`；只有创作步骤真正提交正文时才显式使用 `--complete --ticket <ticket>`
+- **ticket 绑定现场指纹**：`pending_ticket` 会绑定当前步骤、state fingerprint、artifact fingerprint 与允许写入的 block pattern；若 `--advance` 发放 ticket 后 state、working draft、final document 或提交 block 范围发生漂移，必须重新走一次 `--advance`
 
 - **step-4 必须通过 `run-step.py` 原子完成**：`required_artifacts` 必须在同一次步骤提交中同步写入，禁止先推进再手改 YAML
 - **step-3 先验只检查前置，不检查产物**：步骤 3 的 validator 只确认 step 1/2、模板文件与路径前置条件；`template_fingerprint`、`slot_count`、`working_draft_path` 必须由 `run-step.py` 的 step-3 受控流程首次生成，禁止因为 step 3 校验失败而手改 state

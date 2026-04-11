@@ -24,6 +24,7 @@ from protocol_runtime import (
     iso_now,
     load_yaml,
     refresh_receipt,
+    working_draft_relative_path,
 )
 
 
@@ -58,6 +59,7 @@ def initialize_state(
         "completed_at": iso_now(),
     }
     state["solution_root"] = str(SOLUTION_ROOT)
+    state["working_draft_path"] = str(working_draft_relative_path(slug))
     state["final_document_path"] = str(final_document_relative_path(slug))
     state.setdefault("members_path", ".architecture/members.yml")
     state.setdefault("principles_path", ".architecture/principles.md")
@@ -84,6 +86,7 @@ def initialize_state(
     return {
         "slug": slug,
         "solution_root": state["solution_root"],
+        "working_draft_path": state["working_draft_path"],
         "final_document_path": state["final_document_path"],
         "current_step": state.get("current_step"),
         "gate_receipt_step": state["gate_receipt"]["step"],
@@ -92,7 +95,7 @@ def initialize_state(
 
 def main() -> int:
     if not os.environ.get("__CTS_INTERNAL_CALL"):
-        print("❌ 本脚本不可直接调用。请使用 run-step.py --prepare / --complete --ticket。", file=sys.stderr)
+        print("❌ 本脚本不可直接调用。请使用 run-step.py --advance / --complete --ticket。", file=sys.stderr)
         sys.exit(1)
     parser = argparse.ArgumentParser(description="初始化步骤 1 的最小状态字段")
     parser.add_argument("--state", required=True, help="状态文件路径")

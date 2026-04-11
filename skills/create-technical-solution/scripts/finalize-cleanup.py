@@ -18,7 +18,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from protocol_runtime import compute_state_fingerprint, dump_yaml, iso_now, load_yaml, require_receipt
+from protocol_runtime import compute_state_fingerprint, dump_yaml, iso_now, load_yaml, repo_root_from_state_path, require_receipt
 
 
 def load_validator_module(scripts_dir: Path):
@@ -50,11 +50,7 @@ def run_cleanup(state_path: Path, summary: str) -> tuple[int, dict[str, Any]]:
 
     state = load_yaml(state_path, missing_ok=True)
     require_receipt(state, expected_step=12)
-    resolved = state_path.resolve()
-    if resolved.name == "meta.yaml":
-        repo_root = resolved.parents[4]
-    else:
-        repo_root = resolved.parents[3]
+    repo_root = repo_root_from_state_path(state_path)
     draft_value = str(state.get("working_draft_path") or "")
     working_draft = Path(draft_value) if Path(draft_value).is_absolute() else (repo_root / draft_value)
     final_document = repo_root / str(state.get("final_document_path") or "")
@@ -143,7 +139,7 @@ def run_cleanup(state_path: Path, summary: str) -> tuple[int, dict[str, Any]]:
 
 def main() -> int:
     if not os.environ.get("__CTS_INTERNAL_CALL"):
-        print("❌ 本脚本不可直接调用。请使用 run-step.py --prepare / --complete --ticket。", file=sys.stderr)
+        print("❌ 本脚本不可直接调用。请使用 run-step.py --advance / --complete --ticket。", file=sys.stderr)
         sys.exit(1)
     parser = argparse.ArgumentParser(description="步骤 12 原子清理：先验证，再置标志并删除中间产物")
     parser.add_argument("--state", required=True, help="状态文件路径")

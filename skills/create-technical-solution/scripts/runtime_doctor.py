@@ -167,6 +167,9 @@ def run_doctor(
                 fix["applied"] = True
                 mutated = True
 
+    if mutated:
+        state = load_yaml(resolved_state_path, missing_ok=True)
+
     validation = validate_runtime_state(
         state,
         state_path=resolved_state_path,

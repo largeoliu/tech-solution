@@ -166,11 +166,21 @@ def slug_from_state_path(state_path: Path) -> str:
     return resolved.name.rsplit(".", 1)[0]
 
 
-def repo_root_from_state_path(state_path: Path) -> Path:
-    resolved = state_path.resolve()
-    if resolved.name == "meta.yaml":
+def detect_project_root(start_path: Path) -> Path:
+    resolved = start_path.resolve()
+    current = resolved if resolved.is_dir() else resolved.parent
+    for candidate in (current, *current.parents):
+        if (candidate / ".git").exists() or (candidate / ".architecture").exists():
+            return candidate
+    if resolved.name == "meta.yaml" and len(resolved.parents) >= 5:
         return resolved.parents[4]
-    return resolved.parents[3]
+    if len(resolved.parents) >= 4:
+        return resolved.parents[3]
+    return current
+
+
+def repo_root_from_state_path(state_path: Path) -> Path:
+    return detect_project_root(state_path)
 
 
 def state_root_from_repo_root(repo_root: Path) -> Path:
@@ -226,44 +236,52 @@ def render_run_step_command(
     summary_placeholder: str = "<完成摘要>",
 ) -> list[str]:
     base = run_step_base_command(state_path)
+    advance_line = f"{base} --advance"
     prepare_line = f"{base} --prepare"
+    pending_ticket = state.get("pending_ticket") if isinstance(state, dict) else None
+    has_current_ticket = isinstance(pending_ticket, dict) and int(
+        pending_ticket.get("step") or 0
+    ) == step
 
     if step == 1:
-        return [
-            f"{base} --prepare --slug <slug>",
-            f'{base} --complete --ticket <ticket> --summary "<主题摘要>" --slug <slug>',
-        ]
+        return [advance_line]
     if step in {2, 3, 6}:
-        return [
-            prepare_line,
-            f'{base} --complete --ticket <ticket> --summary "{summary_placeholder}"',
-        ]
+        return [advance_line]
     if step == 4:
+        if not has_current_ticket:
+            return [advance_line]
         return [
-            prepare_line,
-            f'{base} --complete --ticket <ticket> --summary "<类型判定>" '
-            '--solution-type "<方案类型>"',
+            f'{base} --complete --ticket <ticket> --summary "<步骤4完成>" <<\'HEREDOC\'',
+            '{"solution_type": "<方案类型>"}',
+            'HEREDOC',
         ]
     if step == 5:
+        if not has_current_ticket:
+            return [advance_line]
         return [
-            prepare_line,
-            f'{base} --complete --ticket <ticket> --summary "<成员选定>" --member <MEMBER_ID> [--member ...]',
+            f'{base} --complete --ticket <ticket> --summary "<步骤5完成>" <<\'HEREDOC\'',
+            '{"selected_members": ["<MEMBER_ID>"]}',
+            'HEREDOC',
         ]
     if step == 7:
+        if not has_current_ticket:
+            return [advance_line]
         return [
-            prepare_line,
             f'{base} --complete --ticket <ticket> --summary "<WD-CTX 完成>" <<\'HEREDOC\'',
             "<WD-CTX 内容>",
             "HEREDOC",
         ]
     if step == 8:
+        if not has_current_ticket:
+            return [advance_line]
         return [
-            prepare_line,
             f'{base} --complete --ticket <ticket> --summary "<WD-TASK 完成>" <<\'HEREDOC\'',
             "<WD-TASK 内容>",
             "HEREDOC",
         ]
     if step == 9:
+        if not has_current_ticket:
+            return [advance_line]
         slot_ids: list[str] = []
         if isinstance(state, dict):
             for s in state.get("slots") or []:
@@ -279,12 +297,13 @@ def render_run_step_command(
             block_lines.append("<专家分析内容>")
             block_lines.append("")
         return [
-            prepare_line,
             f'{base} --complete --ticket <ticket> --summary "<专家分析完成>" <<\'HEREDOC\'',
             *block_lines,
             "HEREDOC",
         ]
     if step == 10:
+        if not has_current_ticket:
+            return [advance_line]
         slot_ids_syn: list[str] = []
         if isinstance(state, dict):
             for s in state.get("slots") or []:
@@ -300,16 +319,12 @@ def render_run_step_command(
             syn_lines.append("<收敛内容>")
             syn_lines.append("")
         return [
-            prepare_line,
             f'{base} --complete --ticket <ticket> --summary "<收敛完成>" <<\'HEREDOC\'',
             *syn_lines,
             "HEREDOC",
         ]
     if step in {11, 12}:
-        return [
-            prepare_line,
-            f'{base} --complete --ticket <ticket> --summary "{summary_placeholder}"',
-        ]
+        return [advance_line]
     return [f'{base} --complete --ticket <ticket> --summary "{summary_placeholder}"']
 
 
