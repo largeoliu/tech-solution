@@ -46,6 +46,7 @@ ALLOWED_TOP_LEVEL_FIELDS = {
     "skipped_steps",
     "required_artifacts",
     "produced_artifacts",
+    "artifact_progress",
     "pending_questions",
     "step_cards_read",
     "artifact_registry",
@@ -89,7 +90,7 @@ ARTIFACT_REPAIR_STEP = {
 GATE_REPAIR_STEP = {
     "can_enter_step_8": 7,
     "can_enter_step_9": 8,
-    "can_enter_step_10": 8,
+    "can_enter_step_10": 9,
     "can_enter_step_11": 10,
     "can_enter_step_12": 11,
 }
@@ -1549,12 +1550,17 @@ class GateValidator:
         self.check_working_draft_block("WD-CTX", errors, 9)
         self.check_working_draft_block("WD-TASK", errors, 9)
         state_slots = self.state.get("slots") or []
-        for slot_info in state_slots:
-            slot_id = slot_info.get("slot", "")
-            if slot_id:
-                artifact = f"WD-EXP-{slot_id}"
-                self.check_working_draft_block(artifact, errors, 9)
-                self.check_artifact_registry(artifact, errors, 9)
+        artifact_progress = self.state.get("artifact_progress") or {}
+        exp_progress = artifact_progress.get("WD-EXP-SLOT-*", {})
+        completed_slots = exp_progress.get("completed_slots", []) if isinstance(exp_progress, dict) else []
+        if not isinstance(completed_slots, list):
+            completed_slots = []
+        completed_set = set(completed_slots)
+        all_slot_ids = [s.get("slot", "") for s in state_slots if s.get("slot")]
+        for slot_id in completed_set:
+            artifact = f"WD-EXP-{slot_id}"
+            self.check_working_draft_block(artifact, errors, 9)
+            self.check_artifact_registry(artifact, errors, 9)
 
     def step_10(self, errors: list[dict[str, Any]]) -> None:
         self.common(10, errors)
@@ -1566,18 +1572,22 @@ class GateValidator:
             message="步骤 10: can_enter_step_10 为 false",
             step=10,
                         field="can_enter_step_10",
-            recommended_rollback_step=8,
-            recommended_repair_step=8,
+            recommended_rollback_step=9,
+            recommended_repair_step=9,
         )
         self.check_working_draft_block("WD-CTX", errors, 10)
         self.check_working_draft_block("WD-TASK", errors, 10)
         state_slots = self.state.get("slots") or []
-        for slot_info in state_slots:
-            slot_id = slot_info.get("slot", "")
-            if slot_id:
-                artifact = f"WD-SYN-{slot_id}"
-                self.check_working_draft_block(artifact, errors, 10)
-                self.check_artifact_registry(artifact, errors, 10)
+        artifact_progress = self.state.get("artifact_progress") or {}
+        syn_progress = artifact_progress.get("WD-SYN-SLOT-*", {})
+        completed_slots = syn_progress.get("completed_slots", []) if isinstance(syn_progress, dict) else []
+        if not isinstance(completed_slots, list):
+            completed_slots = []
+        completed_set = set(completed_slots)
+        for slot_id in completed_set:
+            artifact = f"WD-SYN-{slot_id}"
+            self.check_working_draft_block(artifact, errors, 10)
+            self.check_artifact_registry(artifact, errors, 10)
         self.check_wd_syn_quality(errors, 10)
 
     def step_11(self, errors: list[dict[str, Any]]) -> None:

@@ -1384,10 +1384,11 @@ class TestRunStepBehavior:
         captured: dict[str, object] = {}
 
         def fake_emit_json_scaffold(
-            state_path: Path, members: list[str] | None = None
+            state_path: Path, members: list[str] | None = None, slot: str | None = None
         ) -> int:
             captured["state_path"] = state_path
             captured["members"] = members
+            captured["slot"] = slot
             return 0
 
         monkeypatch.setattr(run_step, "emit_json_scaffold", fake_emit_json_scaffold)
@@ -1400,6 +1401,7 @@ class TestRunStepBehavior:
         assert captured == {
             "state_path": workspace["state_path"].resolve(),
             "members": [],
+            "slot": None,
         }
 
     def test_main_rejects_emit_scaffold_with_complete(
@@ -2562,7 +2564,9 @@ class TestRunStepBehavior:
         assert new_state["current_step"] == 4
         assert new_state["checkpoints"]["step-3"]["template_loaded"] is True
         assert (workspace["working_draft_path"].parent).is_dir()
-        assert (workspace["working_draft_path"] / "ctx.md").exists()
+        assert (workspace["working_draft_path"] / "slots").is_dir()
+        assert not (workspace["working_draft_path"] / "ctx.md").exists()
+        assert not (workspace["working_draft_path"] / "slots" / "SLOT-01" / "experts.md").exists()
         assert (
             new_state["working_draft_path"]
             == ".architecture/.state/create-technical-solution/sample-solution/draft"

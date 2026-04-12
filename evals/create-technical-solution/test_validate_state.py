@@ -599,14 +599,15 @@ class TestScripts:
                 "WD-EXP-SLOT-03",
                 "### 专家：systems_architect\n- 决策类型: 改造\n- 核心理由: 复用不足，需要在现有资产上扩展。\n- 关键证据引用: CTX-01\n- 未决点: 无\n",
             )],
-            summary="完成；写入 WD-EXP-SLOT-*；count=1；gate: step-10 ready",
+            summary="进行中；新增专家分析；累计完成=1/4；gate: step-9 continue",
             require_receipt_step=9,
         )
 
         refreshed = vs.load_state(workspace["state_path"])
-        assert payload["gate_receipt_step"] == 10
+        assert payload["gate_receipt_step"] == 9
         assert refreshed["checkpoints"]["step-9"]["wd_exp_count"] == 1
-        assert refreshed["can_enter_step_10"] is True
+        assert refreshed["can_enter_step_10"] is False
+        assert refreshed["artifact_progress"]["WD-EXP-SLOT-*"]["completed_slots"] == ["SLOT-03"]
 
     def test_advance_state_step_rejects_step_10_plus(self, workspace: dict[str, Path]) -> None:
         state = make_state(workspace, current_step=10)
@@ -1086,6 +1087,7 @@ class TestValidator:
     def test_step_9_rejects_out_of_band_wd_exp_mutation(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
         state = make_state(workspace, current_step=9, completed_steps=[1, 2, 3, 4, 5, 6, 7, 8])
+        state["artifact_progress"] = {"WD-EXP-SLOT-*": {"completed_slots": ["SLOT-01"]}}
         exp_path = slot_dir(workspace, 1) / "experts.md"
         original = exp_path.read_text(encoding="utf-8")
         state["artifact_registry"]["WD-EXP-SLOT-01"] = {
@@ -1105,6 +1107,7 @@ class TestValidator:
     def test_step_10_rejects_out_of_band_wd_syn_mutation(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)
         state = make_state(workspace)
+        state["artifact_progress"] = {"WD-SYN-SLOT-*": {"completed_slots": ["SLOT-01"]}}
         syn_path = slot_dir(workspace, 1) / "synthesis.md"
         original = syn_path.read_text(encoding="utf-8")
         state["artifact_registry"]["WD-SYN-SLOT-01"] = {
@@ -1453,3 +1456,166 @@ def test_installed_copy_run_step_smoke(tmp_path: Path) -> None:
 
     assert status.returncode == 0
     assert str(installed_root / "scripts" / "run-step.py") in status.stdout
+
+
+class TestIncrementalSlotProgress:
+    def test_step3_does_not_precreate_empty_files(self, workspace: dict[str, Path]) -> None:
+        state = make_state(workspace, current_step=3, completed_steps=[1, 2])
+        state["gate_receipt"] = {"step": 3, "state_fingerprint": "", "validated_at": "2026-04-12T00:00:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        working_dir = workspace["working_draft_path"]
+        vs.Path.mkdir(working_dir, parents=True, exist_ok=True)
+        (working_dir / "slots").mkdir(parents=True, exist_ok=True)
+        for slot_info in state["slots"]:
+            (working_dir / "slots" / slot_info["slot"]).mkdir(parents=True, exist_ok=True)
+        assert not (working_dir / "ctx.md").exists()
+        assert not (working_dir / "task.md").exists()
+        for slot_info in state["slots"]:
+            assert not (working_dir / "slots" / slot_info["slot"] / "experts.md").exists()
+            assert not (working_dir / "slots" / slot_info["slot"] / "synthesis.md").exists()
+
+    def test_step9_partial_completion_stays_on_step9(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(
+            workspace,
+            current_step=9,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8],
+            produced_artifacts=["WD-CTX", "WD-TASK"],
+            can_enter_step_9=True,
+            can_enter_step_10=False,
+        )
+        state["gate_receipt"] = {"step": 9, "state_fingerprint": "", "validated_at": "2026-04-12T00:00:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        payload = udb.upsert_with_sync(
+            working_dir=workspace["working_draft_path"],
+            state_path=workspace["state_path"],
+            block_updates=[(
+                "WD-EXP-SLOT-01",
+                "### 参与槽位\n- 1.1 需求概述\n\n### 决策类型\n- 复用\n\n### 核心理由\n- 现有入口满足需求\n\n### 关键证据引用\n- CTX-01\n\n### 未决点\n- 无\n",
+            )],
+            summary="进行中；新增专家分析；累计完成=1/4；gate: step-9 continue",
+            require_receipt_step=9,
+        )
+        refreshed = vs.load_state(workspace["state_path"])
+        assert payload["gate_receipt_step"] == 9
+        assert refreshed["can_enter_step_10"] is False
+        assert "SLOT-01" in refreshed["artifact_progress"]["WD-EXP-SLOT-*"]["completed_slots"]
+        assert refreshed["current_step"] == 9
+
+    def test_step9_all_slots_completion_advances_to_step10(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(
+            workspace,
+            current_step=9,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8],
+            produced_artifacts=["WD-CTX", "WD-TASK"],
+            can_enter_step_9=True,
+            can_enter_step_10=False,
+        )
+        state["gate_receipt"] = {"step": 9, "state_fingerprint": "", "validated_at": "2026-04-12T00:00:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        all_slots = [s["slot"] for s in state["slots"]]
+        block_updates = []
+        for slot_info in state["slots"]:
+            block_updates.append((
+                f"WD-EXP-{slot_info['slot']}",
+                f"### 参与槽位\n- {slot_info['title']}\n\n### 决策类型\n- 复用\n\n### 核心理由\n- 满足需求\n\n### 关键证据引用\n- CTX-01\n\n### 未决点\n- 无\n",
+            ))
+        payload = udb.upsert_with_sync(
+            working_dir=workspace["working_draft_path"],
+            state_path=workspace["state_path"],
+            block_updates=block_updates,
+            summary="完成；写入专家分析；slots=4；gate: step-10 ready",
+            require_receipt_step=9,
+        )
+        refreshed = vs.load_state(workspace["state_path"])
+        assert payload["gate_receipt_step"] == 10
+        assert refreshed["can_enter_step_10"] is True
+        assert set(refreshed["artifact_progress"]["WD-EXP-SLOT-*"]["completed_slots"]) == set(all_slots)
+
+    def test_step9_incremental_then_remaining(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(
+            workspace,
+            current_step=9,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8],
+            produced_artifacts=["WD-CTX", "WD-TASK"],
+            can_enter_step_9=True,
+            can_enter_step_10=False,
+        )
+        state["gate_receipt"] = {"step": 9, "state_fingerprint": "", "validated_at": "2026-04-12T00:00:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        udb.upsert_with_sync(
+            working_dir=workspace["working_draft_path"],
+            state_path=workspace["state_path"],
+            block_updates=[(
+                "WD-EXP-SLOT-01",
+                "### 参与槽位\n- 1.1 需求概述\n\n### 决策类型\n- 复用\n\n### 核心理由\n- 满足\n\n### 关键证据引用\n- CTX-01\n\n### 未决点\n- 无\n",
+            )],
+            summary="进行中；累计完成=1/4",
+            require_receipt_step=9,
+        )
+        refreshed = vs.load_state(workspace["state_path"])
+        assert refreshed["can_enter_step_10"] is False
+        assert refreshed["current_step"] == 9
+        remaining_slots = [s["slot"] for s in state["slots"] if s["slot"] != "SLOT-01"]
+        block_updates = []
+        for slot_info in state["slots"]:
+            if slot_info["slot"] == "SLOT-01":
+                continue
+            block_updates.append((
+                f"WD-EXP-{slot_info['slot']}",
+                f"### 参与槽位\n- {slot_info['title']}\n\n### 决策类型\n- 复用\n\n### 核心理由\n- 满足\n\n### 关键证据引用\n- CTX-01\n\n### 未决点\n- 无\n",
+            ))
+        udb.upsert_with_sync(
+            working_dir=workspace["working_draft_path"],
+            state_path=workspace["state_path"],
+            block_updates=block_updates,
+            summary="完成；写入专家分析；slots=4；gate: step-10 ready",
+            require_receipt_step=9,
+        )
+        refreshed = vs.load_state(workspace["state_path"])
+        assert refreshed["can_enter_step_10"] is True
+        assert refreshed["current_step"] == 10
+
+    def test_step10_partial_completion_stays_on_step10(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(
+            workspace,
+            current_step=10,
+            can_enter_step_10=True,
+            can_enter_step_11=False,
+        )
+        state["gate_receipt"] = {"step": 10, "state_fingerprint": "", "validated_at": "2026-04-12T00:00:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        payload = udb.upsert_with_sync(
+            working_dir=workspace["working_draft_path"],
+            state_path=workspace["state_path"],
+            block_updates=[(
+                "WD-SYN-SLOT-01",
+                "### 槽位：1.1 需求概述\n#### 目标能力\n- 描述需求\n#### 候选方案对比\n| 路径 | 可行性 | 关键证据 | 选择理由 |\n|------|--------|----------|----------|\n| 复用 | ✅ | CTX-01 | 满足 |\n#### 选定路径\n- 路径: 复用\n- 选定写法:\n沿用现有入口。\n- 关键证据引用: CTX-01\n- 建议落位槽位: 1.1 需求概述\n- 模板承载缺口: 无\n- 未决问题: 无",
+            )],
+            summary="进行中；新增收敛；累计完成=1/4；gate: step-10 continue",
+            require_receipt_step=10,
+        )
+        refreshed = vs.load_state(workspace["state_path"])
+        assert payload["gate_receipt_step"] == 10
+        assert refreshed["can_enter_step_11"] is False
+        assert "SLOT-01" in refreshed["artifact_progress"]["WD-SYN-SLOT-*"]["completed_slots"]
+
+    def test_file_exists_means_real_content(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(workspace, current_step=9, completed_steps=[1, 2, 3, 4, 5, 6, 7, 8])
+        state["gate_receipt"] = {"step": 9, "state_fingerprint": "", "validated_at": "2026-04-12T00:00:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        state["artifact_progress"] = {"WD-EXP-SLOT-*": {"completed_slots": ["SLOT-01"]}}
+        write_state(workspace, state)
+        exp_path = workspace["working_draft_path"] / "slots" / "SLOT-01" / "experts.md"
+        assert exp_path.exists()
+        content = exp_path.read_text(encoding="utf-8")
+        assert len(content) > 0

@@ -1157,13 +1157,20 @@ def emit_scaffold(state_path: Path, members: list[str] | None = None) -> int:
     return 0
 
 
-def emit_json_scaffold(state_path: Path, members: list[str] | None = None) -> int:
+def emit_json_scaffold(state_path: Path, members: list[str] | None = None, slot: str | None = None) -> int:
     snapshot = load_runtime_snapshot(state_path)
     if not snapshot.state:
         print("❌ 状态文件不存在。请先用 --slug 参数执行步骤 1。")
         return 1
     module = load_block_scaffolds_module()
-    print(module.emit_json_scaffold(snapshot, members=members or []))
+    full_scaffold = json.loads(module.emit_json_scaffold(snapshot, members=members or []))
+    if slot and snapshot.current_step in (9, 10):
+        full_scaffold = [item for item in full_scaffold if item.get("slot") == slot]
+        if not full_scaffold:
+            slot_titles = {s.get("slot", ""): s.get("title", "") for s in snapshot.state.get("slots", [])}
+            print(f"❌ --slot {slot} 未匹配到任何 scaffold 条目。可用 slot: {list(slot_titles.keys())}", file=sys.stderr)
+            return 1
+    print(json.dumps(full_scaffold, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -1286,6 +1293,28 @@ def step_requires_ticket(step: int) -> bool:
     return step >= 7
 
 
+def _slot_progress_for_step(state: dict[str, Any], step: int) -> dict[str, Any]:
+    if step == 9:
+        artifact_key = "WD-EXP-SLOT-*"
+    elif step == 10:
+        artifact_key = "WD-SYN-SLOT-*"
+    else:
+        return {}
+    progress = state.get("artifact_progress") or {}
+    entry = progress.get(artifact_key, {}) if isinstance(progress, dict) else {}
+    completed = entry.get("completed_slots", []) if isinstance(entry, dict) else []
+    if not isinstance(completed, list):
+        completed = []
+    all_ids = [s.get("slot", "") for s in state.get("slots") or [] if s.get("slot")]
+    remaining = [sid for sid in all_ids if sid not in set(completed)]
+    recommended = remaining[0] if remaining else None
+    return {
+        "completed_slots": completed,
+        "remaining_slots": remaining,
+        "recommended_slot": recommended,
+    }
+
+
 def build_creative_entry_response(state_path: Path, step: int) -> dict[str, Any]:
     state = load_state(state_path)
     step_def = STEP_DEFS.get(step, {})
@@ -1298,6 +1327,7 @@ def build_creative_entry_response(state_path: Path, step: int) -> dict[str, Any]
     submit_command = None
     json_scaffold_command = None
     json_scaffold_preview = None
+    slot_progress = _slot_progress_for_step(state, step)
     if ticket_value:
         base = run_step_base_command(state_path)
         submit_command = f'{base} --complete --ticket {ticket_value} --summary "<完成摘要>"'
@@ -1310,7 +1340,7 @@ def build_creative_entry_response(state_path: Path, step: int) -> dict[str, Any]
             )
         except Exception:
             json_scaffold_preview = None
-    return {
+    response = {
         "status": "needs_input",
         "step": step,
         "artifact": step_def.get("artifact"),
@@ -1324,6 +1354,9 @@ def build_creative_entry_response(state_path: Path, step: int) -> dict[str, Any]
         "json_scaffold_command": json_scaffold_command,
         "json_scaffold_preview": json_scaffold_preview,
     }
+    if slot_progress:
+        response["slot_progress"] = slot_progress
+    return response
 
 
 def build_business_entry_response(state_path: Path, step: int) -> dict[str, Any]:
@@ -1541,6 +1574,7 @@ def main() -> int:
     parser.add_argument(
         "--member", action="append", default=[], help=argparse.SUPPRESS
     )
+    parser.add_argument("--slot", help="限定 scaffold 输出范围到指定 slot（如 SLOT-01），仅步骤 9/10 有效")
 
     args = parser.parse_args()
 
@@ -1580,7 +1614,7 @@ def main() -> int:
     if args.emit_scaffold:
         return emit_scaffold(Path(args.state).resolve(), members=args.member)
     if args.emit_json_scaffold:
-        return emit_json_scaffold(Path(args.state).resolve(), members=args.member)
+        return emit_json_scaffold(Path(args.state).resolve(), members=args.member, slot=args.slot)
     else:
         return print_status(Path(args.state).resolve())
 

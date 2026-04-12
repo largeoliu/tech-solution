@@ -20,25 +20,36 @@ if str(SCRIPTS_DIR) not in sys.path:
 from protocol_runtime import dump_yaml, load_yaml, refresh_receipt, repo_root_from_state_path, require_receipt
 
 
-def sync_artifacts(working_dir: Path, slots: list[dict[str, Any]]) -> list[str]:
+def sync_artifacts(working_dir: Path, slots: list[dict[str, Any]]) -> tuple[list[str], dict[str, Any]]:
     artifacts: list[str] = []
+    progress: dict[str, Any] = {}
     ctx_path = working_dir / "ctx.md"
-    if ctx_path.exists():
+    if ctx_path.exists() and ctx_path.stat().st_size > 0:
         artifacts.append("WD-CTX")
     task_path = working_dir / "task.md"
-    if task_path.exists():
+    if task_path.exists() and task_path.stat().st_size > 0:
         artifacts.append("WD-TASK")
+    exp_completed: list[str] = []
+    syn_completed: list[str] = []
     for slot_info in slots:
         slot_id = slot_info.get("slot", "")
         if not slot_id:
             continue
         exp_path = working_dir / "slots" / slot_id / "experts.md"
-        if exp_path.exists():
+        if exp_path.exists() and exp_path.stat().st_size > 0:
             artifacts.append(f"WD-EXP-{slot_id}")
+            exp_completed.append(slot_id)
         syn_path = working_dir / "slots" / slot_id / "synthesis.md"
-        if syn_path.exists():
+        if syn_path.exists() and syn_path.stat().st_size > 0:
             artifacts.append(f"WD-SYN-{slot_id}")
-    return artifacts
+            syn_completed.append(slot_id)
+    exp_completed.sort()
+    syn_completed.sort()
+    progress = {
+        "WD-EXP-SLOT-*": {"completed_slots": exp_completed},
+        "WD-SYN-SLOT-*": {"completed_slots": syn_completed},
+    }
+    return artifacts, progress
 
 
 def resolve_path(value: Any, base: Path) -> Path:
@@ -46,7 +57,7 @@ def resolve_path(value: Any, base: Path) -> Path:
     return path if path.is_absolute() else (base / path).resolve()
 
 
-def sync_artifacts_in_state(state_path: Path, require_receipt_step: int | None = None) -> list[str]:
+def sync_artifacts_in_state(state_path: Path, require_receipt_step: int | None = None) -> tuple[list[str], dict[str, Any]]:
     state = load_yaml(state_path)
     repo_root = repo_root_from_state_path(state_path)
     draft_path = resolve_path(state.get("working_draft_path") or "", repo_root)
@@ -55,11 +66,12 @@ def sync_artifacts_in_state(state_path: Path, require_receipt_step: int | None =
     if require_receipt_step is not None:
         require_receipt(state, expected_step=require_receipt_step)
     slots = state.get("slots") or []
-    artifacts = sync_artifacts(draft_path, slots)
+    artifacts, progress = sync_artifacts(draft_path, slots)
     state["produced_artifacts"] = artifacts
+    state["artifact_progress"] = progress
     refresh_receipt(state)
     dump_yaml(state_path, state)
-    return artifacts
+    return artifacts, progress
 
 
 def main() -> int:
@@ -82,8 +94,8 @@ def main() -> int:
     if args.state:
         state = load_yaml(Path(args.state).resolve())
         slots = state.get("slots") or []
-    artifacts = sync_artifacts(working_dir, slots)
-    output = {"produced_artifacts": artifacts}
+    artifacts, progress = sync_artifacts(working_dir, slots)
+    output = {"produced_artifacts": artifacts, "artifact_progress": progress}
 
     if args.write and args.state:
         state_path = Path(args.state).resolve()

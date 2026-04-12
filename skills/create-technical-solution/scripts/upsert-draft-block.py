@@ -269,6 +269,58 @@ def count_slot_sections(block: str) -> int:
     return len(re.findall(r"^\s*###\s+", block, re.MULTILINE))
 
 
+def _extract_slot_id(block_name: str) -> str | None:
+    m = re.match(r"^WD-(?:EXP|SYN)-(SLOT-\d+)$", block_name)
+    return m.group(1) if m else None
+
+
+def _all_slot_ids(state: dict[str, Any]) -> list[str]:
+    return [s.get("slot", "") for s in state.get("slots") or [] if s.get("slot")]
+
+
+def _ensure_artifact_progress(state: dict[str, Any]) -> None:
+    progress = state.setdefault("artifact_progress", {})
+    if not isinstance(progress, dict):
+        progress = {}
+        state["artifact_progress"] = progress
+    for key in ("WD-EXP-SLOT-*", "WD-SYN-SLOT-*"):
+        entry = progress.setdefault(key, {})
+        if not isinstance(entry, dict):
+            progress[key] = {}
+            entry = progress[key]
+        entry.setdefault("completed_slots", [])
+
+
+def _record_slot_completion(state: dict[str, Any], block_name: str) -> None:
+    slot_id = _extract_slot_id(block_name)
+    if not slot_id:
+        return
+    _ensure_artifact_progress(state)
+    progress = state["artifact_progress"]
+    if block_name.startswith("WD-EXP-"):
+        artifact_key = "WD-EXP-SLOT-*"
+    elif block_name.startswith("WD-SYN-"):
+        artifact_key = "WD-SYN-SLOT-*"
+    else:
+        return
+    completed = progress.get(artifact_key, {}).get("completed_slots", [])
+    if not isinstance(completed, list):
+        completed = []
+    if slot_id not in completed:
+        completed.append(slot_id)
+        completed.sort()
+    progress.setdefault(artifact_key, {})["completed_slots"] = completed
+
+
+def _check_step_completion(state: dict[str, Any], artifact_key: str) -> bool:
+    _ensure_artifact_progress(state)
+    completed = state.get("artifact_progress", {}).get(artifact_key, {}).get("completed_slots", [])
+    all_ids = _all_slot_ids(state)
+    if not all_ids:
+        return False
+    return set(completed) >= set(all_ids)
+
+
 def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -> None:
     checkpoints = state.setdefault("checkpoints", {})
     if not isinstance(checkpoints, dict):
@@ -313,28 +365,47 @@ def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -
         if 8 not in completed:
             completed.append(8)
     elif block_name.startswith("WD-EXP-"):
+        _record_slot_completion(state, block_name)
+        all_done = _check_step_completion(state, "WD-EXP-SLOT-*")
+        completed_slots = state.get("artifact_progress", {}).get("WD-EXP-SLOT-*", {}).get("completed_slots", [])
+        total_slots = len(_all_slot_ids(state))
         checkpoints["step-9"] = {
             "summary": summary,
             "skipped": False,
             "reason": "",
-            "wd_exp_count": 0,
+            "wd_exp_count": len(completed_slots),
             "completed_at": iso_now(),
         }
-        state["can_enter_step_10"] = True
-        state["current_step"] = 10
-        if 9 not in completed:
-            completed.append(9)
+        if all_done:
+            state["can_enter_step_10"] = True
+            state["current_step"] = 10
+            if 9 not in completed:
+                completed.append(9)
+        else:
+            state["can_enter_step_10"] = False
+            state["current_step"] = 9
+            if 9 not in completed:
+                completed.append(9)
     elif block_name.startswith("WD-SYN-"):
+        _record_slot_completion(state, block_name)
+        all_done = _check_step_completion(state, "WD-SYN-SLOT-*")
+        completed_slots = state.get("artifact_progress", {}).get("WD-SYN-SLOT-*", {}).get("completed_slots", [])
         checkpoints["step-10"] = {
             "summary": summary,
             "wd_syn_written": True,
-            "syn_slot_count": 0,
+            "syn_slot_count": len(completed_slots),
             "completed_at": iso_now(),
         }
-        state["can_enter_step_11"] = True
-        state["current_step"] = 11
-        if 10 not in completed:
-            completed.append(10)
+        if all_done:
+            state["can_enter_step_11"] = True
+            state["current_step"] = 11
+            if 10 not in completed:
+                completed.append(10)
+        else:
+            state["can_enter_step_11"] = False
+            state["current_step"] = 10
+            if 10 not in completed:
+                completed.append(10)
     completed.sort()
 
 
@@ -346,11 +417,13 @@ def update_counts(state: dict[str, Any], block_name: str, content: str) -> None:
     elif block_name == "WD-TASK":
         checkpoints["step-8"]["task_slot_count"] = count_slot_sections(content)
     elif block_name.startswith("WD-EXP-"):
-        checkpoints["step-9"]["wd_exp_count"] = sum(
+        completed_slots = state.get("artifact_progress", {}).get("WD-EXP-SLOT-*", {}).get("completed_slots", [])
+        checkpoints["step-9"]["wd_exp_count"] = len(completed_slots) if completed_slots else sum(
             1 for item in produced if isinstance(item, str) and item.startswith("WD-EXP-")
         )
     elif block_name.startswith("WD-SYN-"):
-        checkpoints["step-10"]["syn_slot_count"] = sum(
+        completed_slots = state.get("artifact_progress", {}).get("WD-SYN-SLOT-*", {}).get("completed_slots", [])
+        checkpoints["step-10"]["syn_slot_count"] = len(completed_slots) if completed_slots else sum(
             1 for item in produced if isinstance(item, str) and item.startswith("WD-SYN-")
         )
 

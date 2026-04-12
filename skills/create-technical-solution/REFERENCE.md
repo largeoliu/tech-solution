@@ -5,10 +5,13 @@
 ## 产物 Schema 速查
 
 - 所有 `WD-*` 都是 **working draft 目录内的稳定文件**，状态文件中的 `produced_artifacts` 仅表示这些文件已经落盘到 `working_draft_path` 目录。
+- **文件不预创建**：working draft 只初始化目录骨架（`draft/`、`draft/slots/`、`draft/slots/SLOT-XX/`），文件在对应步骤首次成功提交时才创建。文件存在即代表真实产物已落盘。
+- `artifact_progress` 跟踪步骤 9/10 的槽位级进度：`artifact_progress.WD-EXP-SLOT-*.completed_slots` 和 `artifact_progress.WD-SYN-SLOT-*.completed_slots` 记录已完成的 slot id 列表。
 - `solution_root` 固定采用双读单写策略：兼容读取历史 `.architecture/solutions/`，但新 working draft 统一写入 `.architecture/.state/create-technical-solution/[slug]/draft/`，最终文档统一写入 `.architecture/technical-solutions/`。
 - `meta.yaml` 只保留流程控制字段、路径字段、gate flags、最小 checkpoint 与 cleanup 状态；不得承载正文。
 - `checkpoints.step-N.summary` 只能写单行流程摘要，不得复述 CTX、专家分析、收敛结论或详细设计正文。
 - step 7/8/9/10 的 canonical 输入格式是 **结构化 JSON payload**，Markdown 只作为脚本渲染产物落到 working draft。
+- 步骤 9/10 支持**增量提交**：每次 `--complete` 可提交一个或多个槽位，不必一次性提交全部。脚本在每次成功提交后立即写入对应文件并更新 `artifact_progress`。
 
 - **共享上下文（WD-CTX）**：默认只保留 `上下文编号`、`来源`、`结论或约束`、`适用槽位`、`可信度或缺口`（必填）；仅当涉及新增、拆分、迁移、平行建设或职责转移时，才补充 `资产类型`、`资产标识`、`位置`、`当前职责`、`当前能力`、`可扩展点`、`已知限制`、`调用方/依赖方`、`相关证据路径`；若结论为"未发现候选"，还必须补 `搜索范围`、`搜索关键词`、`已排除目录或对象`、`未发现结论`
 - **模板任务单（WD-TASK）**：只保留 `槽位标识`、`必须消费的共享上下文`、`参与专家`、`每位专家必答问题`、`建议落位槽位`、`落位表达要求`、`缺口或阻塞项`（必填）；不重复抄写 CTX 事实详情，统一通过 CTX 编号引用
@@ -138,11 +141,20 @@
 ## 最小执行示例
 
 ```text
+FULL checkpoint.step-3 摘要示例：
+`完成；初始化 draft 目录骨架；slots=5；gate: step-4 ready`
+
 FULL checkpoint.step-8 摘要示例：
 `完成；写入 WD-TASK；slots=5；gate: step-9 ready`
 
+增量 checkpoint.step-9 摘要示例：
+`进行中；新增专家分析；累计完成=3/5；gate: step-9 continue`
+
 FULL checkpoint.step-9 摘要示例：
 `完成；写入专家分析；slots=5；gate: step-10 ready`
+
+增量 checkpoint.step-10 摘要示例：
+`进行中；新增收敛；累计完成=2/5；gate: step-10 continue`
 
 FULL checkpoint.step-10 摘要示例：
 `完成；写入协作收敛；slots=5；gate: step-11 ready`
@@ -197,6 +209,22 @@ python /path/to/run-step.py --state <状态文件路径> --complete --ticket <ti
 python /path/to/run-step.py --state <状态文件路径> --emit-json-scaffold
 ```
 
+步骤 9/10 支持按槽位缩小 scaffold 范围：
+
+```bash
+python /path/to/run-step.py --state <状态文件路径> --emit-json-scaffold --slot SLOT-03
+```
+
+`--advance` 在步骤 9/10 还会返回 `slot_progress` 字段：
+
+```json
+{
+  "completed_slots": ["SLOT-01", "SLOT-02"],
+  "remaining_slots": ["SLOT-03", "SLOT-04"],
+  "recommended_slot": "SLOT-03"
+}
+```
+
 它只输出当前创作步骤的结构化数组模板，不写 state、不写 draft，可直接作为 `--complete` 提交前的填空底稿。
 
 失败后继续使用 `python /path/to/run-step.py --state <状态文件路径>` 或 `--advance`。对外只消费 `run-step.py` 返回的恢复动作，不直接调用 validator 或其他内部脚本。
@@ -220,3 +248,4 @@ python /path/to/run-step.py --state <状态文件路径> --emit-json-scaffold
 - 不修改 working draft
 - 不修改 receipt
 - `--emit-json-scaffold 与 --complete` 不能同时使用；同理也不能与 `--advance` 同时使用
+- 步骤 9/10 支持 `--slot SLOT-XX` 参数，仅输出指定槽位的 scaffold 条目

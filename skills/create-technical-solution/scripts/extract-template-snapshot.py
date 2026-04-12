@@ -2,7 +2,7 @@
 # requires-python = ">=3.9"
 # dependencies = ["pyyaml>=6.0"]
 # ///
-"""提取模板指纹并生成 working draft 骨架。"""
+"""提取模板指纹并生成 working draft 目录骨架。"""
 
 from __future__ import annotations
 
@@ -96,17 +96,9 @@ def update_state(
         )
     working_draft.mkdir(parents=True, exist_ok=True)
     (working_draft / "slots").mkdir(parents=True, exist_ok=True)
-    for filename in ("ctx.md", "task.md"):
-        target = working_draft / filename
-        if not target.exists():
-            target.write_text("", encoding="utf-8")
     for item in headings:
         slot_dir = working_draft / "slots" / str(item["slot"])
         slot_dir.mkdir(parents=True, exist_ok=True)
-        for filename in ("experts.md", "synthesis.md"):
-            target = slot_dir / filename
-            if not target.exists():
-                target.write_text("", encoding="utf-8")
     state["solution_root"] = str(SOLUTION_ROOT)
     state["template_path"] = str(template_path.relative_to(repo_root))
     state["working_draft_path"] = str(expected_working_draft)
@@ -116,7 +108,7 @@ def update_state(
         checkpoints = {}
         state["checkpoints"] = checkpoints
     checkpoints["step-3"] = {
-        "summary": f"完成；写入 draft 骨架；slots={len(headings)}；gate: step-4 ready",
+        "summary": f"完成；初始化 draft 目录骨架；slots={len(headings)}；gate: step-4 ready",
         "template_loaded": True,
         "template_fingerprint": fingerprint,
         "slot_count": len(headings),
@@ -140,7 +132,7 @@ def main() -> int:
     if not os.environ.get("__CTS_INTERNAL_CALL"):
         print("❌ 本脚本不可直接调用。请使用 run-step.py --advance / --complete --ticket。", file=sys.stderr)
         sys.exit(1)
-    parser = argparse.ArgumentParser(description="提取模板指纹并生成 working draft 骨架")
+    parser = argparse.ArgumentParser(description="提取模板指纹并生成 working draft 目录骨架")
     parser.add_argument("--template", required=True, help="模板路径")
     parser.add_argument("--slug", required=True, help="方案 slug")
     parser.add_argument("--working-draft", required=True, help="working draft 目录路径")
