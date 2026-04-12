@@ -37,7 +37,6 @@ checkpoints:
     summary: ""
     members_checked: false
     selected_members: []
-    selected_member_count: 0
   step-6:
     summary: ""
     repowiki_checked: false

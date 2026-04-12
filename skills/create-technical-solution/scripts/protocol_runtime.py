@@ -201,10 +201,6 @@ def repo_root_from_state_path(state_path: Path) -> Path:
     return detect_project_root(state_path)
 
 
-def state_root_from_repo_root(repo_root: Path) -> Path:
-    return (repo_root / STATE_ROOT).resolve()
-
-
 def working_draft_relative_path(slug: str) -> Path:
     return STATE_ROOT / slug
 
@@ -222,17 +218,6 @@ def canonical_state_paths_for_slug(slug: str) -> dict[str, str]:
         "working_draft_path": str(working_draft_relative_path(slug)),
         "final_document_path": str(final_document_relative_path(slug)),
     }
-
-
-def canonical_repo_paths_for_slug(*, repo_root: Path, slug: str) -> dict[str, Path]:
-    relative_paths = canonical_state_paths_for_slug(slug)
-    resolved: dict[str, Path] = {}
-    for key, value in relative_paths.items():
-        path = resolve_repo_path(repo_root, value)
-        if path is None:
-            raise SystemExit(f"无法解析 canonical 路径: {key}={value}")
-        resolved[key] = path
-    return resolved
 
 
 def build_canonical_state_payload(*, state_path: Path, slug: str | None = None) -> dict[str, Any]:
