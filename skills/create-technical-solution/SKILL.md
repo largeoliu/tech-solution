@@ -59,7 +59,7 @@ compatibility:
    - 创作步骤（7、8、9、10）会自动完成 entry 动作，并返回 `business_task`、`artifact`、`required_output_shape`、`ticket`、`submit_command`、`json_scaffold_command`、`next_action`
 3. **只读 scaffold**：`python /path/to/run-step.py --state <状态文件> --emit-scaffold` → 仅向 `stdout` 输出当前步骤 Markdown scaffold；不修改 state、working draft 或 receipt
 4. **JSON scaffold（创作步骤推荐）**：`python /path/to/run-step.py --state <状态文件> --emit-json-scaffold` → 仅向 `stdout` 输出当前创作步骤的结构化 JSON 骨架；适合步骤 7/8/9/10 先拿合法数组结构再补业务值
-5. **仅在创作步骤提交业务内容时**，才使用 `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> --summary "..."`
+5. **仅在业务/创作步骤提交业务内容时**，才使用 `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket>`；checkpoint 摘要由脚本自动生成
 6. **重复**直到步骤 12 完成
 
 标准主路径示例：
@@ -71,14 +71,14 @@ compatibility:
 | 空状态 / 步骤 1 entry | `python /path/to/run-step.py --state <状态文件> --advance` |
 | 业务决策步骤 entry（1、4、5） | `python /path/to/run-step.py --state <状态文件> --advance` |
 | 创作步骤 entry（7、8、9、10） | `python /path/to/run-step.py --state <状态文件> --advance` |
-| 业务/创作步骤提交正文 | `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> --summary "..." <<'HEREDOC' <JSON payload> HEREDOC` |
+| 业务/创作步骤提交正文 | `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> <<'HEREDOC' <JSON payload> HEREDOC` |
 | 创作步骤获取 JSON 骨架 | `python /path/to/run-step.py --state <状态文件> --emit-json-scaffold` |
 
 ## 状态文件初始化
 只能通过 `run-step.py --advance` 进入空状态初始化与步骤 1。它会在 state 缺失时自动创建最小 state、返回步骤 1 的业务输入 contract，并在提交步骤 1 正文后写入 checkpoint 与路径；不得再手工 `cp templates/_template.yaml` 后补 YAML，也不得把空状态初始化理解成第二条公开流程。
 
 ## 运行入口与内部脚本
-- `python /path/to/run-step.py --state <状态文件> [--advance | --complete --ticket <ticket> --summary "..." ...]`
+- `python /path/to/run-step.py --state <状态文件> [--advance | --complete --ticket <ticket> ...]`
   - 唯一受支持的对外入口。默认通过 `--advance` 统一封装验证、receipt 刷新、参数推导、step card 加载、working draft 写入、最终文档成稿与清理
 - `python /path/to/run-step.py --state <状态文件> --emit-scaffold`
   - 同一入口下的只读辅助模式；仅输出 scaffold 到 `stdout`，不是第二条写入路径，也不会替代 `--complete`
@@ -89,12 +89,12 @@ compatibility:
   - `--emit-json-scaffold 与 --complete 不能同时使用`
 - 其他脚本（如 `initialize-state.py`、`extract-template-snapshot.py`、`upsert-draft-block.py`、`advance-state-step.py`、`render-final-document.py`、`finalize-cleanup.py`）
   - 仅保留给 `run-step.py`、测试与内部兼容流程使用；不再作为用户公开操作入口
-- 创作型步骤（7、8、9、10）统一通过 stdin/heredoc 提交结构化 JSON payload
-- Step 7: CTX entry 数组
-- Step 8: slot task 数组
-- Step 9: slot analysis 数组
-- Step 10: slot synthesis 数组
-- Markdown 只允许由脚本渲染到 working draft；模型不得手写 WD block 正文
+- 创作型步骤（7、8、9、10）统一通过 heredoc 提交结构化 JSON payload
+- Step 7: CTX entry 数组，canonical truth 写入 `ctx.json`，`ctx.md` 只是脚本导出的 render view
+- Step 8: slot task 数组，canonical truth 写入 `task.json`，`task.md` 只是脚本导出的 render view
+- Step 9: slot×member expert truth 数组；每条必须绑定 `member`，脚本按槽位拆分为 `slots/SLOT-XX/experts/<MEMBER>.json`，`experts.md` 只是 render view
+- Step 10: slot decision 数组；canonical truth 写入 `slots/SLOT-XX/decision.json`，`synthesis.md` 只是脚本导出的派生 view
+- Markdown 只允许由脚本渲染到 working draft；模型不得手写 WD block 正文，也不得把 render view 当成 canonical truth
 
 ## 状态更新规则
 - 每步完成后写入 `checkpoints.step-N` 并追加 `completed_steps`
@@ -104,7 +104,7 @@ compatibility:
 - **checkpoint 必须结构化且瘦身**：`checkpoints.step-N.summary` 只能写流程摘要，不得复述正文
 - **流程摘要只允许描述**：本步是否完成/跳过、写入了什么类型的产物、区块数量/槽位数量、下一步 gate 是否齐备；避免写 CTX 编号、正文内容或大段 Markdown
 - **严禁手写 produced_artifacts**：必须以 `run-step.py` 在块写入后的同步结果为准，不得口头宣称某个 `WD-*` 已存在
-- **ticket 由脚本主路径发放**：标准流程通过 `--advance` 自动生成一次性 `pending_ticket`；只有创作步骤真正提交正文时才显式使用 `--complete --ticket <ticket>`
+- **ticket 由脚本主路径发放**：标准流程通过 `--advance` 自动生成一次性 `pending_ticket`；业务决策步骤与创作步骤真正提交正文时，都通过 `--complete --ticket <ticket>` 提交，不再要求模型手写步骤摘要
 - **ticket 绑定现场指纹**：`pending_ticket` 会绑定当前步骤、state fingerprint、artifact fingerprint 与允许写入的 block pattern；若 `--advance` 发放 ticket 后 state、working draft、final document 或提交 block 范围发生漂移，必须重新走一次 `--advance`
 
 - **step-4 必须通过 `run-step.py` 原子完成**：`required_artifacts` 必须在同一次步骤提交中同步写入，禁止先推进再手改 YAML
@@ -113,12 +113,15 @@ compatibility:
 - **receipt 必须跟随 current_step 原子刷新**：任何 mutating script 成功后都必须把 `gate_receipt.step` 刷新到最新 `current_step`；若 `receipt.step` 落后于 `current_step`，视为非法状态，必须停下修复，不能继续写 draft、render 或 cleanup
 - **working draft 只能文件级写入**：step 7/8/9/10 只能通过 `run-step.py` 的受控写入路径更新对应文件，禁止整份覆盖 draft 目录
 - **创作步骤不得提交 Markdown 正文**：通过 stdin 传入的只能是结构化 JSON payload；如果直接提交 `## WD-*`、draft 容器标题或手写区块正文，视为无效输入
+- **step 9 truth 是 slot×member**：专家判断的真相源是 `slots/SLOT-XX/experts/<MEMBER>.json`；`experts.md` 仅用于阅读，不得把单个槽位总述当成成员真相
+- **step 10 truth 是 decision.json**：每个槽位的收敛真相源只能是 `slots/SLOT-XX/decision.json`；`synthesis.md` 仅保留脚本导出的审阅视图
 - **state 中路径必须相对化**：`solution_root` 固定为 `.architecture/technical-solutions`，`working_draft_path` 固定为 `.architecture/.state/create-technical-solution/[slug]/draft`（目录）；不得把绝对路径写回 state
 - **最终文档目录固定**：`final_document_path` 只能位于 `.architecture/technical-solutions/`，不得写入 `docs/`、项目根目录或其他自定义目录
 - **目录策略固定为双读单写**：可以读取历史 `.architecture/solutions/`，但本次流程的新 working draft 统一写入 `.architecture/.state/create-technical-solution/`，最终文档统一写入 `.architecture/technical-solutions/`
 - **禁止外部脚本补状态**：不得用 inline Python、手工 Edit YAML、直接 `rm` 文件来伪造 receipt、fingerprint、checkpoint、cleanup 结果；一旦 gate fail，必须停在当前步修复脚本要求的最小前置
 - **禁止先写 final 再追认**：step 11 只能通过 `run-step.py` 的成稿流程生成最终文档；不得先 `Write` 最终文档，再补跑内部脚本追认
-- **render 不接受外部整文**：step 11 只能从 working draft 渲染；不得先拼 `/tmp/final-document.md` 再传给脚本
+- **render 不接受外部整文**：step 11 只能从 `decision.json` truth 渲染；不得先拼 `/tmp/final-document.md` 再传给脚本，也不得把 `synthesis.md` 当成唯一输入
+- **step 11 必须写 render receipt**：`checkpoints.step-11.render_receipt.mode` 必须为 `decision_truth`，并记录每个槽位对应的 `decision.json` 路径/hash 以及最终文档 hash
 - **cleanup 失败只允许脚本化 repair**：step 12 失败时只能回到 `run-step.py` 给出的修复步骤重跑；不得阅读 validator 源码逆向补字段
 - **禁止把现成 `docs/技术方案*.md` 当主路径**：若仓库内已有历史方案，只能当背景参考；不得先重写 `docs/` 再回头补 `.architecture` 流程
 
@@ -232,7 +235,7 @@ step 8 必须按当前模板的真实槽位逐项生成任务单，不得只按"
 | members.yml 不存在 | `.architecture/` 未初始化 | 先调用 `bootstrap-architecture` 技能 |
 | 模板文件不存在 | 模板未创建或路径错误 | 检查 `.architecture/templates/technical-solution-template.md`，缺失则调用 `manage-technical-solution-template` |
 | working draft 内容丢失 | slug 不一致导致多份草稿 | 终止当前流程，以正确 slug 重启 |
-| fingerprint 反复不一致 | state.yaml 曾与 WD-* 同目录导致 fingerprint 自我矛盾（已修复）；或手动修改 YAML 导致 receipt 失效 | 确认 `working_draft_path` 以 `/draft` 结尾；运行 `runtime_doctor.py --apply-safe-fixes` 自动迁移旧布局；否则重新运行 `python /path/to/run-step.py --state <状态文件>` 按 repair 指引重新生成 receipt |
+| fingerprint 反复不一致 | state.yaml 曾与 WD-* 同目录导致 fingerprint 自我矛盾（已修复）；或手动修改 YAML 导致 receipt 失效 | 确认 `working_draft_path` 以 `/draft` 结尾；重新运行 `python /path/to/run-step.py --state <状态文件>`，按返回的 repair 指引重建 receipt 与路径状态 |
 
 ## 相关技能
 - `bootstrap-architecture`：初始化 `.architecture/` 目录、成员名册、原则文档和技术方案模板。

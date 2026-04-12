@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -88,7 +89,7 @@ def workspace(tmp_path: Path) -> dict[str, Path]:
         "members_path": members_path,
         "principles_path": principles_path,
         "state_path": state_dir / "sample-solution.yaml",
-        "working_draft_path": state_dir / "sample-solution",
+        "working_draft_path": state_dir / "sample-solution" / "draft",
         "final_document_path": solution_root / "sample-solution.md",
     }
 
@@ -113,7 +114,7 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
         "members_path": ".architecture/members.yml",
         "principles_path": ".architecture/principles.md",
         "repowiki_path": ".qoder/repowiki",
-        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution",
+        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution/draft",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
         "checkpoints": {
             "step-1": {"summary": "完成；slug=sample-solution；paths=1；gate: step-2 ready", "slug": "sample-solution", "scope_ready": True},
@@ -124,8 +125,8 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
             "step-6": {"summary": "完成；repowiki 不存在；sources=0；gate: step-7 ready", "repowiki_checked": True, "repowiki_exists": False, "repowiki_source_count": 0},
             "step-7": {"summary": "完成；写入 WD-CTX；CTX=1；gate: step-8 ready", "wd_ctx_written": True, "ctx_count": 1},
             "step-8": {"summary": "完成；写入 WD-TASK；slots=4；gate: step-9 ready", "wd_task_written": True, "task_slot_count": 4},
-            "step-9": {"summary": "完成；写入 WD-EXP-*；members=1；gate: step-10 ready", "wd_exp_written": True, "wd_exp_count": 4},
-            "step-10": {"summary": "完成；写入 WD-SYN-SLOT-*；slots=4；gate: step-11 ready", "wd_syn_written": True, "syn_slot_count": 4},
+            "step-9": {"summary": "完成；写入专家分析；slots=4；gate: step-10 ready", "wd_exp_written": True, "wd_exp_count": 4},
+            "step-10": {"summary": "完成；写入协作收敛；slots=4；gate: step-11 ready", "wd_syn_written": True, "syn_slot_count": 4},
             "step-11": {"summary": "等待成稿", "final_document_written": False, "absorbed_slot_count": 0, "rendered_via_script": False},
             "step-12": {"summary": "等待校验", "validator_passed": False, "working_draft_deleted": False, "state_file_deleted": False},
         },
@@ -153,6 +154,23 @@ def write_state(workspace: dict[str, Path], state: dict) -> None:
 
 def write_good_draft(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
+    (path / "ctx.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "CTX-01",
+                    "source": "services/a.py, models/a.py",
+                    "conclusion": "需求概述已在现有流程中有入口。",
+                    "applicable_slots": ["1.1 需求概述", "1.2 核心目标", "2.1 方案设计", "2.2 风险与验证"],
+                    "confidence": "已核实",
+                }
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     (path / "ctx.md").write_text(
         "\n".join([
             "### CTX-01",
@@ -161,6 +179,20 @@ def write_good_draft(path: Path) -> None:
             "适用槽位: 1.1 需求概述、1.2 核心目标、2.1 方案设计、2.2 风险与验证",
             "可信度或缺口: 已核实",
         ]),
+        encoding="utf-8",
+    )
+    (path / "task.json").write_text(
+        json.dumps(
+            [
+                {"slot": "1.1 需求概述", "required_ctx": ["CTX-01"]},
+                {"slot": "1.2 核心目标", "required_ctx": ["CTX-01"]},
+                {"slot": "2.1 方案设计", "required_ctx": ["CTX-01"]},
+                {"slot": "2.2 风险与验证", "required_ctx": ["CTX-01"]},
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
     (path / "task.md").write_text(
@@ -215,6 +247,24 @@ def write_good_draft(path: Path) -> None:
     for index, title in enumerate(["1.1 需求概述", "1.2 核心目标", "2.1 方案设计", "2.2 风险与验证"], start=1):
         slot = path / "slots" / f"SLOT-{index:02d}"
         slot.mkdir(parents=True, exist_ok=True)
+        experts_dir = slot / "experts"
+        experts_dir.mkdir(parents=True, exist_ok=True)
+        (experts_dir / "systems_architect.json").write_text(
+            json.dumps(
+                {
+                    "slot": title,
+                    "member": "systems_architect",
+                    "decision_type": "改造",
+                    "rationale": f"复用现有骨架并补齐 {title}。",
+                    "evidence_refs": ["CTX-01"],
+                    "open_questions": ["无"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         (slot / "experts.md").write_text(
             "\n".join([
                 "### 专家：systems_architect",
@@ -226,12 +276,37 @@ def write_good_draft(path: Path) -> None:
             encoding="utf-8",
         )
         (slot / "synthesis.md").write_text(make_wd_syn_block(title), encoding="utf-8")
+        (slot / "decision.json").write_text(
+            json.dumps(
+                {
+                    "slot": title,
+                    "target_capability": f"收敛 {title} 的最终写法。",
+                    "comparisons": [
+                        {"path": "复用", "feasibility": "☐", "evidence": "CTX-01", "reason": "不足"},
+                        {"path": "改造", "feasibility": "☑", "evidence": "CTX-01", "reason": "推荐"},
+                        {"path": "新建", "feasibility": "☐", "evidence": "CTX-01", "reason": "成本高"},
+                    ],
+                    "selected_path": "改造",
+                    "selected_writeup": f"在 {title} 位置补齐内容。",
+                    "evidence_refs": ["CTX-01"],
+                    "template_gap": "无",
+                    "open_question": "无",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
 
 def assert_good_draft(path: Path) -> None:
     assert path.is_dir()
+    assert (path / "ctx.json").exists()
     assert (path / "ctx.md").exists()
+    assert (path / "task.json").exists()
     assert (path / "task.md").exists()
+    assert (path / "slots" / "SLOT-01" / "decision.json").exists()
     assert (path / "slots" / "SLOT-01" / "experts.md").exists()
     assert (path / "slots" / "SLOT-04" / "synthesis.md").exists()
 
@@ -256,7 +331,7 @@ def test_dry_run_reports_legacy_working_draft_migration_without_mutation(workspa
     exit_code, payload = doctor.run_doctor(workspace["state_path"], output_format="json")
 
     assert exit_code == 2
-    assert any(fix["code"] == "legacy_working_draft_migration" and fix["applied"] is False for fix in payload["safe_fixes"])
+    assert any(fix["code"] == "old_layout_migration" and fix["applied"] is False for fix in payload["safe_fixes"])
     refreshed = vs.load_state(workspace["state_path"])
     assert refreshed["working_draft_path"] == ".architecture/technical-solutions/working-drafts/sample-solution.working.md"
     assert legacy_path.exists()
@@ -276,7 +351,7 @@ def test_apply_mode_migrates_legacy_working_draft_to_canonical_state_dir(workspa
     assert exit_code == 0
     assert payload["passed"] is True
     refreshed = vs.load_state(workspace["state_path"])
-    assert refreshed["working_draft_path"] == ".architecture/.state/create-technical-solution/sample-solution"
+    assert refreshed["working_draft_path"] == ".architecture/.state/create-technical-solution/sample-solution/draft"
     assert_good_draft(workspace["working_draft_path"])
     assert not legacy_path.exists()
 
@@ -295,7 +370,7 @@ def test_apply_mode_rewrites_legacy_state_path_without_clobbering_existing_canon
     assert exit_code == 0
     assert payload["passed"] is True
     refreshed = vs.load_state(workspace["state_path"])
-    assert refreshed["working_draft_path"] == ".architecture/.state/create-technical-solution/sample-solution"
+    assert refreshed["working_draft_path"] == ".architecture/.state/create-technical-solution/sample-solution/draft"
     assert_good_draft(workspace["working_draft_path"])
     assert legacy_path.read_text(encoding="utf-8") == "legacy draft content\n"
 

@@ -59,6 +59,7 @@ from protocol_runtime import (
     canonical_step_defs,
     SOLUTION_ROOT,
     compute_artifact_fingerprint,
+    default_step_summary,
     dump_yaml,
     final_document_relative_path,
     iso_now,
@@ -444,6 +445,232 @@ def _load_json_payload(raw: str) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def _trim_runtime_state_for_repair(state: dict[str, Any], *, target_step: int) -> None:
+    def artifact_step(name: str) -> int | None:
+        if name == "WD-CTX":
+            return 7
+        if name == "WD-TASK":
+            return 8
+        if name.startswith("WD-EXP-") or name == "WD-EXP-SLOT-*":
+            return 9
+        if name.startswith("WD-SYN-") or name == "WD-SYN-SLOT-*":
+            return 10
+        return None
+
+    completed = state.get("completed_steps")
+    if isinstance(completed, list):
+        state["completed_steps"] = [
+            item for item in completed if isinstance(item, int) and item < target_step
+        ]
+    checkpoints = state.get("checkpoints")
+    if isinstance(checkpoints, dict):
+        state["checkpoints"] = {
+            key: value
+            for key, value in checkpoints.items()
+            if not (str(key).startswith("step-") and str(key)[5:].isdigit() and int(str(key)[5:]) >= target_step)
+        }
+    step_cards_read = state.get("step_cards_read")
+    if isinstance(step_cards_read, dict):
+        state["step_cards_read"] = {
+            key: value
+            for key, value in step_cards_read.items()
+            if not str(key).isdigit() or int(key) < target_step
+        }
+    produced = state.get("produced_artifacts")
+    if isinstance(produced, list):
+        kept_produced = []
+        for item in produced:
+            step_num = artifact_step(str(item))
+            if step_num is None or step_num < target_step:
+                kept_produced.append(item)
+        state["produced_artifacts"] = kept_produced
+    registry = state.get("artifact_registry")
+    if isinstance(registry, dict):
+        kept_registry = {}
+        for key, value in registry.items():
+            step_num = artifact_step(str(key))
+            if step_num is None or step_num < target_step:
+                kept_registry[key] = value
+        state["artifact_registry"] = kept_registry
+    progress = state.get("artifact_progress")
+    if isinstance(progress, dict):
+        trimmed_progress = {}
+        for key, value in progress.items():
+            step_num = artifact_step(str(key))
+            if step_num is not None and step_num >= target_step:
+                continue
+            trimmed_progress[key] = value
+        state["artifact_progress"] = trimmed_progress
+    gate_fields = {
+        "can_enter_step_8": 7,
+        "can_enter_step_9": 8,
+        "can_enter_step_10": 9,
+        "can_enter_step_11": 10,
+        "can_enter_step_12": 11,
+    }
+    for field, step_num in gate_fields.items():
+        if step_num >= target_step and field in state:
+            state.pop(field, None)
+    if target_step <= 12:
+        state.pop("absorption_check_passed", None)
+        state.pop("cleanup_allowed", None)
+    state["current_step"] = target_step
+    state["pending_ticket"] = {}
+    refresh_receipt(state, step=target_step)
+
+
+def _execute_current_step_entry(state_path: Path) -> dict[str, Any]:
+    snapshot = load_runtime_snapshot(state_path)
+    state = snapshot.state
+    assert state
+
+    step = snapshot.current_step
+    mode = step_mode(step)
+    if mode == "automatic":
+        mark_code = mark_step_card_read(state_path)
+        if mark_code != 0:
+            raise RuntimeError(f"步骤 {step} 无法登记 step card 已读。")
+        prepare_code = prepare_step(state_path)
+        if prepare_code != 0:
+            raise RuntimeError(f"步骤 {step} prepare 失败。")
+        ticket = str(load_state(state_path).get("pending_ticket", {}).get("value") or "")
+        if not ticket:
+            raise RuntimeError(f"步骤 {step} 未生成 ticket。")
+        args = argparse.Namespace(
+            state=str(state_path),
+            complete=True,
+            summary=auto_summary_for_step(step),
+            slug=None,
+            solution_type=None,
+            member=[],
+            ticket=ticket,
+            _stdin_content=None,
+        )
+        code = complete_step(args)
+        if code != 0:
+            raise RuntimeError(f"步骤 {step} 自动推进失败。")
+        new_state = load_state(state_path)
+        return {
+            "status": "completed",
+            "step": step,
+            "next_step": int(new_state.get("current_step") or step),
+            "next_action": "advance",
+        }
+
+    if mode == "business":
+        if not has_valid_pending_ticket(state_path, state=state, step=step):
+            mark_code = mark_step_card_read(state_path)
+            if mark_code != 0:
+                raise RuntimeError(f"步骤 {step} 无法登记 step card 已读。")
+            prepare_code = prepare_step(state_path)
+            if prepare_code != 0:
+                raise RuntimeError(f"步骤 {step} prepare 失败。")
+        return build_business_entry_response(state_path, step)
+
+    if not has_valid_pending_ticket(state_path, state=state, step=step):
+        mark_code = mark_step_card_read(state_path)
+        if mark_code != 0:
+            raise RuntimeError(f"步骤 {step} 无法登记 step card 已读。")
+        prepare_code = prepare_step(state_path)
+        if prepare_code != 0:
+            raise RuntimeError(f"步骤 {step} prepare 失败。")
+    return build_creative_entry_response(state_path, step)
+
+
+def dispatch_repair_action(state_path: Path, repair_action: dict[str, Any]) -> dict[str, Any] | None:
+    kind = str(repair_action.get("kind") or "").strip()
+    step = int(repair_action.get("step") or 0)
+    if kind not in {"refresh_ticket", "rebuild_from_step", "rerender_final_document"}:
+        return None
+
+    state = load_state(state_path)
+    if not state:
+        return None
+
+    if kind == "refresh_ticket":
+        resolved_step = step or int(state.get("current_step") or 1)
+        state["pending_ticket"] = {}
+        refresh_receipt(state, step=resolved_step)
+        dump_yaml(state_path, state)
+        return _execute_current_step_entry(state_path)
+
+    if kind == "rebuild_from_step":
+        if step <= 0:
+            return None
+        _trim_runtime_state_for_repair(state, target_step=step)
+        dump_yaml(state_path, state)
+        return _execute_current_step_entry(state_path)
+
+    resolved_step = step or int(state.get("current_step") or 11) or 11
+    state["current_step"] = resolved_step
+    state["pending_ticket"] = {}
+    refresh_receipt(state, step=resolved_step)
+    dump_yaml(state_path, state)
+    mark_code = mark_step_card_read(state_path)
+    if mark_code != 0:
+        raise RuntimeError(f"步骤 {resolved_step} 无法登记 step card 已读。")
+    prepare_code = prepare_step(state_path)
+    if prepare_code != 0:
+        raise RuntimeError(f"步骤 {resolved_step} prepare 失败。")
+    code, stdout = render_final_document_in_process(
+        state_path, auto_summary_for_step(resolved_step)
+    )
+    if code != 0:
+        raise RuntimeError(stdout)
+    clear_pending_ticket(state_path)
+    new_state = load_state(state_path)
+    return {
+        "status": "completed",
+        "step": resolved_step,
+        "next_step": int(new_state.get("current_step") or resolved_step),
+        "next_action": "advance",
+    }
+
+
+def dispatch_validator_repair(state_path: Path, *, step: int) -> dict[str, Any] | None:
+    auto_repairable_codes = {
+        "invalid_gate_receipt",
+        "missing_artifact",
+        "missing_working_draft_block",
+        "missing_working_draft_path",
+        "invalid_working_draft_path",
+        "draft_block_overwritten",
+        "artifact_registry_mismatch",
+        "state_slots_out_of_sync",
+        "gate_flag_false",
+        "step_order_violation",
+        "final_document_not_rendered_via_script",
+        "missing_render_receipt",
+    }
+    passed, validator_output = run_validator(state_path, step)
+    if passed:
+        return None
+    payload = _load_json_payload(validator_output) or {}
+    issues = payload.get("issues")
+    if not isinstance(issues, list):
+        return None
+    issue_codes = {
+        str(item.get("code") or "").strip()
+        for item in issues
+        if isinstance(item, dict) and str(item.get("code") or "").strip()
+    }
+    if not issue_codes or not issue_codes.issubset(auto_repairable_codes):
+        return None
+    repair_plan = payload.get("repair_plan")
+    if not isinstance(repair_plan, list):
+        return None
+    for entry in repair_plan:
+        if not isinstance(entry, dict):
+            continue
+        repair_action = entry.get("repair_action")
+        if not isinstance(repair_action, dict):
+            continue
+        dispatched = dispatch_repair_action(state_path, repair_action)
+        if dispatched is not None:
+            return dispatched
+    return None
+
+
 def format_step_failure(
     *,
     step: int,
@@ -484,7 +711,7 @@ def format_step_failure(
 def upsert_blocks_in_process(
     state_path: Path,
     working_dir: Path,
-    summary: str,
+    summary: str | None,
     block_updates: list[tuple[str, str]],
     *,
     validate_step: int | None = None,
@@ -587,7 +814,7 @@ def upsert_blocks_in_process(
     )
 
 
-def render_final_document_in_process(state_path: Path, summary: str) -> tuple[int, str]:
+def render_final_document_in_process(state_path: Path, summary: str | None) -> tuple[int, str]:
     module = load_render_final_document_module()
     try:
         payload = module.render_final_document(
@@ -600,7 +827,7 @@ def render_final_document_in_process(state_path: Path, summary: str) -> tuple[in
     return 0, json.dumps(payload, ensure_ascii=False, indent=2)
 
 
-def finalize_cleanup_in_process(state_path: Path, summary: str) -> tuple[int, str]:
+def finalize_cleanup_in_process(state_path: Path, summary: str | None) -> tuple[int, str]:
     module = load_finalize_cleanup_module()
     try:
         exit_code, payload = module.run_cleanup(state_path, summary)
@@ -849,7 +1076,7 @@ def _print_next_command(state_path: Path, step: int, state: dict[str, Any]) -> N
 
 def complete_step_1(
     state_path: Path,
-    summary: str,
+    summary: str | None,
     slug: str | None,
     stdin_content: str | None = None,
     **_: Any,
@@ -861,13 +1088,14 @@ def complete_step_1(
             slug = candidate.strip() or None
     if not slug:
         return 1, '步骤 1 需要业务 JSON，至少包含字段 "slug"。'
+    summary = str(summary or "").strip() or default_step_summary(1, slug=slug)
     code, stdout = initialize_state_in_process(state_path, slug, summary)
     if code != 0:
         return code, f"initialize-state.py 失败:\n{stdout}"
     return 0, f"✅ 步骤 1 完成。slug={slug}，已推进到步骤 2。\n{stdout}"
 
 
-def complete_step_2(state_path: Path, summary: str, **_: Any) -> tuple[int, str]:
+def complete_step_2(state_path: Path, summary: str | None, **_: Any) -> tuple[int, str]:
     snapshot = load_runtime_snapshot(state_path)
     state = snapshot.state
     repo_root = snapshot.repo_root
@@ -879,6 +1107,7 @@ def complete_step_2(state_path: Path, summary: str, **_: Any) -> tuple[int, str]
             missing.append(field)
     if missing:
         return 2, f"前置文件缺失: {missing}。请先运行 bootstrap-architecture。"
+    summary = str(summary or "").strip() or default_step_summary(2)
     # 推进（advance-state-step 内部会自动补 prerequisites_checked=true）
     code, stdout = advance_state_step_in_process(
         state_path=state_path,
@@ -897,7 +1126,7 @@ def complete_step_2(state_path: Path, summary: str, **_: Any) -> tuple[int, str]
     return 0, f"✅ 步骤 2 完成。前置文件检查通过，已推进到步骤 3。"
 
 
-def complete_step_3(state_path: Path, summary: str, **_: Any) -> tuple[int, str]:
+def complete_step_3(state_path: Path, summary: str | None, **_: Any) -> tuple[int, str]:
     snapshot = load_runtime_snapshot(state_path)
     state = snapshot.state
     slug = snapshot.slug
@@ -928,7 +1157,7 @@ FULL_REQUIRED_ARTIFACTS = ["WD-CTX", "WD-TASK", "WD-EXP-SLOT-*", "WD-SYN-SLOT-*"
 
 def complete_step_4(
     state_path: Path,
-    summary: str,
+    summary: str | None,
     solution_type: str | None = None,
     stdin_content: str | None = None,
     **_: Any,
@@ -940,6 +1169,7 @@ def complete_step_4(
             solution_type = candidate.strip() or None
     if not solution_type:
         return 1, '步骤 4 需要业务 JSON 字段 "solution_type"。'
+    summary = str(summary or "").strip() or default_step_summary(4)
     code, stdout = advance_state_step_in_process(
         state_path=state_path,
         step=4,
@@ -958,7 +1188,7 @@ def complete_step_4(
 
 def complete_step_5(
     state_path: Path,
-    summary: str,
+    summary: str | None,
     members: list[str] | None = None,
     stdin_content: str | None = None,
     **_: Any,
@@ -971,6 +1201,7 @@ def complete_step_5(
             members = [str(item).strip() for item in selected if str(item).strip()]
     if not members:
         return 1, '步骤 5 需要业务 JSON 字段 "selected_members"，且至少包含一个成员。'
+    summary = str(summary or "").strip() or default_step_summary(5)
     members_json = json.dumps(members)
     code, stdout = advance_state_step_in_process(
         state_path=state_path,
@@ -991,7 +1222,7 @@ def complete_step_5(
     return 0, f"✅ 步骤 5 完成。参与成员: {members}，已推进到步骤 6。"
 
 
-def complete_step_6(state_path: Path, summary: str, **_: Any) -> tuple[int, str]:
+def complete_step_6(state_path: Path, summary: str | None, **_: Any) -> tuple[int, str]:
     snapshot = load_runtime_snapshot(state_path)
     state = snapshot.state
     repo_root = snapshot.repo_root
@@ -1003,6 +1234,7 @@ def complete_step_6(state_path: Path, summary: str, **_: Any) -> tuple[int, str]
         content_dir = repo_root / repowiki_path / "zh" / "content"
         if content_dir.exists():
             source_count = sum(1 for _ in content_dir.rglob("*.md"))
+    summary = str(summary or "").strip() or default_step_summary(6)
     code, stdout = advance_state_step_in_process(
         state_path=state_path,
         step=6,
@@ -1027,7 +1259,7 @@ def complete_step_6(state_path: Path, summary: str, **_: Any) -> tuple[int, str]
 
 def complete_creative_step(
     state_path: Path,
-    summary: str,
+    summary: str | None,
     step: int,
     stdin_content: str | None,
     snapshot: RuntimeSnapshot | None = None,
@@ -1044,13 +1276,13 @@ def complete_creative_step(
     if step == 7:
         try:
             payload = parse_json_array_payload(stdin_content, label="步骤 7 结构化内容")
-            block_updates = [("WD-CTX", module.render_ctx_payload(payload))]
+            block_updates = [("WD-CTX", json.dumps(payload, ensure_ascii=False, indent=2))]
         except ValueError as exc:
             return 1, str(exc)
     elif step == 8:
         try:
             payload = parse_json_array_payload(stdin_content, label="步骤 8 结构化内容")
-            block_updates = [("WD-TASK", module.render_task_payload(payload))]
+            block_updates = [("WD-TASK", json.dumps(payload, ensure_ascii=False, indent=2))]
         except ValueError as exc:
             return 1, str(exc)
     elif step == 9:
@@ -1106,11 +1338,13 @@ def complete_creative_step(
 
 
 def complete_step_11(
-    state_path: Path, summary: str, snapshot: RuntimeSnapshot | None = None, **_: Any
+    state_path: Path, summary: str | None, snapshot: RuntimeSnapshot | None = None, **_: Any
 ) -> tuple[int, str]:
     snapshot = snapshot or load_runtime_snapshot(state_path)
     assert snapshot is not None
-    seed_checkpoint_summary(state_path, 11, summary)
+    summary = str(summary or "").strip() or None
+    if summary:
+        seed_checkpoint_summary(state_path, 11, summary)
     passed, output = run_validator(state_path, 11, write_receipt=True)
     if not passed:
         return 2, format_step_failure(
@@ -1133,11 +1367,12 @@ def complete_step_11(
 
 
 def complete_step_12(
-    state_path: Path, summary: str, snapshot: RuntimeSnapshot | None = None, **_: Any
+    state_path: Path, summary: str | None, snapshot: RuntimeSnapshot | None = None, **_: Any
 ) -> tuple[int, str]:
     snapshot = snapshot or load_runtime_snapshot(state_path)
     assert snapshot is not None
-    seed_checkpoint_summary(state_path, 12, summary)
+    summary = str(summary or "").strip() or None
+    seed_checkpoint_summary(state_path, 12, summary or default_step_summary(12))
     passed, output = run_validator(state_path, 12, write_receipt=True)
     if not passed:
         return 2, f"步骤 12 验证失败:\n{output}"
@@ -1330,7 +1565,7 @@ def build_creative_entry_response(state_path: Path, step: int) -> dict[str, Any]
     slot_progress = _slot_progress_for_step(state, step)
     if ticket_value:
         base = run_step_base_command(state_path)
-        submit_command = f'{base} --complete --ticket {ticket_value} --summary "<完成摘要>"'
+        submit_command = f"{base} --complete --ticket {ticket_value}"
         json_scaffold_command = f"{base} --emit-json-scaffold"
         try:
             module = load_block_scaffolds_module()
@@ -1361,6 +1596,13 @@ def build_creative_entry_response(state_path: Path, step: int) -> dict[str, Any]
 
 def build_business_entry_response(state_path: Path, step: int) -> dict[str, Any]:
     state = load_state(state_path)
+    pending_ticket = state.get("pending_ticket") if isinstance(state, dict) else None
+    ticket_value = None
+    if isinstance(pending_ticket, dict) and int(pending_ticket.get("step") or 0) == step:
+        ticket_value = str(pending_ticket.get("value") or "").strip() or None
+    submit_command = None
+    if ticket_value:
+        submit_command = f"{run_step_base_command(state_path)} --complete --ticket {ticket_value}"
     return {
         "status": "needs_input",
         "step": step,
@@ -1369,6 +1611,8 @@ def build_business_entry_response(state_path: Path, step: int) -> dict[str, Any]
         "required_output_shape": structured_output_shape_for_step(step),
         "next_action": "submit_business_content",
         "current_step": int(state.get("current_step") or step),
+        "ticket": ticket_value,
+        "submit_command": submit_command,
     }
 
 
@@ -1413,56 +1657,18 @@ def advance_step(state_path: Path) -> dict[str, Any]:
     assert state
 
     step = snapshot.current_step
-    mode = step_mode(step)
-    if mode == "automatic":
-        mark_code = mark_step_card_read(state_path)
-        if mark_code != 0:
-            raise RuntimeError(f"步骤 {step} 无法登记 step card 已读。")
-        prepare_code = prepare_step(state_path)
-        if prepare_code != 0:
-            raise RuntimeError(f"步骤 {step} prepare 失败。")
-        ticket = str(load_state(state_path).get("pending_ticket", {}).get("value") or "")
-        if not ticket:
-            raise RuntimeError(f"步骤 {step} 未生成 ticket。")
-        args = argparse.Namespace(
-            state=str(state_path),
-            complete=True,
-            summary=auto_summary_for_step(step),
-            slug=None,
-            solution_type=None,
-            member=[],
-            ticket=ticket,
-            _stdin_content=None,
-        )
-        code = complete_step(args)
-        if code != 0:
-            raise RuntimeError(f"步骤 {step} 自动推进失败。")
-        new_state = load_state(state_path)
-        return {
-            "status": "completed",
-            "step": step,
-            "next_step": int(new_state.get("current_step") or step),
-            "next_action": "advance",
-        }
+    dispatched = dispatch_validator_repair(state_path, step=step)
+    if dispatched is not None:
+        return dispatched
 
-    if mode == "business":
-        if not has_valid_pending_ticket(state_path, state=state, step=step):
-            mark_code = mark_step_card_read(state_path)
-            if mark_code != 0:
-                raise RuntimeError(f"步骤 {step} 无法登记 step card 已读。")
-            prepare_code = prepare_step(state_path)
-            if prepare_code != 0:
-                raise RuntimeError(f"步骤 {step} prepare 失败。")
-        return build_business_entry_response(state_path, step)
-
-    if not has_valid_pending_ticket(state_path, state=state, step=step):
-        mark_code = mark_step_card_read(state_path)
-        if mark_code != 0:
-            raise RuntimeError(f"步骤 {step} 无法登记 step card 已读。")
-        prepare_code = prepare_step(state_path)
-        if prepare_code != 0:
-            raise RuntimeError(f"步骤 {step} prepare 失败。")
-    return build_creative_entry_response(state_path, step)
+    try:
+        return _execute_current_step_entry(state_path)
+    except RuntimeError:
+        if step_mode(step) != "automatic":
+            dispatched = dispatch_validator_repair(state_path, step=step)
+            if dispatched is not None:
+                return dispatched
+        raise
 
 
 def complete_step(args: argparse.Namespace) -> int:
@@ -1600,8 +1806,6 @@ def main() -> int:
             args._stdin_content = None
 
     if args.complete:
-        if not args.summary:
-            parser.error("--complete 需要 --summary 参数。")
         return complete_step(args)
     if args.advance:
         payload = advance_step(Path(args.state).resolve())

@@ -1,0 +1,44 @@
+{
+  "skill_name": "create-technical-solution",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "请使用 create-technical-solution skill，基于 `evals/create-technical-solution/files/requirement-new-capability.md` 生成一份技术方案。要求严格遵循当前模板，明确复用/改造/新建的选择，并输出到 `.architecture/technical-solutions/`。",
+      "expected_output": "Skill 被正确触发，沿公开主路径推进，最终生成一份基于模板的技术方案文档，并留下可验证的中间产物链路。",
+      "files": [
+        "evals/create-technical-solution/files/requirement-new-capability.md"
+      ],
+      "expectations": [
+        "使用 create-technical-solution skill 而不是自由发挥流程",
+        "最终文档位于 .architecture/technical-solutions/ 下",
+        "方案内容覆盖现有能力复用/改造/新建比较、测试和发布相关槽位"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "请使用 create-technical-solution skill，处理 `evals/create-technical-solution/files/requirement-existing-solution-update.md`。重点不是新写一份，而是按最新模板补齐缺失槽位，并确保流程回退到正确步骤。",
+      "expected_output": "Skill 能识别这是模板变更/补写场景，回退到正确步骤，补齐缺失槽位，而不是盲目整文重写。",
+      "files": [
+        "evals/create-technical-solution/files/requirement-existing-solution-update.md"
+      ],
+      "expectations": [
+        "能体现模板快照和回退语义",
+        "最终方案仍遵循当前模板结构",
+        "不会绕过中间产物直接改最终文档"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "请使用 create-technical-solution skill，基于 `evals/create-technical-solution/files/requirement-cross-module-refactor.md` 产出技术方案。这个需求涉及职责拆分和模块边界调整，请确保专家分析和收敛覆盖职责迁移、风险和回退。",
+      "expected_output": "Skill 能在跨模块重构场景下稳定生成结构化技术方案文档，并体现职责迁移相关的资产比较和收敛依据。",
+      "files": [
+        "evals/create-technical-solution/files/requirement-cross-module-refactor.md"
+      ],
+      "expectations": [
+        "内容包含职责边界、迁移顺序、风险与回退",
+        "中间产物链路不被跳过",
+        "最终文档不是泛泛而谈，而是围绕模板槽位组织"
+      ]
+    }
+  ]
+}

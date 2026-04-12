@@ -34,7 +34,7 @@ def test_load_runtime_snapshot_resolves_core_state_and_paths(tmp_path: Path) -> 
     state = {
         "current_step": 9,
         "template_path": ".architecture/templates/technical-solution-template.md",
-        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution",
+        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution/draft",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
     }
     state_path.write_text(yaml.safe_dump(state, allow_unicode=True, sort_keys=False), encoding="utf-8")
@@ -47,7 +47,7 @@ def test_load_runtime_snapshot_resolves_core_state_and_paths(tmp_path: Path) -> 
     assert snapshot.state == state
     assert snapshot.current_step == 9
     assert snapshot.template_path == (repo / ".architecture/templates/technical-solution-template.md").resolve()
-    assert snapshot.working_draft_path == (repo / ".architecture/.state/create-technical-solution/sample-solution").resolve()
+    assert snapshot.working_draft_path == (repo / ".architecture/.state/create-technical-solution/sample-solution/draft").resolve()
     assert snapshot.final_document_path == (repo / ".architecture/technical-solutions/sample-solution.md").resolve()
 
 
@@ -69,5 +69,5 @@ def test_load_runtime_snapshot_falls_back_to_slug_based_paths(tmp_path: Path) ->
     assert snapshot.slug == "sample-solution"
     assert snapshot.current_step == 3
     assert snapshot.template_path == (repo / ".architecture/templates/technical-solution-template.md").resolve()
-    assert snapshot.working_draft_path == (repo / ".architecture/.state/create-technical-solution/sample-solution").resolve()
+    assert snapshot.working_draft_path == (repo / ".architecture/.state/create-technical-solution/sample-solution/draft").resolve()
     assert snapshot.final_document_path == (repo / ".architecture/technical-solutions/sample-solution.md").resolve()

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import argparse
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -18,7 +19,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from protocol_runtime import compute_state_fingerprint, dump_yaml, iso_now, load_yaml, repo_root_from_state_path, require_receipt
+from protocol_runtime import compute_state_fingerprint, default_step_summary, dump_yaml, iso_now, load_yaml, repo_root_from_state_path, require_receipt
 
 
 def load_validator_module(scripts_dir: Path):
@@ -39,7 +40,74 @@ def load_sync_module(scripts_dir: Path):
     return module
 
 
-def run_cleanup(state_path: Path, summary: str) -> tuple[int, dict[str, Any]]:
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def relative_to_repo(path: Path, repo_root: Path) -> str:
+    try:
+        return path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def cleanup_archive_path(working_draft: Path) -> Path:
+    return working_draft.parent / "archive" / "cleanup-receipt.json"
+
+
+def collect_draft_files(working_draft: Path, repo_root: Path) -> list[dict[str, Any]]:
+    files: list[dict[str, Any]] = []
+    if not working_draft.is_dir():
+        return files
+    for path in sorted(candidate for candidate in working_draft.rglob("*") if candidate.is_file()):
+        files.append(
+            {
+                "path": relative_to_repo(path, repo_root),
+                "sha256": sha256_file(path),
+                "size": path.stat().st_size,
+            }
+        )
+    return files
+
+
+def build_cleanup_archive_payload(
+    *,
+    repo_root: Path,
+    state_path: Path,
+    working_draft: Path,
+    final_document: Path,
+    state: dict[str, Any],
+    summary: str,
+) -> dict[str, Any]:
+    draft_files = collect_draft_files(working_draft, repo_root)
+    step11 = state.get("checkpoints", {}).get("step-11", {})
+    return {
+        "archived_at": iso_now(),
+        "step": 12,
+        "state_path": relative_to_repo(state_path, repo_root),
+        "working_draft_path": relative_to_repo(working_draft, repo_root),
+        "final_document_path": relative_to_repo(final_document, repo_root),
+        "state_fingerprint": compute_state_fingerprint(state),
+        "gate_receipt": dict(state.get("gate_receipt") or {}),
+        "step_11_summary": str(step11.get("summary") or ""),
+        "step_12_summary": summary,
+        "render_receipt": dict(step11.get("render_receipt") or {}),
+        "final_document_hash": sha256_file(final_document) if final_document.is_file() else "",
+        "draft_file_count": len(draft_files),
+        "draft_files": draft_files,
+        "deleted": {
+            "working_draft": False,
+            "state_file": False,
+        },
+    }
+
+
+def write_cleanup_archive(archive_path: Path, payload: dict[str, Any]) -> None:
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    archive_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def run_cleanup(state_path: Path, summary: str | None) -> tuple[int, dict[str, Any]]:
     if not state_path.exists():
         return 2, {
             "passed": False,
@@ -75,7 +143,8 @@ def run_cleanup(state_path: Path, summary: str) -> tuple[int, dict[str, Any]]:
     if not isinstance(step12, dict):
         step12 = {}
         checkpoints["step-12"] = step12
-    step12["summary"] = summary
+    resolved_summary = str(summary or "").strip() or default_step_summary(12)
+    step12["summary"] = resolved_summary
     step12["validator_passed"] = False
     step12["working_draft_deleted"] = False
     step12["state_file_deleted"] = False
@@ -105,7 +174,7 @@ def run_cleanup(state_path: Path, summary: str) -> tuple[int, dict[str, Any]]:
     refreshed_state["absorption_check_passed"] = True
     refreshed_state["cleanup_allowed"] = True
     step12 = refreshed_state.setdefault("checkpoints", {}).setdefault("step-12", {})
-    step12["summary"] = summary
+    step12["summary"] = resolved_summary
     step12["validator_passed"] = True
     step12["working_draft_deleted"] = False
     step12["state_file_deleted"] = False
@@ -118,6 +187,17 @@ def run_cleanup(state_path: Path, summary: str) -> tuple[int, dict[str, Any]]:
     refreshed_state["gate_receipt"]["validated_at"] = iso_now()
     dump_yaml(state_path, refreshed_state)
 
+    archive_path = cleanup_archive_path(working_draft)
+    archive_payload = build_cleanup_archive_payload(
+        repo_root=repo_root,
+        state_path=state_path,
+        working_draft=working_draft,
+        final_document=final_document,
+        state=refreshed_state,
+        summary=resolved_summary,
+    )
+    write_cleanup_archive(archive_path, archive_payload)
+
     import shutil
     shutil.rmtree(str(working_draft))
     if state_path.exists():
@@ -125,6 +205,13 @@ def run_cleanup(state_path: Path, summary: str) -> tuple[int, dict[str, Any]]:
         state_path.unlink(missing_ok=False)
         if not any(state_parent.iterdir()):
             shutil.rmtree(str(state_parent))
+
+    archive_payload["deleted"] = {
+        "working_draft": not working_draft.exists(),
+        "state_file": not state_path.exists(),
+    }
+    archive_payload["cleanup_completed_at"] = iso_now()
+    write_cleanup_archive(archive_path, archive_payload)
 
     return 0, {
         "passed": True,
