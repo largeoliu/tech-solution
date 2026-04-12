@@ -78,12 +78,23 @@ def compute_state_fingerprint(state: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+ARTIFACT_FINGERPRINT_EXCLUDED_NAMES = frozenset({
+    "state.yaml",
+    "meta.yaml",
+    ".gitkeep",
+    ".gitignore",
+    ".DS_Store",
+})
+
+
 def compute_artifact_fingerprint(*, repo_root: Path, state: dict[str, Any]) -> str:
     entries: list[tuple[str, str]] = []
 
     draft_path = resolve_repo_path(repo_root, state.get("working_draft_path"))
     if draft_path and draft_path.is_dir():
         for path in sorted(p for p in draft_path.rglob("*") if p.is_file()):
+            if path.name in ARTIFACT_FINGERPRINT_EXCLUDED_NAMES:
+                continue
             relative = path.relative_to(repo_root).as_posix()
             content_hash = hashlib.sha256(path.read_bytes()).hexdigest()
             entries.append((relative, content_hash))
@@ -179,7 +190,7 @@ def workflow_default_block(step_id: int) -> str | None:
 
 def slug_from_state_path(state_path: Path) -> str:
     resolved = state_path.resolve()
-    if resolved.name == "meta.yaml":
+    if resolved.name in ("meta.yaml", "state.yaml"):
         return resolved.parent.name
     return resolved.name.rsplit(".", 1)[0]
 
@@ -202,7 +213,7 @@ def repo_root_from_state_path(state_path: Path) -> Path:
 
 
 def working_draft_relative_path(slug: str) -> Path:
-    return STATE_ROOT / slug
+    return STATE_ROOT / slug / "draft"
 
 
 def final_document_relative_path(slug: str) -> Path:

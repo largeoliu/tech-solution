@@ -1232,12 +1232,13 @@ def validate_pending_ticket(
     current_state_fingerprint = state.get("gate_receipt", {}).get("state_fingerprint", "")
     if current_state_fingerprint != str(pending_ticket.get("state_fingerprint") or ""):
         return 1, "❌ 状态自 ticket 发放后已变化，请重新执行 --advance。"
-    current_artifact_fingerprint = compute_artifact_fingerprint(
-        repo_root=repo_root_from_state_path(state_path),
-        state=state,
-    )
-    if current_artifact_fingerprint != str(pending_ticket.get("artifact_fingerprint") or ""):
-        return 1, "❌ 中间产物自 ticket 发放后已变化，请不要删除现有 draft 文件，直接重新执行 --advance。"
+    if step_mode(step) != "automatic":
+        current_artifact_fingerprint = compute_artifact_fingerprint(
+            repo_root=repo_root_from_state_path(state_path),
+            state=state,
+        )
+        if current_artifact_fingerprint != str(pending_ticket.get("artifact_fingerprint") or ""):
+            return 1, "❌ 中间产物自 ticket 发放后已变化，请不要删除现有 draft 文件，直接重新执行 --advance。"
     return None
 
 
@@ -1250,12 +1251,13 @@ def has_valid_pending_ticket(state_path: Path, *, state: dict[str, Any], step: i
     current_state_fingerprint = str(state.get("gate_receipt", {}).get("state_fingerprint") or "")
     if current_state_fingerprint != str(pending_ticket.get("state_fingerprint") or ""):
         return False
-    current_artifact_fingerprint = compute_artifact_fingerprint(
-        repo_root=repo_root_from_state_path(state_path),
-        state=state,
-    )
-    if current_artifact_fingerprint != str(pending_ticket.get("artifact_fingerprint") or ""):
-        return False
+    if step_mode(step) != "automatic":
+        current_artifact_fingerprint = compute_artifact_fingerprint(
+            repo_root=repo_root_from_state_path(state_path),
+            state=state,
+        )
+        if current_artifact_fingerprint != str(pending_ticket.get("artifact_fingerprint") or ""):
+            return False
     return True
 
 

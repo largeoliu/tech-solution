@@ -259,7 +259,7 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
     if code == "repowiki_not_consumed":
         return "回到步骤 7，实际读取并引用 repowiki，再把来源条目写入 WD-CTX。"
     if code == "invalid_working_draft_path":
-        return "回到步骤 3，重新生成 .architecture/.state/create-technical-solution/[slug]/ 目录。"
+        return "回到步骤 3，重新生成 .architecture/.state/create-technical-solution/[slug]/draft/ 目录。"
     if code == "invalid_final_document_path":
         return "回到步骤 1 或 11，把 final_document_path 固定到 .architecture/technical-solutions/[slug].md。"
     if code == "final_document_headings_mismatch":

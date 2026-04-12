@@ -123,8 +123,8 @@ def run_cleanup(state_path: Path, summary: str) -> tuple[int, dict[str, Any]]:
     if state_path.exists():
         state_parent = state_path.parent
         state_path.unlink(missing_ok=False)
-        if state_parent.name != ".state" and not any(state_parent.iterdir()):
-            state_parent.rmdir()
+        if not any(state_parent.iterdir()):
+            shutil.rmtree(str(state_parent))
 
     return 0, {
         "passed": True,

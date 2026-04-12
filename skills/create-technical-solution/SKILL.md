@@ -107,7 +107,7 @@ compatibility:
 - **receipt 必须跟随 current_step 原子刷新**：任何 mutating script 成功后都必须把 `gate_receipt.step` 刷新到最新 `current_step`；若 `receipt.step` 落后于 `current_step`，视为非法状态，必须停下修复，不能继续写 draft、render 或 cleanup
 - **working draft 只能文件级写入**：step 7/8/9/10 只能通过 `run-step.py` 的受控写入路径更新对应文件，禁止整份覆盖 draft 目录
 - **创作步骤不得提交 Markdown 正文**：通过 stdin 传入的只能是结构化 JSON payload；如果直接提交 `## WD-*`、draft 容器标题或手写区块正文，视为无效输入
-- **state 中路径必须相对化**：`solution_root` 固定为 `.architecture/technical-solutions`，`working_draft_path` 固定为 `.architecture/.state/create-technical-solution/[slug]`（目录）；不得把绝对路径写回 state
+- **state 中路径必须相对化**：`solution_root` 固定为 `.architecture/technical-solutions`，`working_draft_path` 固定为 `.architecture/.state/create-technical-solution/[slug]/draft`（目录）；不得把绝对路径写回 state
 - **最终文档目录固定**：`final_document_path` 只能位于 `.architecture/technical-solutions/`，不得写入 `docs/`、项目根目录或其他自定义目录
 - **目录策略固定为双读单写**：可以读取历史 `.architecture/solutions/`，但本次流程的新 working draft 统一写入 `.architecture/.state/create-technical-solution/`，最终文档统一写入 `.architecture/technical-solutions/`
 - **禁止外部脚本补状态**：不得用 inline Python、手工 Edit YAML、直接 `rm` 文件来伪造 receipt、fingerprint、checkpoint、cleanup 结果；一旦 gate fail，必须停在当前步修复脚本要求的最小前置
@@ -226,7 +226,7 @@ step 8 必须按当前模板的真实槽位逐项生成任务单，不得只按"
 | members.yml 不存在 | `.architecture/` 未初始化 | 先调用 `bootstrap-architecture` 技能 |
 | 模板文件不存在 | 模板未创建或路径错误 | 检查 `.architecture/templates/technical-solution-template.md`，缺失则调用 `manage-technical-solution-template` |
 | working draft 内容丢失 | slug 不一致导致多份草稿 | 终止当前流程，以正确 slug 重启 |
-| fingerprint 反复不一致 | 手动修改 YAML 导致 receipt 失效 | 不要使用 inline Python 修改 state；重新运行 `python /path/to/run-step.py --state <状态文件>`，按当前步骤的 repair 指引重新生成合法 receipt |
+| fingerprint 反复不一致 | state.yaml 曾与 WD-* 同目录导致 fingerprint 自我矛盾（已修复）；或手动修改 YAML 导致 receipt 失效 | 确认 `working_draft_path` 以 `/draft` 结尾；运行 `runtime_doctor.py --apply-safe-fixes` 自动迁移旧布局；否则重新运行 `python /path/to/run-step.py --state <状态文件>` 按 repair 指引重新生成 receipt |
 
 ## 相关技能
 - `bootstrap-architecture`：初始化 `.architecture/` 目录、成员名册、原则文档和技术方案模板。

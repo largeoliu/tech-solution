@@ -110,6 +110,35 @@ def legacy_working_draft_fix(
     }
 
 
+def old_layout_migration_fix(
+    *,
+    repo_root: Path,
+    slug: str,
+    state: dict[str, Any],
+    canonical_draft_path: Path,
+) -> dict[str, Any] | None:
+    raw_path = str(state.get("working_draft_path") or "").strip()
+    canonical_relative = str(working_draft_relative_path(slug))
+    if raw_path == canonical_relative:
+        return None
+    old_dir = resolve_repo_path(repo_root, raw_path)
+    if old_dir is None or not old_dir.is_dir():
+        return None
+    wd_files = ["ctx.md", "task.md", "slots"]
+    has_old_layout = any((old_dir / f).exists() for f in wd_files)
+    if not has_old_layout:
+        return None
+    return {
+        "code": "old_layout_migration",
+        "description": f"migrate WD files from {raw_path}/ to {canonical_relative}/",
+        "from_path": str(old_dir),
+        "path": str(canonical_draft_path),
+        "applied": False,
+        "eligible": True,
+        "move_files": True,
+    }
+
+
 def receipt_fix_entry(*, step: int) -> dict[str, Any]:
     return {
         "code": "refresh_gate_receipt",
@@ -147,6 +176,15 @@ def run_doctor(
     if draft_fix is not None:
         safe_fixes.append(draft_fix)
 
+    layout_fix = old_layout_migration_fix(
+        repo_root=snapshot.repo_root,
+        slug=snapshot.slug,
+        state=state,
+        canonical_draft_path=canonical_draft_path,
+    )
+    if layout_fix is not None:
+        safe_fixes.append(layout_fix)
+
     mutated = False
     if apply_safe_fixes:
         for fix in safe_fixes:
@@ -162,6 +200,18 @@ def run_doctor(
                     target = Path(fix["path"])
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.move(str(source), str(target))
+                state["working_draft_path"] = str(working_draft_relative_path(snapshot.slug))
+                dump_yaml(resolved_state_path, state)
+                fix["applied"] = True
+                mutated = True
+            elif fix["code"] == "old_layout_migration":
+                source = Path(fix["from_path"])
+                target = Path(fix["path"])
+                target.mkdir(parents=True, exist_ok=True)
+                for item in ["ctx.md", "task.md", "slots"]:
+                    src_item = source / item
+                    if src_item.exists():
+                        shutil.move(str(src_item), str(target / item))
                 state["working_draft_path"] = str(working_draft_relative_path(snapshot.slug))
                 dump_yaml(resolved_state_path, state)
                 fix["applied"] = True

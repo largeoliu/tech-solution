@@ -5,7 +5,7 @@
 ## 产物 Schema 速查
 
 - 所有 `WD-*` 都是 **working draft 目录内的稳定文件**，状态文件中的 `produced_artifacts` 仅表示这些文件已经落盘到 `working_draft_path` 目录。
-- `solution_root` 固定采用双读单写策略：兼容读取历史 `.architecture/solutions/`，但新 working draft 统一写入 `.architecture/.state/create-technical-solution/[slug]/`，最终文档统一写入 `.architecture/technical-solutions/`。
+- `solution_root` 固定采用双读单写策略：兼容读取历史 `.architecture/solutions/`，但新 working draft 统一写入 `.architecture/.state/create-technical-solution/[slug]/draft/`，最终文档统一写入 `.architecture/technical-solutions/`。
 - `meta.yaml` 只保留流程控制字段、路径字段、gate flags、最小 checkpoint 与 cleanup 状态；不得承载正文。
 - `checkpoints.step-N.summary` 只能写单行流程摘要，不得复述 CTX、专家分析、收敛结论或详细设计正文。
 - step 7/8/9/10 的 canonical 输入格式是 **结构化 JSON payload**，Markdown 只作为脚本渲染产物落到 working draft。
