@@ -58,7 +58,7 @@ def initialize_state(
         "completed_at": iso_now(),
     }
     for key, value in canonical.items():
-        if key in {"slug", "current_step"}:
+        if key in {"current_step"}:
             continue
         state[key] = value
     pending_questions = state.setdefault("pending_questions", [])

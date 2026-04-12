@@ -62,17 +62,28 @@ def extract_slot_headings(markdown: str) -> list[str]:
     return [title for level, title in headings if level == slot_level]
 
 
-WRITEUP_RE = re.compile(r"^\s*-\s*选定写法:\s*(.+?)\s*$", re.MULTILINE)
+WRITEUP_START_RE = re.compile(r"^-\s*选定写法:\s*$", re.MULTILINE)
+WRITEUP_INLINE_RE = re.compile(r"^-\s*选定写法:\s*(.+?)\s*$", re.MULTILINE)
 
 
 def extract_final_writeup(content: str, title: str) -> str:
-    match = WRITEUP_RE.search(content)
-    if not match:
-        raise SystemExit(
-            f"槽位「{title}」的 WD-SYN 缺少可用于最终成稿的 `选定写法`。"
-            "请在步骤 10 补齐该字段后重新提交。"
+    match = WRITEUP_START_RE.search(content)
+    if match:
+        remainder = content[match.end():]
+        end_match = re.search(
+            r"^-\s*(?:关键证据引用|建议落位槽位|模板承载缺口|未决问题)",
+            remainder,
+            re.MULTILINE,
         )
-    return match.group(1).strip()
+        body = remainder[: end_match.start()] if end_match else remainder
+        return body.strip()
+    match = WRITEUP_INLINE_RE.search(content)
+    if match:
+        return match.group(1).strip()
+    raise SystemExit(
+        f"槽位「{title}」的 WD-SYN 缺少可用于最终成稿的 `选定写法`。"
+        "请在步骤 10 补齐该字段后重新提交。"
+    )
 
 
 def strip_slot_heading(content: str, title: str) -> str:
@@ -124,19 +135,33 @@ def render_from_draft(state_path: Path) -> str:
 
     template_content = template_path.read_text(encoding="utf-8")
     expected_slots = extract_slot_headings(template_content)
+    slot_levels: dict[str, int] = {}
+    for line in template_content.splitlines():
+        m = re.match(r"^(#{2,6})\s+(.+?)\s*$", line)
+        if m:
+            t = normalize_text(m.group(2))
+            if t in expected_slots:
+                slot_levels[t] = len(m.group(1))
     lines: list[str] = []
+    skip_until_level: int | None = None
     for raw_line in template_content.splitlines():
+        heading_match = re.match(r"^(#{2,6})\s+(.+?)\s*$", raw_line)
+        if heading_match:
+            level = len(heading_match.group(1))
+            title = normalize_text(heading_match.group(2))
+            if title in expected_slots:
+                lines.append(raw_line)
+                body = sections.get(title, "").strip()
+                if body:
+                    lines.append("")
+                    lines.extend(body.splitlines())
+                skip_until_level = slot_levels.get(title)
+                continue
+            if level <= (skip_until_level or 99):
+                skip_until_level = None
+        if skip_until_level is not None:
+            continue
         lines.append(raw_line)
-        match = re.match(r"^(#{2,6})\s+(.+?)\s*$", raw_line)
-        if not match:
-            continue
-        title = normalize_text(match.group(2))
-        if title not in expected_slots:
-            continue
-        body = sections.get(title, "").strip()
-        if body:
-            lines.append("")
-            lines.extend(body.splitlines())
     return "\n".join(lines).rstrip() + "\n"
 
 

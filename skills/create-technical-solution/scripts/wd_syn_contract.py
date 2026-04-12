@@ -26,7 +26,7 @@ def required_slot_fragments(title: str) -> list[str]:
         "| 新建 |",
         "#### 选定路径",
         "- 路径:",
-        "- 选定写法:",
+        "- 选定写法:\n<本槽位最终写法，支持多行 Markdown>",
         "- 关键证据引用:",
         f"- 建议落位槽位: {title}",
         "- 模板承载缺口:",

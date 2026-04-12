@@ -10,7 +10,7 @@
    - 确认步骤 5 已完成（selected_members 已写入且非空）
    - 若验证失败，按 `repair_plan[]` 修复后重试
    - 展示自检结果（通过/不通过 + 具体原因）
-2. 执行 `find . -type d -name "repowiki"`
+ 2. 检测 repowiki 目录：脚本默认检查 `.qoder/repowiki`（路径可在状态文件 `repowiki_path` 字段中配置）
 3. 存在则记录路径并标记下一步必须纳入
    - **记录格式**：`repowiki_path: ".qoder/repowiki/zh/content"`
    - **标记格式**：`repowiki_exists: true`

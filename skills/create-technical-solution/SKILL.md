@@ -125,7 +125,6 @@ compatibility:
 - 步骤 9 必须实际加载对应专家的角色和视角，不得模拟 `WD-EXP-SLOT-*` 产出——跳过专家分析等于跳过多视角验证，方案会遗漏关键风险。
 - `WD-EXP-SLOT-*` 必须按槽位稳定落盘，每个槽位内再保留逐专家小节；不得用单个总块冒充多个槽位产物。
 - 步骤 10 必须保留 `WD-SYN-SLOT-*` 收敛区块，不得以最终文档替代——中间产物和最终文档职责不同，缺少逐槽位收敛会导致回退时无法追溯决策依据。
-- `moderate` 流程的 step-9 必须显式 skip，而不是“先推进 step-9 再口头说明直接做 step-10”。
 - 步骤 1-12 进入前必须先通过 `run-step.py` 触发 validator 门禁并写 receipt；若未通过，优先消费 `--format json` 返回的 `repair_plan[]`，按 `repair_plan[].step` 与 `repair_plan[].depends_on_steps` 安排修复顺序，按 `repair_plan[].action_type` 判断是否需要重跑对应步骤，并用 `repair_plan[].script_command` 作为首选重试命令；产物闭合以 `repair_plan[].expected_artifacts_after_fix` 为准，再结合 `summary.recommended_repair_sequence`、`summary.recommended_rollback_step`、`summary.missing_artifacts`、`summary.skip_instead_of_retry` 与 `issues[*].repair_guidance` 补充判断，直到通过后继续
 
 <HARD-GATE>

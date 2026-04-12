@@ -15,7 +15,7 @@
 - **专家分析（WD-EXP-SLOT-*）**：默认只保留 `参与槽位`、`决策类型`、`核心理由`、`关键证据引用`、`未决点`（必填）；每个槽位文件内再按专家小节展开；仅 `新建` 时强制补充不可复用 / 不可改造证据说明
 - **协作收敛（WD-SYN-SLOT-*）**：
   `目标能力`、`候选方案对比`、`选定路径`、`选定写法`、`关键证据引用`、`建议落位槽位`、`模板承载缺口`、`未决问题`
-  其中 `选定写法` 是 step 11 成稿的直接来源；`候选方案对比`、`关键证据引用`、`模板承载缺口`、`未决问题` 仅保留在 working draft 中，不进入最终技术方案文档
+  其中 `选定写法` 支持多段落 Markdown，是最终技术方案该槽位正文的直接来源，应写完该槽位需要的全部正式内容；`候选方案对比`、`关键证据引用`、`模板承载缺口`、`未决问题` 仅保留在 working draft 中，不进入最终技术方案文档
 
 ## 结构化提交示例
 
@@ -29,6 +29,22 @@
     "conclusion": "需求概述沿用现有入口。",
     "applicable_slots": ["1.1 需求概述", "1.2 核心目标"],
     "confidence": "已验证"
+  },
+  {
+    "id": "CTX-02",
+    "source": "services/order_service.go, services/payment_service.go",
+    "conclusion": "现有订单服务不支持按比例抽取，需新增 SpotCheckService。",
+    "applicable_slots": ["2.1 方案设计"],
+    "confidence": "已验证",
+    "asset_type": "领域服务",
+    "asset_id": "SpotCheckService",
+    "location": "services/spot_check/",
+    "current_duty": "当前仅支持按数量抽取",
+    "current_capability": "抽取规则固定，不可配置",
+    "extensibility": "可通过扩展配置实现比例配置",
+    "known_limits": "不支持动态比例调整，需改表",
+    "callers_deps": "OrderService(调用方)",
+    "evidence_path": "services/order_service.go:120"
   }
 ]
 ```
@@ -39,7 +55,15 @@
 [
   {
     "slot": "1.1 需求概述",
-    "required_ctx": ["CTX-01"]
+    "required_ctx": ["CTX-01"],
+    "participating_experts": ["ARCH"],
+    "expert_questions": [
+      "当前需求概述的现有资产是什么？复用/改造/新建分别的可行性？",
+      "落位到模板 1.1 槽位需要承载的最小闭环是什么？"
+    ],
+    "suggested_slot": "1.1 需求概述",
+    "expression_requirements": "写明需求来源、核心目标和约束条件",
+    "blockers": "无"
   }
 ]
 ```
@@ -70,7 +94,11 @@
       {"path": "改造", "feasibility": "✅", "evidence": "CTX-01", "reason": "推荐"}
     ],
     "selected_path": "改造",
-    "selected_writeup": "在 2.1 方案设计 位置补齐内容。",
+    "selected_writeup": "整体采用改造路径，在现有 OrderService 上扩展。
+
+新增字段 `spotRuleConfig` 存储比例配置，向后兼容。
+
+服务层增加策略分发逻辑，根据配置选择抽取方式。",
     "evidence_refs": ["CTX-01"],
     "template_gap": "无",
     "open_question": "无"
@@ -173,4 +201,3 @@ python /path/to/run-step.py --state <状态文件路径> --complete --ticket <ti
 - 不修改 working draft
 - 不修改 receipt
 - `--emit-scaffold 与 --complete 不能同时使用`；同理也不能与 `--advance` 同时使用
-- scaffold 步骤选择遵循当前 auto-skip 语义（`light` 的 8/9/10、`moderate` 的 9/10 会映射到 step-10 scaffold）

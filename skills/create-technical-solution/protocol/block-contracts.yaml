@@ -12,6 +12,20 @@ blocks:
         - conclusion
         - applicable_slots
         - confidence
+      optional_fields:
+        - asset_type       # 资产类型
+        - asset_id         # 资产标识
+        - location         # 位置
+        - current_duty     # 当前职责
+        - current_capability  # 当前能力
+        - extensibility    # 可扩展点
+        - known_limits     # 已知限制
+        - callers_deps     # 调用方/依赖方
+        - evidence_path    # 相关证据路径
+        - search_scope     # 搜索范围（未发现候选时）
+        - search_keywords  # 搜索关键词（未发现候选时）
+        - excluded         # 已排除目录或对象（未发现候选时）
+        - not_found_conclusion  # 未发现结论（未发现候选时）
   WD-TASK:
     type: singleton
     heading: WD-TASK

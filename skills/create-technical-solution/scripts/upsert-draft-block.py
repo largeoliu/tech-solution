@@ -48,6 +48,23 @@ def _default_block_for_step(step: int) -> str | None:
     return {7: "WD-CTX", 8: "WD-TASK"}.get(step)
 
 
+CTX_EXTENSION_FIELDS = [
+    ("资产类型", "asset_type"),
+    ("资产标识", "asset_id"),
+    ("位置", "location"),
+    ("当前职责", "current_duty"),
+    ("当前能力", "current_capability"),
+    ("可扩展点", "extensibility"),
+    ("已知限制", "known_limits"),
+    ("调用方/依赖方", "callers_deps"),
+    ("相关证据路径", "evidence_path"),
+    ("搜索范围", "search_scope"),
+    ("搜索关键词", "search_keywords"),
+    ("已排除目录或对象", "excluded"),
+    ("未发现结论", "not_found_conclusion"),
+]
+
+
 def render_ctx_payload(entries: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for index, entry in enumerate(entries, start=1):
@@ -66,9 +83,13 @@ def render_ctx_payload(entries: list[dict[str, Any]]) -> str:
                 f"结论或约束: {conclusion}",
                 f"适用槽位: {slots_text}",
                 f"可信度或缺口: {confidence}",
-                "",
             ]
         )
+        for label, key in CTX_EXTENSION_FIELDS:
+            value = str(entry.get(key) or "").strip()
+            if value:
+                lines.append(f"- {label}: {value}")
+        lines.append("")
     return "\n".join(lines).strip()
 
 
@@ -186,7 +207,7 @@ def render_syn_payload(entries: list[dict[str, Any]], slots: list[dict[str, Any]
                 *table_lines,
                 "#### 选定路径",
                 f"- 路径: {str(entry.get('selected_path') or '').strip()}",
-                f"- 选定写法: {str(entry.get('selected_writeup') or '').strip()}",
+                f"- 选定写法:\n{str(entry.get('selected_writeup') or '').strip()}",
                 f"- 关键证据引用: {', '.join(str(item).strip() for item in evidence_refs if str(item).strip())}",
                 f"- 建议落位槽位: {slot_title}",
                 f"- 模板承载缺口: {str(entry.get('template_gap') or '无').strip()}",
