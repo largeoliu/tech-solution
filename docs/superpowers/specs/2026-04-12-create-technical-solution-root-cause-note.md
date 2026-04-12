@@ -116,6 +116,32 @@ These are worthwhile, but no longer blockers for the main execution path:
 2. Consider deriving public protocol examples from one script-owned source to reduce future drift.
 3. Consider shrinking `json_scaffold_preview` for very large templates if payload size becomes noisy.
 
+## Review Follow-Ups
+
+After the first merge, a code review identified two important issues that were addressed in a follow-up commit (`1f91867`).
+
+### Issue 1: Step 9 JSON scaffold ignored member filtering
+
+The `build_exp_json_scaffold` function computed `_resolved_members` but never used it, producing one flat entry per slot regardless of how many members were selected. The test `test_emit_json_scaffold_step9_respects_member_filter` had a misleading name — it asserted shape but not filtering behavior.
+
+Fix: rewrote `build_exp_json_scaffold` to expand entries per `slot × member` pair, added a `member` field to each entry, and updated the test to assert member values appear in output. Also added a second test confirming that two selected members produce double the entries.
+
+### Issue 2: Over-broad `WD-*` summary rejection
+
+Replacing the removed `WD-EXP` single-pattern with `re.compile(r"WD-[A-Z]+(?:-[A-Z0-9*]+)*")` was too aggressive — it rejected all `WD-*` strings, including the legitimate short summaries `WD-CTX 完成` and `WD-TASK 完成` used by steps 7 and 8.
+
+Fix: narrowed the pattern to only block internal wildcard artifact identifiers:
+
+```python
+re.compile(r"WD-(?:EXP|SYN)-[A-Z0-9*\-]+")
+```
+
+This allows `WD-CTX` and `WD-TASK` in summaries while still catching `WD-EXP-SLOT-*` and `WD-SYN-SLOT-*`. A regression test `test_validator_rejects_generic_wd_artifact_identifier_in_summary` was added to lock in the narrowing.
+
+### Lesson
+
+Both issues were caught by having tests that named the wrong thing (member filter) or by testing at the wrong granularity (blocking all `WD-*` instead of just the internal artifact wildcard forms). The review process paid for itself twice.
+
 ## Bottom Line
 
 The run failed because the workflow still leaked protocol assembly work to the model.
