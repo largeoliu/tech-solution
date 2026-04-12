@@ -210,8 +210,12 @@ def run_doctor(
                 target.mkdir(parents=True, exist_ok=True)
                 for item in ["ctx.md", "task.md", "slots"]:
                     src_item = source / item
+                    tgt_item = target / item
                     if src_item.exists():
-                        shutil.move(str(src_item), str(target / item))
+                        if tgt_item.exists():
+                            if src_item.stat().st_mtime <= tgt_item.stat().st_mtime:
+                                continue
+                        shutil.move(str(src_item), str(tgt_item))
                 state["working_draft_path"] = str(working_draft_relative_path(snapshot.slug))
                 dump_yaml(resolved_state_path, state)
                 fix["applied"] = True
