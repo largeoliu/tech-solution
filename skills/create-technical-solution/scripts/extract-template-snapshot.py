@@ -94,6 +94,19 @@ def update_state(
             "working draft 路径不符合协议："
             f"期望 {expected_working_draft}，实际 {actual_working_draft}"
         )
+    working_draft.mkdir(parents=True, exist_ok=True)
+    (working_draft / "slots").mkdir(parents=True, exist_ok=True)
+    for filename in ("ctx.md", "task.md"):
+        target = working_draft / filename
+        if not target.exists():
+            target.write_text("", encoding="utf-8")
+    for item in headings:
+        slot_dir = working_draft / "slots" / str(item["slot"])
+        slot_dir.mkdir(parents=True, exist_ok=True)
+        for filename in ("experts.md", "synthesis.md"):
+            target = slot_dir / filename
+            if not target.exists():
+                target.write_text("", encoding="utf-8")
     state["solution_root"] = str(SOLUTION_ROOT)
     state["template_path"] = str(template_path.relative_to(repo_root))
     state["working_draft_path"] = str(expected_working_draft)

@@ -56,10 +56,11 @@ compatibility:
    - 空状态时会自动初始化步骤 1，并返回 `business_task`、`required_output_shape`、`next_action`
    - 自动步骤（2、3、6、11、12）会在一次调用内完成推进
    - 业务决策步骤（1、4、5）会自动完成 entry 动作，并返回 `business_task`、`required_output_shape`、`next_action`
-   - 创作步骤（7、8、9、10）会自动完成 entry 动作，并返回 `business_task`、`artifact`、`required_output_shape`、`next_action`
-3. **只读 scaffold**：`python /path/to/run-step.py --state <状态文件> --emit-scaffold` → 仅向 `stdout` 输出当前步骤 scaffold；不修改 state、working draft 或 receipt
-4. **仅在创作步骤提交业务内容时**，才使用 `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> --summary "..."`
-5. **重复**直到步骤 12 完成
+   - 创作步骤（7、8、9、10）会自动完成 entry 动作，并返回 `business_task`、`artifact`、`required_output_shape`、`ticket`、`submit_command`、`json_scaffold_command`、`next_action`
+3. **只读 scaffold**：`python /path/to/run-step.py --state <状态文件> --emit-scaffold` → 仅向 `stdout` 输出当前步骤 Markdown scaffold；不修改 state、working draft 或 receipt
+4. **JSON scaffold（创作步骤推荐）**：`python /path/to/run-step.py --state <状态文件> --emit-json-scaffold` → 仅向 `stdout` 输出当前创作步骤的结构化 JSON 骨架；适合步骤 7/8/9/10 先拿合法数组结构再补业务值
+5. **仅在创作步骤提交业务内容时**，才使用 `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> --summary "..."`
+6. **重复**直到步骤 12 完成
 
 标准主路径示例：
 
@@ -71,6 +72,7 @@ compatibility:
 | 业务决策步骤 entry（1、4、5） | `python /path/to/run-step.py --state <状态文件> --advance` |
 | 创作步骤 entry（7、8、9、10） | `python /path/to/run-step.py --state <状态文件> --advance` |
 | 业务/创作步骤提交正文 | `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> --summary "..." <<'HEREDOC' <JSON payload> HEREDOC` |
+| 创作步骤获取 JSON 骨架 | `python /path/to/run-step.py --state <状态文件> --emit-json-scaffold` |
 
 ## 状态文件初始化
 只能通过 `run-step.py --advance` 进入空状态初始化与步骤 1。它会在 state 缺失时自动创建最小 state、返回步骤 1 的业务输入 contract，并在提交步骤 1 正文后写入 checkpoint 与路径；不得再手工 `cp templates/_template.yaml` 后补 YAML，也不得把空状态初始化理解成第二条公开流程。
@@ -81,6 +83,10 @@ compatibility:
 - `python /path/to/run-step.py --state <状态文件> --emit-scaffold`
   - 同一入口下的只读辅助模式；仅输出 scaffold 到 `stdout`，不是第二条写入路径，也不会替代 `--complete`
   - `--emit-scaffold 与 --complete 不能同时使用`
+- `python /path/to/run-step.py --state <状态文件> --emit-json-scaffold`
+  - 创作步骤的只读 JSON 辅助模式；仅输出与 `required_output_shape` 对齐的结构化数组骨架，帮助一次性提交完整 payload
+  - 不修改 state、working draft 或 receipt
+  - `--emit-json-scaffold 与 --complete 不能同时使用`
 - 其他脚本（如 `initialize-state.py`、`extract-template-snapshot.py`、`upsert-draft-block.py`、`advance-state-step.py`、`render-final-document.py`、`finalize-cleanup.py`）
   - 仅保留给 `run-step.py`、测试与内部兼容流程使用；不再作为用户公开操作入口
 - 创作型步骤（7、8、9、10）统一通过 stdin/heredoc 提交结构化 JSON payload
@@ -96,7 +102,7 @@ compatibility:
 - **state / draft 职责固定**：state 只保留 `current_step`、`completed_steps`、`required_artifacts`、`produced_artifacts`、gate flags、路径字段，最小 checkpoint、cleanup 状态
 - **正文只允许写入 working draft**：`WD-CTX`、`WD-TASK`、`WD-EXP-SLOT-*`、`WD-SYN-SLOT-*` 一律只存在于 working draft；共享上下文、专家判断、收敛结论、详细设计正文不得写进 state
 - **checkpoint 必须结构化且瘦身**：`checkpoints.step-N.summary` 只能写流程摘要，不得复述正文
-- **流程摘要只允许描述**：本步是否完成/跳过、写入了什么区块、区块数量/槽位数量、下一步 gate 是否齐备
+- **流程摘要只允许描述**：本步是否完成/跳过、写入了什么类型的产物、区块数量/槽位数量、下一步 gate 是否齐备；避免写 CTX 编号、正文内容或大段 Markdown
 - **严禁手写 produced_artifacts**：必须以 `run-step.py` 在块写入后的同步结果为准，不得口头宣称某个 `WD-*` 已存在
 - **ticket 由脚本主路径发放**：标准流程通过 `--advance` 自动生成一次性 `pending_ticket`；只有创作步骤真正提交正文时才显式使用 `--complete --ticket <ticket>`
 - **ticket 绑定现场指纹**：`pending_ticket` 会绑定当前步骤、state fingerprint、artifact fingerprint 与允许写入的 block pattern；若 `--advance` 发放 ticket 后 state、working draft、final document 或提交 block 范围发生漂移，必须重新走一次 `--advance`

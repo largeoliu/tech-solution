@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -134,6 +135,80 @@ def build_wd_syn_scaffold(snapshot: RuntimeSnapshot) -> str:
         lines.extend(render_slot_lines(title))
         payloads.append("\n".join(lines).rstrip())
     return "\n\n".join(payloads)
+
+
+def build_ctx_json_scaffold(snapshot: RuntimeSnapshot) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": f"CTX-{index:02d}",
+            "source": "",
+            "conclusion": "",
+            "applicable_slots": [slot_info["title"]],
+            "confidence": "",
+        }
+        for index, slot_info in enumerate(template_slots(snapshot), start=1)
+    ]
+
+
+def build_task_json_scaffold(snapshot: RuntimeSnapshot) -> list[dict[str, Any]]:
+    return [
+        {
+            "slot": slot_info["title"],
+            "required_ctx": [],
+        }
+        for slot_info in template_slots(snapshot)
+    ]
+
+
+def build_exp_json_scaffold(
+    snapshot: RuntimeSnapshot, members: list[str] | None = None
+) -> list[dict[str, Any]]:
+    _resolved_members = resolve_members(snapshot.state, members)
+    return [
+        {
+            "slot": slot_info["title"],
+            "decision_type": "",
+            "rationale": "",
+            "evidence_refs": [],
+            "open_questions": [],
+        }
+        for slot_info in template_slots(snapshot)
+    ]
+
+
+def build_syn_json_scaffold(snapshot: RuntimeSnapshot) -> list[dict[str, Any]]:
+    return [
+        {
+            "slot": slot_info["title"],
+            "target_capability": "",
+            "comparisons": [
+                {"path": "复用", "feasibility": "", "evidence": "", "reason": ""},
+                {"path": "改造", "feasibility": "", "evidence": "", "reason": ""},
+                {"path": "新建", "feasibility": "", "evidence": "", "reason": ""},
+            ],
+            "selected_path": "",
+            "selected_writeup": "",
+            "evidence_refs": [],
+            "template_gap": "",
+            "open_question": "",
+        }
+        for slot_info in template_slots(snapshot)
+    ]
+
+
+def emit_json_scaffold(snapshot: RuntimeSnapshot, members: list[str] | None = None) -> str:
+    step = snapshot.current_step
+    if step == 7:
+        payload: Any = build_ctx_json_scaffold(snapshot)
+    elif step == 8:
+        payload = build_task_json_scaffold(snapshot)
+    elif step == 9:
+        payload = build_exp_json_scaffold(snapshot, members=members)
+    elif step == 10:
+        payload = build_syn_json_scaffold(snapshot)
+    else:
+        raise SystemExit(f"步骤 {step} 不支持 emit json scaffold；仅支持步骤 7/8/9/10。")
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def emit_scaffold(snapshot: RuntimeSnapshot, members: list[str] | None = None) -> str:

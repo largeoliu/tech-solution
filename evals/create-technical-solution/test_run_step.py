@@ -86,7 +86,7 @@ def workspace(tmp_path: Path) -> dict[str, Path]:
         "repo": repo,
         "arch": arch,
         "state_path": state_dir / "sample-solution.yaml",
-        "working_draft_path": state_dir / "sample-solution",
+        "working_draft_path": state_dir / "sample-solution" / "draft",
         "template_path": template_path,
         "members_path": members_path,
         "principles_path": principles_path,
@@ -110,7 +110,7 @@ def make_step9_state(workspace: dict[str, Path]) -> dict:
         "members_path": ".architecture/members.yml",
         "principles_path": ".architecture/principles.md",
         "repowiki_path": ".qoder/repowiki",
-        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution",
+        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution/draft",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
         "slots": [{"slot": item["slot"], "title": item["title"]} for item in headings],
         "checkpoints": {
@@ -208,7 +208,7 @@ def make_step11_state(workspace: dict[str, Path]) -> dict:
         "members_path": ".architecture/members.yml",
         "principles_path": ".architecture/principles.md",
         "repowiki_path": ".qoder/repowiki",
-        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution",
+        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution/draft",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
         "slots": [{"slot": item["slot"], "title": item["title"]} for item in headings],
         "checkpoints": {
@@ -329,7 +329,7 @@ def make_step4_state(workspace: dict[str, Path]) -> dict:
         "members_path": ".architecture/members.yml",
         "principles_path": ".architecture/principles.md",
         "repowiki_path": ".qoder/repowiki",
-        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution",
+        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution/draft",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
         "slots": [
             {"slot": item["slot"], "title": item["title"]} for item in slot_headings
@@ -478,7 +478,7 @@ def write_directory_draft(
                 "| 改造 | ✅ | CTX-01 | 推荐 |\n"
                 "| 新建 | ❌ | CTX-01 | 成本高 |\n"
                 "#### 选定路径\n"
-                f"- 路径: 改造\n- 选定写法: 在 {title} 位置补齐内容。\n- 关键证据引用: CTX-01\n- 建议落位槽位: {title}\n- 模板承载缺口: 无\n- 未决问题: 无\n"
+                f"- 路径: 改造\n- 选定写法:\n在 {title} 位置补齐内容。\n- 关键证据引用: CTX-01\n- 建议落位槽位: {title}\n- 模板承载缺口: 无\n- 未决问题: 无\n"
             )
         (slot_dir / "experts.md").write_text(experts_body, encoding="utf-8")
         (slot_dir / "synthesis.md").write_text(synthesis_body, encoding="utf-8")
@@ -875,7 +875,7 @@ class TestRunStepBehavior:
         assert new_state["solution_root"] == ".architecture/technical-solutions"
         assert (
             new_state["working_draft_path"]
-            == ".architecture/.state/create-technical-solution/sample-solution"
+            == ".architecture/.state/create-technical-solution/sample-solution/draft"
         )
         assert (
             new_state["final_document_path"]
@@ -892,7 +892,7 @@ class TestRunStepBehavior:
         assert new_state["solution_root"] == ".architecture/technical-solutions"
         assert (
             new_state["working_draft_path"]
-            == ".architecture/.state/create-technical-solution/sample-solution"
+            == ".architecture/.state/create-technical-solution/sample-solution/draft"
         )
         assert (
             new_state["final_document_path"]
@@ -976,6 +976,34 @@ class TestRunStepBehavior:
         new_state = vs.load_state(workspace["state_path"])
         assert new_state["current_step"] == 7
         assert new_state["pending_ticket"]["step"] == 7
+        assert result["ticket"] == new_state["pending_ticket"]["value"]
+        assert result["allowed_block_pattern"] == "WD-CTX"
+        assert "--complete --ticket" in result["submit_command"]
+        assert result["json_scaffold_command"].endswith("--emit-json-scaffold")
+        assert isinstance(result["json_scaffold_preview"], list)
+        assert result["json_scaffold_preview"][0]["id"] == "CTX-01"
+
+    def test_advance_step_9_returns_ticket_and_submit_contract(
+        self, workspace: dict[str, Path]
+    ) -> None:
+        state = make_step9_state(workspace)
+        write_state(workspace, state)
+        write_step9_draft(workspace)
+
+        result = run_step.advance_step(workspace["state_path"])
+
+        refreshed = vs.load_state(workspace["state_path"])
+        ticket = refreshed["pending_ticket"]
+        assert result["status"] == "needs_input"
+        assert result["step"] == 9
+        assert result["ticket"] == ticket["value"]
+        assert result["allowed_block_pattern"] == "WD-EXP-SLOT-*"
+        assert result["submit_command"].endswith("--complete --ticket <ticket> --summary \"<完成摘要>\"") is False
+        assert "--complete --ticket" in result["submit_command"]
+        assert result["json_scaffold_command"].endswith("--emit-json-scaffold")
+        assert isinstance(result["json_scaffold_preview"], list)
+        assert result["json_scaffold_preview"][0]["slot"] == "1.1 需求概述"
+        assert result["json_scaffold_preview"][0]["evidence_refs"] == []
 
     def test_complete_step_7_accepts_structured_payload_and_renders_ctx_markdown(
         self, workspace: dict[str, Path]
@@ -1010,8 +1038,8 @@ class TestRunStepBehavior:
         )
         assert run_step.complete_step(make_args(workspace["state_path"], "repowiki 检查完成")) == 0
 
-        run_step.advance_step(workspace["state_path"])
-        step7_ticket = prepare_and_get_ticket(workspace)
+        result = run_step.advance_step(workspace["state_path"])
+        step7_ticket = result["ticket"]
 
         assert (
             run_step.complete_step(
@@ -1348,6 +1376,32 @@ class TestRunStepBehavior:
             "members": [],
         }
 
+    def test_main_emit_json_scaffold_mode_keeps_summary_optional(
+        self,
+        workspace: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_emit_json_scaffold(
+            state_path: Path, members: list[str] | None = None
+        ) -> int:
+            captured["state_path"] = state_path
+            captured["members"] = members
+            return 0
+
+        monkeypatch.setattr(run_step, "emit_json_scaffold", fake_emit_json_scaffold)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["run-step.py", "--state", str(workspace["state_path"]), "--emit-json-scaffold"],
+        )
+
+        assert run_step.main() == 0
+        assert captured == {
+            "state_path": workspace["state_path"].resolve(),
+            "members": [],
+        }
+
     def test_main_rejects_emit_scaffold_with_complete(
         self,
         workspace: dict[str, Path],
@@ -1360,6 +1414,29 @@ class TestRunStepBehavior:
                 "--state",
                 str(workspace["state_path"]),
                 "--emit-scaffold",
+                "--complete",
+                "--summary",
+                "noop",
+            ],
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_step.main()
+
+        assert exc_info.value.code == 2
+
+    def test_main_rejects_emit_json_scaffold_with_complete(
+        self,
+        workspace: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "run-step.py",
+                "--state",
+                str(workspace["state_path"]),
+                "--emit-json-scaffold",
                 "--complete",
                 "--summary",
                 "noop",
@@ -1534,6 +1611,119 @@ class TestRunStepBehavior:
 
         assert exit_code == 0
         assert "WD-EXP" in capsys.readouterr().out
+
+    def test_emit_json_scaffold_step7_matches_required_shape(
+        self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        state = make_step9_state(workspace)
+        state["current_step"] = 7
+        state["completed_steps"] = [1, 2, 3, 4, 5, 6]
+        state["gate_receipt"] = {
+            "step": 7,
+            "state_fingerprint": "",
+            "validated_at": "2026-04-08T09:31:00",
+        }
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        write_step9_draft(workspace)
+
+        exit_code = run_step.emit_json_scaffold(workspace["state_path"])
+
+        assert exit_code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert isinstance(payload, list)
+        assert payload[0] == {
+            "id": "CTX-01",
+            "source": "",
+            "conclusion": "",
+            "applicable_slots": ["1.1 需求概述"],
+            "confidence": "",
+        }
+
+    def test_emit_json_scaffold_step9_respects_member_filter(
+        self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        state = make_step9_state(workspace)
+        state["checkpoints"]["step-5"]["selected_members"] = [
+            "systems_architect",
+            "domain_expert",
+        ]
+        state["checkpoints"]["step-5"]["selected_member_count"] = 2
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        write_step9_draft(workspace)
+
+        exit_code = run_step.emit_json_scaffold(
+            workspace["state_path"], members=["domain_expert"]
+        )
+
+        assert exit_code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert len(payload) == 4
+        assert payload[0]["slot"] == "1.1 需求概述"
+        assert payload[0]["decision_type"] == ""
+        assert payload[0]["rationale"] == ""
+        assert payload[0]["evidence_refs"] == []
+        assert payload[0]["open_questions"] == []
+
+    def test_emit_json_scaffold_step10_matches_required_shape(
+        self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        state = make_step11_state(workspace)
+        state["current_step"] = 10
+        state["completed_steps"] = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        state["gate_receipt"] = {
+            "step": 10,
+            "state_fingerprint": "",
+            "validated_at": "2026-04-08T09:31:00",
+        }
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        write_step11_draft(workspace)
+
+        exit_code = run_step.emit_json_scaffold(workspace["state_path"])
+
+        assert exit_code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert isinstance(payload, list)
+        assert payload[0]["slot"] == "1.1 需求概述"
+        assert payload[0]["target_capability"] == ""
+        assert payload[0]["comparisons"] == [
+            {"path": "复用", "feasibility": "", "evidence": "", "reason": ""},
+            {"path": "改造", "feasibility": "", "evidence": "", "reason": ""},
+            {"path": "新建", "feasibility": "", "evidence": "", "reason": ""},
+        ]
+        assert payload[0]["selected_path"] == ""
+        assert payload[0]["selected_writeup"] == ""
+        assert payload[0]["evidence_refs"] == []
+
+    def test_emit_json_scaffold_uses_stdout_instead_of_complete_path(
+        self,
+        workspace: dict[str, Path],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        state = make_step11_state(workspace)
+        state["current_step"] = 10
+        state["completed_steps"] = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        state["gate_receipt"] = {
+            "step": 10,
+            "state_fingerprint": "",
+            "validated_at": "2026-04-08T09:31:00",
+        }
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        write_step11_draft(workspace)
+
+        def forbid_complete(*_args, **_kwargs):
+            raise AssertionError("emit_json_scaffold should not call complete path")
+
+        monkeypatch.setattr(run_step, "complete_creative_step", forbid_complete)
+
+        exit_code = run_step.emit_json_scaffold(workspace["state_path"])
+
+        assert exit_code == 0
+        assert '"comparisons"' in capsys.readouterr().out
 
     def test_run_step_reads_names_and_default_blocks_from_workflow(self) -> None:
         assert run_step.get_step_name(7) == "构建共享上下文 (WD-CTX)"
@@ -2347,11 +2537,11 @@ class TestRunStepBehavior:
         new_state = vs.load_state(workspace["state_path"])
         assert new_state["current_step"] == 4
         assert new_state["checkpoints"]["step-3"]["template_loaded"] is True
-        assert workspace["working_draft_path"].is_dir()
+        assert (workspace["working_draft_path"].parent).is_dir()
         assert (workspace["working_draft_path"] / "ctx.md").exists()
         assert (
             new_state["working_draft_path"]
-            == ".architecture/.state/create-technical-solution/sample-solution"
+            == ".architecture/.state/create-technical-solution/sample-solution/draft"
         )
 
     def test_complete_step_3_ignores_tampered_external_working_draft_path(
@@ -2372,9 +2562,9 @@ class TestRunStepBehavior:
         assert new_state["current_step"] == 4
         assert (
             new_state["working_draft_path"]
-            == ".architecture/.state/create-technical-solution/sample-solution"
+            == ".architecture/.state/create-technical-solution/sample-solution/draft"
         )
-        assert workspace["working_draft_path"].is_dir()
+        assert (workspace["working_draft_path"].parent).is_dir()
         assert not external_draft_path.exists()
 
     def test_print_status_shows_public_repair_hint_and_next_command(
@@ -2392,11 +2582,11 @@ class TestRunStepBehavior:
         assert exit_code == 0
         output = capsys.readouterr().out
         assert (
-            "working_draft_path 必须固定为 .architecture/.state/create-technical-solution/sample-solution"
+            "working_draft_path 必须固定为 .architecture/.state/create-technical-solution/sample-solution/draft"
             in output
         )
         assert (
-            "回到步骤 3，重新生成 .architecture/.state/create-technical-solution/[slug]/ 目录"
+            "回到步骤 3，重新生成 .architecture/.state/create-technical-solution/[slug]/draft/ 目录"
             in output
         )
         assert '"slot": "2.1 方案设计"' in output

@@ -102,7 +102,7 @@ def workspace(tmp_path: Path) -> dict[str, Path]:
         "members_path": members_path,
         "principles_path": principles_path,
         "solution_root": solution_root,
-        "working_draft_path": state_dir / "sample-solution",
+        "working_draft_path": state_dir / "sample-solution" / "draft",
         "final_document_path": solution_root / "sample-solution.md",
         "state_path": state_dir / "sample-solution.yaml",
         "content_file": repo / "final-content.md",
@@ -126,7 +126,7 @@ def make_state(workspace: dict[str, Path], **overrides) -> dict:
         "members_path": ".architecture/members.yml",
         "principles_path": ".architecture/principles.md",
         "repowiki_path": ".qoder/repowiki",
-        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution",
+        "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution/draft",
         "final_document_path": ".architecture/technical-solutions/sample-solution.md",
         "slots": [{"slot": item["slot"], "title": item["title"]} for item in headings],
         "checkpoints": {
@@ -230,8 +230,8 @@ def write_good_draft(workspace: dict[str, Path]) -> None:
 def register_artifacts(state: dict, workspace: dict[str, Path]) -> None:
     registry = {}
     for artifact, relative in {
-        "WD-CTX": ".architecture/.state/create-technical-solution/sample-solution/ctx.md",
-        "WD-TASK": ".architecture/.state/create-technical-solution/sample-solution/task.md",
+        "WD-CTX": ".architecture/.state/create-technical-solution/sample-solution/draft/ctx.md",
+        "WD-TASK": ".architecture/.state/create-technical-solution/sample-solution/draft/task.md",
     }.items():
         path = workspace["repo"] / relative
         if path.exists():
@@ -297,6 +297,38 @@ class TestStateBoundary:
         validator.step_7(errors)
 
         assert any(error["code"] == "summary_too_long" for error in errors)
+
+    def test_step_9_accepts_documented_wd_exp_summary(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(
+            workspace,
+            current_step=9,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8],
+            produced_artifacts=["WD-CTX", "WD-TASK", "WD-EXP-SLOT-*"]
+        )
+        state["checkpoints"]["step-9"] = {
+            "summary": "完成；写入专家分析；slots=4；gate: step-10 ready",
+            "wd_exp_written": True,
+            "wd_exp_count": 4,
+        }
+        state["can_enter_step_10"] = True
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_9(errors)
+
+        assert not any(error["code"] == "summary_contains_forbidden_content" for error in errors)
+
+    def test_step_10_accepts_documented_wd_syn_summary(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(workspace)
+        state["checkpoints"]["step-10"]["summary"] = "完成；写入协作收敛；slots=4；gate: step-11 ready"
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_10(errors)
+
+        assert not any(error["code"] == "summary_contains_forbidden_content" for error in errors)
 
     def test_step_7_rejects_unstructured_wd_ctx(self, workspace: dict[str, Path]) -> None:
         workspace["working_draft_path"].mkdir(parents=True, exist_ok=True)
@@ -784,7 +816,7 @@ class TestValidator:
         validator.step_4(errors)
         assert any(error["code"] == "invalid_working_draft_path" for error in errors)
 
-    def test_step_4_accepts_state_dir_working_draft_path(self, workspace: dict[str, Path]) -> None:
+    def test_step_4_accepts_canonical_draft_directory_path(self, workspace: dict[str, Path]) -> None:
         workspace["working_draft_path"].mkdir(parents=True, exist_ok=True)
         state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
         state["checkpoints"]["step-4"] = {"summary": "完成；类型已判定", "solution_type": "新功能方案"}
@@ -1348,7 +1380,7 @@ class TestProjectRootResolution:
             "template_path": ".architecture/templates/technical-solution-template.md",
             "members_path": ".architecture/members.yml",
             "principles_path": ".architecture/principles.md",
-            "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution",
+            "working_draft_path": ".architecture/.state/create-technical-solution/sample-solution/draft",
             "final_document_path": ".architecture/technical-solutions/sample-solution.md",
             "slots": [{"slot": item["slot"], "title": item["title"]} for item in vs.extract_slot_headings(TEMPLATE)],
             "checkpoints": {

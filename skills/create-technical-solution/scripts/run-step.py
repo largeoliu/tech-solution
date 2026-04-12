@@ -521,6 +521,7 @@ def upsert_blocks_in_process(
         if validate_step is not None:
             require_receipt(state, expected_step=validate_step)
         slots = state.get("slots") or []
+        working_dir.parent.mkdir(parents=True, exist_ok=True)
         staging_dir = Path(
             tempfile.mkdtemp(
                 prefix=f".{working_dir.name}.staging-",
@@ -1156,6 +1157,16 @@ def emit_scaffold(state_path: Path, members: list[str] | None = None) -> int:
     return 0
 
 
+def emit_json_scaffold(state_path: Path, members: list[str] | None = None) -> int:
+    snapshot = load_runtime_snapshot(state_path)
+    if not snapshot.state:
+        print("❌ 状态文件不存在。请先用 --slug 参数执行步骤 1。")
+        return 1
+    module = load_block_scaffolds_module()
+    print(module.emit_json_scaffold(snapshot, members=members or []))
+    return 0
+
+
 def prepare_step(state_path: Path, *, slug: str | None = None) -> int:
     state_exists = state_path.exists() and state_path.stat().st_size > 0
     if not state_exists:
@@ -1278,6 +1289,27 @@ def step_requires_ticket(step: int) -> bool:
 def build_creative_entry_response(state_path: Path, step: int) -> dict[str, Any]:
     state = load_state(state_path)
     step_def = STEP_DEFS.get(step, {})
+    pending_ticket = state.get("pending_ticket") if isinstance(state, dict) else None
+    ticket_value = None
+    allowed_block_pattern = None
+    if isinstance(pending_ticket, dict) and int(pending_ticket.get("step") or 0) == step:
+        ticket_value = str(pending_ticket.get("value") or "").strip() or None
+        allowed_block_pattern = str(pending_ticket.get("allowed_block_pattern") or "").strip() or None
+    submit_command = None
+    json_scaffold_command = None
+    json_scaffold_preview = None
+    if ticket_value:
+        base = run_step_base_command(state_path)
+        submit_command = f'{base} --complete --ticket {ticket_value} --summary "<完成摘要>"'
+        json_scaffold_command = f"{base} --emit-json-scaffold"
+        try:
+            module = load_block_scaffolds_module()
+            snapshot = load_runtime_snapshot(state_path)
+            json_scaffold_preview = json.loads(
+                module.emit_json_scaffold(snapshot, members=[])
+            )
+        except Exception:
+            json_scaffold_preview = None
     return {
         "status": "needs_input",
         "step": step,
@@ -1286,6 +1318,11 @@ def build_creative_entry_response(state_path: Path, step: int) -> dict[str, Any]
         "required_output_shape": structured_output_shape_for_step(step),
         "next_action": "submit_structured_payload",
         "current_step": int(state.get("current_step") or step),
+        "ticket": ticket_value,
+        "allowed_block_pattern": allowed_block_pattern,
+        "submit_command": submit_command,
+        "json_scaffold_command": json_scaffold_command,
+        "json_scaffold_preview": json_scaffold_preview,
     }
 
 
@@ -1492,6 +1529,9 @@ def main() -> int:
     parser.add_argument(
         "--emit-scaffold", action="store_true", help="输出当前步骤 scaffold 到 stdout"
     )
+    parser.add_argument(
+        "--emit-json-scaffold", action="store_true", help="输出当前步骤 JSON scaffold 到 stdout"
+    )
     parser.add_argument("--summary", help="步骤完成摘要（--complete 时必需）")
 
     # 步骤特定参数
@@ -1510,11 +1550,12 @@ def main() -> int:
             bool(args.prepare),
             bool(args.complete),
             bool(args.emit_scaffold),
+            bool(args.emit_json_scaffold),
             bool(args.mark_step_card_read),
         ]
     ) > 1:
         parser.error(
-            "--advance、--prepare、--mark-step-card-read、--emit-scaffold 与 --complete 不能同时使用。"
+            "--advance、--prepare、--mark-step-card-read、--emit-scaffold、--emit-json-scaffold 与 --complete 不能同时使用。"
         )
 
     args._stdin_content = None
@@ -1538,6 +1579,8 @@ def main() -> int:
         return mark_step_card_read(Path(args.state).resolve())
     if args.emit_scaffold:
         return emit_scaffold(Path(args.state).resolve(), members=args.member)
+    if args.emit_json_scaffold:
+        return emit_json_scaffold(Path(args.state).resolve(), members=args.member)
     else:
         return print_status(Path(args.state).resolve())
 

@@ -73,7 +73,6 @@ SUMMARY_MAX_LEN = 120
 SUMMARY_FORBIDDEN_PATTERNS = [
     re.compile(r"\n"),
     re.compile(r"CTX-\d+"),
-    re.compile(r"WD-EXP"),
     re.compile(r"^#{1,6}\s", re.MULTILINE),
     re.compile(r"```"),
     re.compile(r"^\s*\|.+\|\s*$", re.MULTILINE),

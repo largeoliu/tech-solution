@@ -142,10 +142,10 @@ FULL checkpoint.step-8 摘要示例：
 `完成；写入 WD-TASK；slots=5；gate: step-9 ready`
 
 FULL checkpoint.step-9 摘要示例：
-`完成；写入 WD-EXP-SLOT-*；slots=5；gate: step-10 ready`
+`完成；写入专家分析；slots=5；gate: step-10 ready`
 
 FULL checkpoint.step-10 摘要示例：
-`完成；写入 WD-SYN-SLOT-*；slots=5；gate: step-11 ready`
+`完成；写入协作收敛；slots=5；gate: step-11 ready`
 ```
 
 ## 结果汇报格式
@@ -181,6 +181,7 @@ python /path/to/run-step.py --state <状态文件路径> --advance
 - 自动步骤（2、3、6、11、12）在一次调用内完成
 - 业务决策步骤（1、4、5）会自动完成 entry，并在返回 payload 中给出 `business_task`、`required_output_shape`、`next_action`
 - 创作步骤（7、8、9、10）会自动完成 entry，并在返回 payload 中给出 `artifact`、`business_task`、`required_output_shape`、`next_action`
+- 创作步骤（7、8、9、10）还会返回 `ticket`、`submit_command` 和 `json_scaffold_command`，可直接复制下一条命令，不必再去 state 里取 ticket
 
 只有业务决策步骤或创作步骤真正提交正文时，才使用显式提交：
 
@@ -189,6 +190,14 @@ python /path/to/run-step.py --state <状态文件路径> --complete --ticket <ti
 ```
 
 此时的 `ticket` 来自前一次 `--advance` 返回或写入的 `pending_ticket`。若发 ticket 后 state、working draft、final document 或提交 block 范围发生变化，旧 ticket 会失效，必须重新执行 `--advance`。
+
+对于步骤 7/8/9/10，推荐先获取合法 JSON 骨架，再补业务值：
+
+```bash
+python /path/to/run-step.py --state <状态文件路径> --emit-json-scaffold
+```
+
+它只输出当前创作步骤的结构化数组模板，不写 state、不写 draft，可直接作为 `--complete` 提交前的填空底稿。
 
 失败后继续使用 `python /path/to/run-step.py --state <状态文件路径>` 或 `--advance`。对外只消费 `run-step.py` 返回的恢复动作，不直接调用 validator 或其他内部脚本。
 
@@ -201,3 +210,13 @@ python /path/to/run-step.py --state <状态文件路径> --complete --ticket <ti
 - 不修改 working draft
 - 不修改 receipt
 - `--emit-scaffold 与 --complete 不能同时使用`；同理也不能与 `--advance` 同时使用
+
+### run-step.py --emit-json-scaffold
+
+- `python /path/to/run-step.py --state <状态文件路径> --emit-json-scaffold`
+- 只读 JSON 辅助入口：仅向 `stdout` 输出当前创作步骤的合法 JSON 数组骨架
+- 仅支持步骤 7/8/9/10
+- 不修改 state
+- 不修改 working draft
+- 不修改 receipt
+- `--emit-json-scaffold 与 --complete` 不能同时使用；同理也不能与 `--advance` 同时使用
