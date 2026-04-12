@@ -787,6 +787,7 @@ class TestValidator:
     def test_step_4_accepts_state_dir_working_draft_path(self, workspace: dict[str, Path]) -> None:
         workspace["working_draft_path"].mkdir(parents=True, exist_ok=True)
         state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
+        state["checkpoints"]["step-4"] = {"summary": "完成；类型已判定", "solution_type": "新功能方案"}
         validator = make_validator(state, workspace)
         errors: list[dict] = []
         validator.step_4(errors)
@@ -803,6 +804,36 @@ class TestValidator:
         errors: list[dict] = []
         validator.step_4(errors)
         assert any(error["code"] == "invalid_working_draft_path" for error in errors)
+
+    def test_step_4_rejects_missing_solution_type(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].mkdir(parents=True, exist_ok=True)
+        state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
+        state["checkpoints"]["step-4"] = {"summary": "完成", "solution_type": ""}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_4(errors)
+        assert any(error["code"] == "missing_solution_type" for error in errors)
+
+    def test_step_4_rejects_invalid_solution_type(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].mkdir(parents=True, exist_ok=True)
+        state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
+        state["checkpoints"]["step-4"] = {"summary": "完成", "solution_type": "现有资产改造"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_4(errors)
+        assert any(error["code"] == "invalid_solution_type" for error in errors)
+
+    def test_step_4_accepts_valid_solution_type(self, workspace: dict[str, Path]) -> None:
+        workspace["working_draft_path"].mkdir(parents=True, exist_ok=True)
+        state = make_state(workspace, current_step=4, completed_steps=[1, 2, 3])
+        state["checkpoints"]["step-4"] = {"summary": "完成；类型已判定", "solution_type": "改造方案"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+        validator.step_4(errors)
+        assert not any(error["code"] in {"missing_solution_type", "invalid_solution_type"} for error in errors)
 
     def test_step_8_detects_missing_task_slots(self, workspace: dict[str, Path]) -> None:
         write_good_draft(workspace)

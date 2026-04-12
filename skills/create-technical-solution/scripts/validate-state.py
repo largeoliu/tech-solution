@@ -1439,6 +1439,29 @@ class GateValidator:
             recommended_rollback_step=4,
             recommended_repair_step=4,
         )
+        VALID_SOLUTION_TYPES = {"新功能方案", "改造方案", "复用方案"}
+        solution_type = checkpoint.get("solution_type") if checkpoint else None
+        require(
+            solution_type is not None and str(solution_type).strip() != "",
+            errors,
+            code="missing_solution_type",
+            message="步骤 4: checkpoints.step-4.solution_type 不能为空",
+            step=4,
+            field="checkpoints.step-4.solution_type",
+            recommended_rollback_step=4,
+            recommended_repair_step=4,
+        )
+        if solution_type is not None and str(solution_type).strip():
+            require(
+                str(solution_type).strip() in VALID_SOLUTION_TYPES,
+                errors,
+                code="invalid_solution_type",
+                message=f"步骤 4: solution_type 必须是 {VALID_SOLUTION_TYPES} 之一，收到: {solution_type!r}",
+                step=4,
+                field="checkpoints.step-4.solution_type",
+                recommended_rollback_step=4,
+                recommended_repair_step=4,
+            )
 
     def step_5(self, errors: list[dict[str, Any]]) -> None:
         self.common(5, errors)

@@ -1132,6 +1132,22 @@ class TestRunStepBehavior:
         assert new_state["current_step"] == 4
         assert new_state["pending_ticket"]["step"] == 4
 
+    def test_advance_step_4_contract_text_mentions_no_deep_exploration(
+        self, workspace: dict[str, Path]
+    ) -> None:
+        state = make_step4_state(workspace)
+        write_state(workspace, state)
+
+        result = run_step.advance_step(workspace["state_path"])
+
+        assert "方案类型" in result["business_task"]
+        contracts = result.get("required_output_shape", {}).get("items", [])
+        all_text = result["business_task"] + " ".join(str(c) for c in contracts)
+        assert (
+            "不需要搜索或阅读业务实现代码" in all_text
+            or "属于步骤 7" in all_text
+        ), "step 4 contract should explicitly prohibit deep code exploration"
+
     def test_advance_step_5_returns_member_selection_contract(
         self, workspace: dict[str, Path]
     ) -> None:
