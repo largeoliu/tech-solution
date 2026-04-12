@@ -32,7 +32,7 @@ from protocol_runtime import (
     slug_from_state_path,
     working_draft_relative_path,
 )
-from quality_checks import placeholder_hits, repeated_slot_groups
+from quality_checks import intermediate_field_hits, placeholder_hits, repeated_slot_groups
 
 
 def count_absorbed_slots(markdown: str) -> int:
@@ -60,6 +60,19 @@ def extract_slot_headings(markdown: str) -> list[str]:
         counts[level] = counts.get(level, 0) + 1
     slot_level = max(counts.items(), key=lambda item: (item[1], item[0]))[0]
     return [title for level, title in headings if level == slot_level]
+
+
+WRITEUP_RE = re.compile(r"^\s*-\s*选定写法:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def extract_final_writeup(content: str, title: str) -> str:
+    match = WRITEUP_RE.search(content)
+    if not match:
+        raise SystemExit(
+            f"槽位「{title}」的 WD-SYN 缺少可用于最终成稿的 `选定写法`。"
+            "请在步骤 10 补齐该字段后重新提交。"
+        )
+    return match.group(1).strip()
 
 
 def strip_slot_heading(content: str, title: str) -> str:
@@ -103,8 +116,8 @@ def render_from_draft(state_path: Path) -> str:
         slot_id = slot_info.get("slot", "")
         title = slot_info.get("title", "")
         syn_path = draft_path / "slots" / slot_id / "synthesis.md"
-        if syn_path.exists():
-            sections[title] = strip_slot_heading(
+        if syn_path.exists() and syn_path.stat().st_size > 0:
+            sections[title] = extract_final_writeup(
                 syn_path.read_text(encoding="utf-8"),
                 title,
             )
@@ -162,6 +175,10 @@ def render_final_document(
     placeholder_findings = placeholder_hits(content)
     if placeholder_findings:
         raise SystemExit(f"最终文档仍含占位内容: {', '.join(placeholder_findings)}")
+
+    intermediate_findings = intermediate_field_hits(content)
+    if intermediate_findings:
+        raise SystemExit(f"最终文档含有中间产物字段，应只保留正式写法: {', '.join(intermediate_findings)}")
 
     draft_path = resolve_repo_path(
         repo_root,

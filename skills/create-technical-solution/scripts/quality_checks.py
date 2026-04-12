@@ -48,3 +48,22 @@ def repeated_slot_groups(slot_blocks: dict[str, str]) -> list[dict[str, object]]
         if len(titles_group) >= 2
     ]
     return findings
+
+
+INTERMEDIATE_FIELD_PATTERNS = [
+    re.compile(r"####\s*候选方案对比"),
+    re.compile(r"关键证据引用"),
+    re.compile(r"模板承载缺口"),
+    re.compile(r"未决问题"),
+    re.compile(r"CTX-\d+"),
+]
+
+
+def intermediate_field_hits(text: str) -> list[str]:
+    hits: list[str] = []
+    for pattern in INTERMEDIATE_FIELD_PATTERNS:
+        for match in pattern.finditer(text):
+            hit = match.group(0).strip()
+            if hit and hit not in hits:
+                hits.append(hit)
+    return hits

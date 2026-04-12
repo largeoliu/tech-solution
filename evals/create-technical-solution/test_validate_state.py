@@ -1197,6 +1197,72 @@ class TestCleanup:
         assert not workspace["state_path"].exists()
 
 
+class TestFinalDocumentPurity:
+    def test_render_final_document_excludes_intermediate_fields(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(workspace, current_step=11)
+        state["gate_receipt"] = {"step": 11, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        rfd.render_final_document(
+            state_path=workspace["state_path"],
+            content_path=None,
+            summary="完成；final_document=1；absorbed_slots=4；gate: step-12 ready",
+        )
+        final_doc = workspace["final_document_path"].read_text(encoding="utf-8")
+        for forbidden in [
+            "#### 候选方案对比",
+            "关键证据引用",
+            "模板承载缺口",
+            "未决问题",
+        ]:
+            assert forbidden not in final_doc, f"最终文档不应包含中间产物字段: {forbidden}"
+        import re as _re
+        assert not _re.search(r"CTX-\d+", final_doc), "最终文档不应包含 CTX 内部引用编号"
+
+    def test_render_final_document_preserves_selected_writeup(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        state = make_state(workspace, current_step=11)
+        state["gate_receipt"] = {"step": 11, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        rfd.render_final_document(
+            state_path=workspace["state_path"],
+            content_path=None,
+            summary="完成；final_document=1；absorbed_slots=4；gate: step-12 ready",
+        )
+        final_doc = workspace["final_document_path"].read_text(encoding="utf-8")
+        assert "在 1.1 需求概述 位置补齐内容。" in final_doc
+        assert "在 2.1 方案设计 位置补齐内容。" in final_doc
+
+    def test_synthesis_md_still_contains_full_intermediate(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        for index, title in enumerate(("1.1 需求概述", "1.2 核心目标", "2.1 方案设计", "2.2 风险与验证"), start=1):
+            syn_path = workspace["working_draft_path"] / "slots" / f"SLOT-{index:02d}" / "synthesis.md"
+            syn_text = syn_path.read_text(encoding="utf-8")
+            assert "#### 候选方案对比" in syn_text
+            assert "关键证据引用" in syn_text
+            assert "模板承载缺口" in syn_text
+
+    def test_render_final_document_fails_on_missing_selected_writeup(self, workspace: dict[str, Path]) -> None:
+        write_good_draft(workspace)
+        syn_path = workspace["working_draft_path"] / "slots" / "SLOT-01" / "synthesis.md"
+        syn_path.write_text(
+            "### 槽位：1.1 需求概述\n#### 目标能力\n- 测试\n#### 候选方案对比\n| 路径 | 可行性 |\n|------|--------|\n| 复用 | ❌ |\n#### 选定路径\n- 路径: 复用\n",
+            encoding="utf-8",
+        )
+        state = make_state(workspace, current_step=11)
+        state["gate_receipt"] = {"step": 11, "state_fingerprint": "", "validated_at": "2026-04-08T09:31:00"}
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        with pytest.raises(SystemExit, match="选定写法"):
+            rfd.render_final_document(
+                state_path=workspace["state_path"],
+                content_path=None,
+                summary="完成；final_document=1；absorbed_slots=4；gate: step-12 ready",
+            )
+
+
 class TestProjectRootResolution:
     def test_repo_root_from_external_skill_state_path_prefers_real_project_root(
         self, tmp_path: Path
