@@ -163,17 +163,21 @@ def build_task_json_scaffold(snapshot: RuntimeSnapshot) -> list[dict[str, Any]]:
 def build_exp_json_scaffold(
     snapshot: RuntimeSnapshot, members: list[str] | None = None
 ) -> list[dict[str, Any]]:
-    _resolved_members = resolve_members(snapshot.state, members)
-    return [
-        {
-            "slot": slot_info["title"],
-            "decision_type": "",
-            "rationale": "",
-            "evidence_refs": [],
-            "open_questions": [],
-        }
-        for slot_info in template_slots(snapshot)
-    ]
+    resolved_members = resolve_members(snapshot.state, members)
+    payload: list[dict[str, Any]] = []
+    for slot_info in template_slots(snapshot):
+        for member in resolved_members:
+            payload.append(
+                {
+                    "slot": slot_info["title"],
+                    "member": member,
+                    "decision_type": "",
+                    "rationale": "",
+                    "evidence_refs": [],
+                    "open_questions": [],
+                }
+            )
+    return payload
 
 
 def build_syn_json_scaffold(snapshot: RuntimeSnapshot) -> list[dict[str, Any]]:

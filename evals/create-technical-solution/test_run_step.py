@@ -1661,10 +1661,34 @@ class TestRunStepBehavior:
         payload = json.loads(capsys.readouterr().out)
         assert len(payload) == 4
         assert payload[0]["slot"] == "1.1 需求概述"
+        assert payload[0]["member"] == "domain_expert"
         assert payload[0]["decision_type"] == ""
         assert payload[0]["rationale"] == ""
         assert payload[0]["evidence_refs"] == []
         assert payload[0]["open_questions"] == []
+
+    def test_emit_json_scaffold_step9_expands_entries_for_all_selected_members(
+        self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        state = make_step9_state(workspace)
+        state["checkpoints"]["step-5"]["selected_members"] = [
+            "systems_architect",
+            "domain_expert",
+        ]
+        state["checkpoints"]["step-5"]["selected_member_count"] = 2
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        write_step9_draft(workspace)
+
+        exit_code = run_step.emit_json_scaffold(workspace["state_path"])
+
+        assert exit_code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert len(payload) == 8
+        assert payload[0]["slot"] == "1.1 需求概述"
+        assert payload[0]["member"] == "systems_architect"
+        assert payload[1]["slot"] == "1.1 需求概述"
+        assert payload[1]["member"] == "domain_expert"
 
     def test_emit_json_scaffold_step10_matches_required_shape(
         self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]

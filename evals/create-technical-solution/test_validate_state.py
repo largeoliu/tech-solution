@@ -330,6 +330,16 @@ class TestStateBoundary:
 
         assert not any(error["code"] == "summary_contains_forbidden_content" for error in errors)
 
+    def test_validator_rejects_generic_wd_artifact_identifier_in_summary(self, workspace: dict[str, Path]) -> None:
+        state = make_state(workspace)
+        state["checkpoints"]["step-9"]["summary"] = "完成；写入 WD-SYN-SLOT-*；slots=4；gate: step-10 ready"
+        validator = make_validator(state, workspace)
+        errors: list[dict] = []
+
+        validator.step_9(errors)
+
+        assert any(error["code"] == "summary_contains_forbidden_content" for error in errors)
+
     def test_step_7_rejects_unstructured_wd_ctx(self, workspace: dict[str, Path]) -> None:
         workspace["working_draft_path"].mkdir(parents=True, exist_ok=True)
         (workspace["working_draft_path"] / "ctx.md").write_text(
