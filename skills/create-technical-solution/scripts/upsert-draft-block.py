@@ -368,7 +368,6 @@ def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -
         _record_slot_completion(state, block_name)
         all_done = _check_step_completion(state, "WD-EXP-SLOT-*")
         completed_slots = state.get("artifact_progress", {}).get("WD-EXP-SLOT-*", {}).get("completed_slots", [])
-        total_slots = len(_all_slot_ids(state))
         checkpoints["step-9"] = {
             "summary": summary,
             "skipped": False,
@@ -418,14 +417,10 @@ def update_counts(state: dict[str, Any], block_name: str, content: str) -> None:
         checkpoints["step-8"]["task_slot_count"] = count_slot_sections(content)
     elif block_name.startswith("WD-EXP-"):
         completed_slots = state.get("artifact_progress", {}).get("WD-EXP-SLOT-*", {}).get("completed_slots", [])
-        checkpoints["step-9"]["wd_exp_count"] = len(completed_slots) if completed_slots else sum(
-            1 for item in produced if isinstance(item, str) and item.startswith("WD-EXP-")
-        )
+        checkpoints["step-9"]["wd_exp_count"] = len(completed_slots)
     elif block_name.startswith("WD-SYN-"):
         completed_slots = state.get("artifact_progress", {}).get("WD-SYN-SLOT-*", {}).get("completed_slots", [])
-        checkpoints["step-10"]["syn_slot_count"] = len(completed_slots) if completed_slots else sum(
-            1 for item in produced if isinstance(item, str) and item.startswith("WD-SYN-")
-        )
+        checkpoints["step-10"]["syn_slot_count"] = len(completed_slots)
 
 
 def sync_artifact_registry(
