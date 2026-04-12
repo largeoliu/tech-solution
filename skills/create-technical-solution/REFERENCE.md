@@ -5,6 +5,10 @@
 ## 产物 Schema 速查
 
 - 所有 `WD-*` 都是 **working draft 目录内的稳定文件**，状态文件中的 `produced_artifacts` 仅表示这些文件已经落盘到 `working_draft_path` 目录。
+- step 7/8 的 canonical truth 分别是 `ctx.json`、`task.json`；`ctx.md`、`task.md` 只是脚本导出的 Markdown render view。
+- step 9 的 canonical truth 是 slot×member 专家 JSON：`slots/SLOT-XX/experts/<MEMBER>.json`；`experts.md` 只是按槽位聚合后的 render view。
+- step 10 的 canonical truth 是 `slots/SLOT-XX/decision.json`；`synthesis.md` 只是从 decision truth 派生的 render view。
+- step 11 的 canonical render 依据是各槽位 `decision.json`，并在 `checkpoints.step-11.render_receipt` 中记录 `mode=decision_truth`、每槽位 decision 路径/hash 与最终文档 hash。
 - **文件不预创建**：working draft 只初始化目录骨架（`draft/`、`draft/slots/`、`draft/slots/SLOT-XX/`），文件在对应步骤首次成功提交时才创建。文件存在即代表真实产物已落盘。
 - `artifact_progress` 跟踪步骤 9/10 的槽位级进度：`artifact_progress.WD-EXP-SLOT-*.completed_slots` 和 `artifact_progress.WD-SYN-SLOT-*.completed_slots` 记录已完成的 slot id 列表。
 - `solution_root` 固定采用双读单写策略：兼容读取历史 `.architecture/solutions/`，但新 working draft 统一写入 `.architecture/.state/create-technical-solution/[slug]/draft/`，最终文档统一写入 `.architecture/technical-solutions/`。
@@ -15,10 +19,10 @@
 
 - **共享上下文（WD-CTX）**：默认只保留 `上下文编号`、`来源`、`结论或约束`、`适用槽位`、`可信度或缺口`（必填）；仅当涉及新增、拆分、迁移、平行建设或职责转移时，才补充 `资产类型`、`资产标识`、`位置`、`当前职责`、`当前能力`、`可扩展点`、`已知限制`、`调用方/依赖方`、`相关证据路径`；若结论为"未发现候选"，还必须补 `搜索范围`、`搜索关键词`、`已排除目录或对象`、`未发现结论`
 - **模板任务单（WD-TASK）**：只保留 `槽位标识`、`必须消费的共享上下文`、`参与专家`、`每位专家必答问题`、`建议落位槽位`、`落位表达要求`、`缺口或阻塞项`（必填）；不重复抄写 CTX 事实详情，统一通过 CTX 编号引用
-- **专家分析（WD-EXP-SLOT-*）**：默认只保留 `参与槽位`、`决策类型`、`核心理由`、`关键证据引用`、`未决点`（必填）；每个槽位文件内再按专家小节展开；仅 `新建` 时强制补充不可复用 / 不可改造证据说明
+- **专家分析（WD-EXP-SLOT-*）**：canonical payload 还必须携带 `member`，脚本会按槽位拆分并落到 `slots/SLOT-XX/experts/<MEMBER>.json`；render view `experts.md` 默认只展示 `参与槽位`、`决策类型`、`核心理由`、`关键证据引用`、`未决点`；仅 `新建` 时强制补充不可复用 / 不可改造证据说明
 - **协作收敛（WD-SYN-SLOT-*）**：
   `目标能力`、`候选方案对比`、`选定路径`、`选定写法`、`关键证据引用`、`建议落位槽位`、`模板承载缺口`、`未决问题`
-  其中 `选定写法` 支持多段落 Markdown，是最终技术方案该槽位正文的直接来源，应写完该槽位需要的全部正式内容；`候选方案对比`、`关键证据引用`、`模板承载缺口`、`未决问题` 仅保留在 working draft 中，不进入最终技术方案文档
+  其中 `选定写法` 支持多段落 Markdown，是 `decision.json` 中用于最终技术方案成稿的直接字段；`候选方案对比`、`关键证据引用`、`模板承载缺口`、`未决问题` 仅保留在 working draft truth / render view 中，不进入最终技术方案文档
 
 ## 结构化提交示例
 
@@ -77,6 +81,7 @@
 [
   {
     "slot": "2.1 方案设计",
+    "member": "ARCH",
     "decision_type": "改造",
     "rationale": "复用现有骨架并补齐专家分析。",
     "evidence_refs": ["CTX-01"],
@@ -108,6 +113,15 @@
   }
 ]
 ```
+
+对应落盘关系：
+
+- Step 7：`ctx.json` -> `ctx.md`
+- Step 8：`task.json` -> `task.md`
+- Step 9：`slots/SLOT-XX/experts/<MEMBER>.json` -> `slots/SLOT-XX/experts.md`
+- Step 10：`slots/SLOT-XX/decision.json` -> `slots/SLOT-XX/synthesis.md`
+- Step 11：`decision.json[*].selected_writeup` -> `.architecture/technical-solutions/[slug].md` + `checkpoints.step-11.render_receipt`
+
 ## WD-SYN-SLOT-* 示例
 
 ### 示例1：数据方案收敛
@@ -191,15 +205,18 @@ python /path/to/run-step.py --state <状态文件路径> --advance
 
 - 空状态时自动初始化步骤 1，并返回 `business_task`、`required_output_shape`、`next_action`
 - 自动步骤（2、3、6、11、12）在一次调用内完成
-- 业务决策步骤（1、4、5）会自动完成 entry，并在返回 payload 中给出 `business_task`、`required_output_shape`、`next_action`
+- 业务决策步骤（1、4、5）会自动完成 entry，并在返回 payload 中给出 `business_task`、`required_output_shape`、`next_action`、`ticket`、`submit_command`
 - 创作步骤（7、8、9、10）会自动完成 entry，并在返回 payload 中给出 `artifact`、`business_task`、`required_output_shape`、`next_action`
 - 创作步骤（7、8、9、10）还会返回 `ticket`、`submit_command` 和 `json_scaffold_command`，可直接复制下一条命令，不必再去 state 里取 ticket
+- 对外提交命令不再要求模型手写 checkpoint/summary；脚本会按当前 truth 自动生成步骤摘要
 
 只有业务决策步骤或创作步骤真正提交正文时，才使用显式提交：
 
 ```bash
-python /path/to/run-step.py --state <状态文件路径> --complete --ticket <ticket> --summary "..."
+python /path/to/run-step.py --state <状态文件路径> --complete --ticket <ticket>
 ```
+
+`checkpoints.step-N.summary` 由脚本在成功提交后自动生成；对外主路径不再要求模型手写步骤摘要或模型自写 render 总结。
 
 此时的 `ticket` 来自前一次 `--advance` 返回或写入的 `pending_ticket`。若发 ticket 后 state、working draft、final document 或提交 block 范围发生变化，旧 ticket 会失效，必须重新执行 `--advance`。
 
@@ -233,6 +250,7 @@ python /path/to/run-step.py --state <状态文件路径> --emit-json-scaffold --
 
 - `python /path/to/run-step.py --state <状态文件路径> --emit-scaffold`
 - 只读辅助入口：仅向 `stdout` 输出当前步骤 scaffold
+- 若当前步骤不是 7/8/9/10，脚本会执行只读 `auto-skip`：保持流程状态不变，并返回空输出或只读提示，而不会触发新的写入路径
 - 不是第二条写入路径
 - 不修改 state
 - 不修改 working draft

@@ -98,6 +98,9 @@ def legacy_working_draft_fix(
     current_path = resolve_repo_path(repo_root, raw_path)
     if current_path is None or current_path == canonical_draft_path:
         return None
+    wd_files = ["ctx.json", "ctx.md", "task.json", "task.md", "slots"]
+    if current_path.is_dir() and any((current_path / name).exists() for name in wd_files):
+        return None
     should_move = current_path.exists() and not canonical_draft_path.exists()
     return {
         "code": "legacy_working_draft_migration",
@@ -124,7 +127,9 @@ def old_layout_migration_fix(
     old_dir = resolve_repo_path(repo_root, raw_path)
     if old_dir is None or not old_dir.is_dir():
         return None
-    wd_files = ["ctx.md", "task.md", "slots"]
+    if old_dir == canonical_draft_path:
+        return None
+    wd_files = ["ctx.json", "ctx.md", "task.json", "task.md", "slots"]
     has_old_layout = any((old_dir / f).exists() for f in wd_files)
     if not has_old_layout:
         return None
@@ -208,7 +213,7 @@ def run_doctor(
                 source = Path(fix["from_path"])
                 target = Path(fix["path"])
                 target.mkdir(parents=True, exist_ok=True)
-                for item in ["ctx.md", "task.md", "slots"]:
+                for item in ["ctx.json", "ctx.md", "task.json", "task.md", "slots"]:
                     src_item = source / item
                     tgt_item = target / item
                     if src_item.exists():
@@ -216,6 +221,8 @@ def run_doctor(
                             if src_item.stat().st_mtime <= tgt_item.stat().st_mtime:
                                 continue
                         shutil.move(str(src_item), str(tgt_item))
+                if source.exists() and source.is_dir() and not any(source.iterdir()):
+                    source.rmdir()
                 state["working_draft_path"] = str(working_draft_relative_path(snapshot.slug))
                 dump_yaml(resolved_state_path, state)
                 fix["applied"] = True

@@ -17,16 +17,16 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from protocol_runtime import dump_yaml, load_yaml, refresh_receipt, repo_root_from_state_path, require_receipt
+from protocol_runtime import decision_truth_path, dump_yaml, expert_truth_complete, expert_truth_files, load_yaml, refresh_receipt, repo_root_from_state_path, require_receipt
 
 
-def sync_artifacts(working_dir: Path, slots: list[dict[str, Any]]) -> tuple[list[str], dict[str, Any]]:
+def sync_artifacts(working_dir: Path, slots: list[dict[str, Any]], state: dict[str, Any] | None = None) -> tuple[list[str], dict[str, Any]]:
     artifacts: list[str] = []
     progress: dict[str, Any] = {}
-    ctx_path = working_dir / "ctx.md"
+    ctx_path = working_dir / "ctx.json"
     if ctx_path.exists() and ctx_path.stat().st_size > 0:
         artifacts.append("WD-CTX")
-    task_path = working_dir / "task.md"
+    task_path = working_dir / "task.json"
     if task_path.exists() and task_path.stat().st_size > 0:
         artifacts.append("WD-TASK")
     exp_completed: list[str] = []
@@ -35,11 +35,12 @@ def sync_artifacts(working_dir: Path, slots: list[dict[str, Any]]) -> tuple[list
         slot_id = slot_info.get("slot", "")
         if not slot_id:
             continue
-        exp_path = working_dir / "slots" / slot_id / "experts.md"
-        if exp_path.exists() and exp_path.stat().st_size > 0:
+        exp_files = expert_truth_files(working_dir, slot_id)
+        if exp_files:
             artifacts.append(f"WD-EXP-{slot_id}")
-            exp_completed.append(slot_id)
-        syn_path = working_dir / "slots" / slot_id / "synthesis.md"
+            if state is not None and expert_truth_complete(state=state, working_dir=working_dir, slot_id=slot_id):
+                exp_completed.append(slot_id)
+        syn_path = decision_truth_path(working_dir, slot_id)
         if syn_path.exists() and syn_path.stat().st_size > 0:
             artifacts.append(f"WD-SYN-{slot_id}")
             syn_completed.append(slot_id)
@@ -66,7 +67,7 @@ def sync_artifacts_in_state(state_path: Path, require_receipt_step: int | None =
     if require_receipt_step is not None:
         require_receipt(state, expected_step=require_receipt_step)
     slots = state.get("slots") or []
-    artifacts, progress = sync_artifacts(draft_path, slots)
+    artifacts, progress = sync_artifacts(draft_path, slots, state)
     state["produced_artifacts"] = artifacts
     state["artifact_progress"] = progress
     refresh_receipt(state)

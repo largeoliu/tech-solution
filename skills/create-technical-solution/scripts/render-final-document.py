@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -21,6 +22,9 @@ if str(SCRIPTS_DIR) not in sys.path:
 from protocol_runtime import (
     DEFAULT_TEMPLATE_PATH,
     SOLUTION_ROOT,
+    default_step_summary,
+    decision_truth_digest,
+    decision_truth_path,
     dump_yaml,
     final_document_relative_path,
     iso_now,
@@ -86,6 +90,26 @@ def extract_final_writeup(content: str, title: str) -> str:
     )
 
 
+def load_decision_truth(slot_path: Path, title: str) -> dict[str, Any]:
+    if not slot_path.exists():
+        raise SystemExit(
+            f"槽位「{title}」缺少 canonical decision truth: {slot_path}。"
+            "请在步骤 10 重新提交结构化决策。"
+        )
+    try:
+        payload = json.loads(slot_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"槽位「{title}」的 canonical decision truth 不是合法 JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise SystemExit(f"槽位「{title}」的 canonical decision truth 必须是 JSON 对象。")
+    if not str(payload.get("selected_writeup") or "").strip():
+        raise SystemExit(
+            f"槽位「{title}」的 canonical decision truth 缺少可用于最终成稿的 `选定写法`。"
+            "请在步骤 10 补齐该字段后重新提交。"
+        )
+    return payload
+
+
 def strip_slot_heading(content: str, title: str) -> str:
     lines = content.strip().splitlines()
     if not lines:
@@ -126,12 +150,8 @@ def render_from_draft(state_path: Path) -> str:
     for slot_info in slots:
         slot_id = slot_info.get("slot", "")
         title = slot_info.get("title", "")
-        syn_path = draft_path / "slots" / slot_id / "synthesis.md"
-        if syn_path.exists() and syn_path.stat().st_size > 0:
-            sections[title] = extract_final_writeup(
-                syn_path.read_text(encoding="utf-8"),
-                title,
-            )
+        truth = load_decision_truth(decision_truth_path(draft_path, slot_id), title)
+        sections[title] = str(truth.get("selected_writeup") or "").strip()
 
     template_content = template_path.read_text(encoding="utf-8")
     expected_slots = extract_slot_headings(template_content)
@@ -165,11 +185,34 @@ def render_from_draft(state_path: Path) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def build_render_receipt(*, state: dict[str, Any], draft_path: Path, repo_root: Path) -> dict[str, Any]:
+    slots_receipt: list[dict[str, Any]] = []
+    for slot_info in state.get("slots") or []:
+        slot_id = str(slot_info.get("slot") or "").strip()
+        title = str(slot_info.get("title") or "").strip()
+        if not slot_id or not title:
+            continue
+        truth_path = decision_truth_path(draft_path, slot_id)
+        slots_receipt.append(
+            {
+                "slot": slot_id,
+                "title": title,
+                "decision_artifact": f"WD-SYN-{slot_id}",
+                "decision_path": truth_path.relative_to(repo_root).as_posix(),
+                "decision_hash": decision_truth_digest(draft_path, slot_id),
+            }
+        )
+    return {
+        "mode": "decision_truth",
+        "slots": slots_receipt,
+    }
+
+
 def render_final_document(
     *,
     state_path: Path,
     content_path: Path | None,
-    summary: str,
+    summary: str | None,
 ) -> dict[str, Any]:
     state = load_yaml(state_path)
     require_receipt(state, expected_step=11)
@@ -210,7 +253,13 @@ def render_final_document(
         state.get("working_draft_path"),
         default_relative=working_draft_relative_path(slug),
     )
+    render_receipt: dict[str, Any] = {"mode": "decision_truth", "slots": []}
     if draft_path and draft_path.is_dir():
+        render_receipt = build_render_receipt(
+            state=state,
+            draft_path=draft_path,
+            repo_root=repo_root,
+        )
         slot_blocks: dict[str, str] = {}
         for slot_info in state.get("slots") or []:
             slot_id = slot_info.get("slot", "")
@@ -230,12 +279,20 @@ def render_final_document(
         checkpoints = {}
         state["checkpoints"] = checkpoints
     checkpoints["step-11"] = {
-        "summary": summary,
+        "summary": "",
         "final_document_written": True,
         "absorbed_slot_count": count_absorbed_slots(content),
         "rendered_via_script": True,
+        "render_receipt": {
+            **render_receipt,
+            "final_document_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        },
         "completed_at": iso_now(),
     }
+    checkpoints["step-11"]["summary"] = str(summary or "").strip() or default_step_summary(
+        11,
+        absorbed_slot_count=checkpoints["step-11"]["absorbed_slot_count"],
+    )
     state["can_enter_step_12"] = True
     completed = state.setdefault("completed_steps", [])
     if not isinstance(completed, list):

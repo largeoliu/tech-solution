@@ -67,6 +67,51 @@ def test_reference_doc_matches_current_validator_json_contract() -> None:
     assert "对外只消费 `run-step.py`" in text
 
 
+def test_docs_cover_canonical_truth_and_render_views() -> None:
+    skill_text = read("skills/create-technical-solution/SKILL.md")
+    ref_text = read("skills/create-technical-solution/REFERENCE.md")
+    step7_text = read("skills/create-technical-solution/steps/07-构建共享上下文.md")
+    step8_text = read("skills/create-technical-solution/steps/08-生成模板任务单.md")
+    step9_text = read("skills/create-technical-solution/steps/09-组织专家按模板逐槽位分析.md")
+    step10_text = read("skills/create-technical-solution/steps/10-按模板逐槽位协作收敛.md")
+    step11_text = read("skills/create-technical-solution/steps/11-严格模板成稿并保存结果.md")
+
+    assert "ctx.json" in skill_text
+    assert "task.json" in skill_text
+    assert "decision.json" in skill_text
+    assert "render_receipt" in skill_text
+
+    assert "ctx.json" in ref_text and "ctx.md" in ref_text
+    assert "task.json" in ref_text and "task.md" in ref_text
+    assert "experts/<MEMBER>.json" in ref_text and "experts.md" in ref_text
+    assert "decision.json" in ref_text and "synthesis.md" in ref_text
+    assert "decision_truth" in ref_text
+
+    assert "ctx.json" in step7_text and "ctx.md" in step7_text
+    assert "task.json" in step8_text and "task.md" in step8_text
+    assert '"member"' in step9_text
+    assert "experts/<MEMBER>.json" in step9_text
+    assert "decision.json" in step10_text and "synthesis.md" in step10_text
+    assert "decision.json.selected_writeup" in step11_text
+    assert "render_receipt" in step11_text
+
+
+def test_public_docs_say_summaries_are_script_generated() -> None:
+    paths = [
+        "skills/create-technical-solution/SKILL.md",
+        "skills/create-technical-solution/REFERENCE.md",
+        "skills/create-technical-solution/steps/07-构建共享上下文.md",
+        "skills/create-technical-solution/steps/08-生成模板任务单.md",
+        "skills/create-technical-solution/steps/09-组织专家按模板逐槽位分析.md",
+        "skills/create-technical-solution/steps/10-按模板逐槽位协作收敛.md",
+        "skills/create-technical-solution/steps/11-严格模板成稿并保存结果.md",
+    ]
+
+    combined = "\n".join(read(path) for path in paths)
+    assert "脚本自动生成" in combined
+    assert "不再要求模型手写摘要" in combined
+
+
 def test_docs_cover_emit_scaffold_read_only_contract() -> None:
     ref_text = read("skills/create-technical-solution/REFERENCE.md")
     skill_text = read("skills/create-technical-solution/SKILL.md")

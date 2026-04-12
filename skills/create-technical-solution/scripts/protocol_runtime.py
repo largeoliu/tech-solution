@@ -245,6 +245,52 @@ def canonical_step_defs() -> dict[int, dict[str, Any]]:
     return {step: dict(defn) for step, defn in CANONICAL_STEP_DEFS.items()}
 
 
+def default_step_summary(
+    step: int,
+    *,
+    slug: str | None = None,
+    ctx_count: int | None = None,
+    slot_count: int | None = None,
+    completed_slots: int | None = None,
+    total_slots: int | None = None,
+    absorbed_slot_count: int | None = None,
+) -> str:
+    if step == 1:
+        slug_part = f"；slug={slug}" if slug else ""
+        return f"完成；定题与范围判断已记录{slug_part}；gate: step-2 ready"
+    if step == 2:
+        return "完成；前置文件检查通过；gate: step-3 ready"
+    if step == 3:
+        return "完成；模板已读取；gate: step-4 ready"
+    if step == 4:
+        return "完成；方案类型已确定；gate: step-5 ready"
+    if step == 5:
+        return "完成；参与成员已记录；gate: step-6 ready"
+    if step == 6:
+        return "完成；repowiki 检查完成；gate: step-7 ready"
+    if step == 7:
+        return f"完成；写入 WD-CTX；CTX={int(ctx_count or 0)}；gate: step-8 ready"
+    if step == 8:
+        return f"完成；写入 WD-TASK；slots={int(slot_count or 0)}；gate: step-9 ready"
+    if step == 9:
+        completed = int(completed_slots or 0)
+        total = int(total_slots or completed)
+        if total and completed < total:
+            return f"进行中；新增专家分析；累计完成={completed}/{total}；gate: step-9 continue"
+        return f"完成；写入专家分析；slots={completed}；gate: step-10 ready"
+    if step == 10:
+        completed = int(completed_slots or 0)
+        total = int(total_slots or completed)
+        if total and completed < total:
+            return f"进行中；新增收敛；累计完成={completed}/{total}；gate: step-10 continue"
+        return f"完成；写入协作收敛；slots={completed}；gate: step-11 ready"
+    if step == 11:
+        return f"完成；最终文档已渲染；absorbed_slots={int(absorbed_slot_count or 0)}；gate: step-12 ready"
+    if step == 12:
+        return "完成；清理已执行；gate: done"
+    return "完成；步骤已处理"
+
+
 def working_draft_path_for_slug(*, repo_root: Path, slug: str) -> Path:
     return (repo_root / working_draft_relative_path(slug)).resolve()
 
@@ -269,6 +315,62 @@ def resolve_repo_path(
     if not candidate.is_absolute():
         candidate = repo_root / candidate
     return candidate.resolve()
+
+
+def selected_member_ids(state: dict[str, Any]) -> list[str]:
+    checkpoints = state.get("checkpoints") or {}
+    if not isinstance(checkpoints, dict):
+        return []
+    step5 = checkpoints.get("step-5") or {}
+    if not isinstance(step5, dict):
+        return []
+    raw = step5.get("selected_members") or []
+    if not isinstance(raw, list):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def expert_truth_dir(working_dir: Path, slot_id: str) -> Path:
+    return working_dir / "slots" / slot_id / "experts"
+
+
+def expert_truth_files(working_dir: Path, slot_id: str) -> list[Path]:
+    experts_dir = expert_truth_dir(working_dir, slot_id)
+    if not experts_dir.is_dir():
+        return []
+    return sorted(experts_dir.glob("*.json"))
+
+
+def expert_truth_member_ids(working_dir: Path, slot_id: str) -> list[str]:
+    return [path.stem for path in expert_truth_files(working_dir, slot_id)]
+
+
+def expert_truth_complete(*, state: dict[str, Any], working_dir: Path, slot_id: str) -> bool:
+    expected = selected_member_ids(state)
+    if not expected:
+        return False
+    expected_normalized = {item.strip().lower() for item in expected if item.strip()}
+    actual = {item.strip().lower() for item in expert_truth_member_ids(working_dir, slot_id) if item.strip()}
+    return expected_normalized.issubset(actual)
+
+
+def expert_truth_digest(working_dir: Path, slot_id: str) -> str:
+    payload_lines: list[str] = []
+    for path in expert_truth_files(working_dir, slot_id):
+        payload_lines.append(f"{path.name}:{hashlib.sha256(path.read_bytes()).hexdigest()}")
+    payload = "\n".join(payload_lines)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def decision_truth_path(working_dir: Path, slot_id: str) -> Path:
+    return working_dir / "slots" / slot_id / "decision.json"
+
+
+def decision_truth_digest(working_dir: Path, slot_id: str) -> str:
+    path = decision_truth_path(working_dir, slot_id)
+    if not path.exists():
+        return ""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def run_step_base_command(state_path: Path) -> str:
@@ -301,7 +403,7 @@ def render_run_step_command(
         if not has_current_ticket:
             return [advance_line]
         return [
-            f'{base} --complete --ticket <ticket> --summary "<步骤4完成>" <<\'HEREDOC\'',
+            f"{base} --complete --ticket <ticket> <<'HEREDOC'",
             '{"solution_type": "<方案类型>"}',
             'HEREDOC',
         ]
@@ -309,7 +411,7 @@ def render_run_step_command(
         if not has_current_ticket:
             return [advance_line]
         return [
-            f'{base} --complete --ticket <ticket> --summary "<步骤5完成>" <<\'HEREDOC\'',
+            f"{base} --complete --ticket <ticket> <<'HEREDOC'",
             '{"selected_members": ["<MEMBER_ID>"]}',
             'HEREDOC',
         ]
@@ -317,7 +419,7 @@ def render_run_step_command(
         if not has_current_ticket:
             return [advance_line]
         return [
-            f'{base} --complete --ticket <ticket> --summary "<WD-CTX 完成>" <<\'HEREDOC\'',
+            f"{base} --complete --ticket <ticket> <<'HEREDOC'",
             '[',
             '  {"id": "CTX-01", "source": "src/module.py", "conclusion": "复用现有入口", "applicable_slots": ["1.1 需求概述"], "confidence": "已验证"}',
             ']',
@@ -327,7 +429,7 @@ def render_run_step_command(
         if not has_current_ticket:
             return [advance_line]
         return [
-            f'{base} --complete --ticket <ticket> --summary "<WD-TASK 完成>" <<\'HEREDOC\'',
+            f"{base} --complete --ticket <ticket> <<'HEREDOC'",
             '[',
             '  {"slot": "1.1 需求概述", "required_ctx": ["CTX-01"]}',
             ']',
@@ -337,7 +439,7 @@ def render_run_step_command(
         if not has_current_ticket:
             return [advance_line]
         return [
-            f'{base} --complete --ticket <ticket> --summary "<专家分析完成>" <<\'HEREDOC\'',
+            f"{base} --complete --ticket <ticket> <<'HEREDOC'",
             '[',
             '  {',
             '    "slot": "2.1 方案设计",',
@@ -353,7 +455,7 @@ def render_run_step_command(
         if not has_current_ticket:
             return [advance_line]
         return [
-            f'{base} --complete --ticket <ticket> --summary "<收敛完成>" <<\'HEREDOC\'',
+            f"{base} --complete --ticket <ticket> <<'HEREDOC'",
             '[',
             '  {',
             '    "slot": "2.1 方案设计",',

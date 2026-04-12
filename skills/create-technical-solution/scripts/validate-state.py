@@ -27,10 +27,16 @@ from protocol_runtime import (
     DEFAULT_PRINCIPLES_PATH,
     DEFAULT_TEMPLATE_PATH,
     SOLUTION_ROOT,
+    decision_truth_digest,
+    decision_truth_path,
+    expert_truth_complete,
+    expert_truth_digest,
+    expert_truth_files,
     repo_root_from_state_path,
     final_document_relative_path,
     render_repair_command,
     resolve_repo_path,
+    selected_member_ids,
     slug_from_state_path,
     working_draft_relative_path,
 )
@@ -151,6 +157,16 @@ def normalize_text(value: str) -> str:
 
 def file_content_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_json_object(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
 
 
 def extract_slot_headings(markdown: str, slot_level: Optional[int] = None) -> list[dict[str, Any]]:
@@ -275,6 +291,8 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
         return "回到步骤 7，通过 run-step.py 重写 WD-CTX，并让 checkpoints.step-7.ctx_count 与实际 CTX 条目数保持一致且大于 0。"
     if code == "placeholder_content_detected":
         return "删除占位语句或模板残留，改成真实技术结论、真实地址/资料和可执行写法后重试。"
+    if code == "missing_canonical_decision_truth":
+        return "回到步骤 10，补齐每个槽位的 decision.json，并让 synthesis.md 仅作为脚本导出的派生视图。"
     if code == "wd_syn_slots_too_similar":
         return "回到步骤 10，按槽位重做差异化收敛，避免把同一套 boilerplate 复制到多个槽位。"
     if code == "cleanup_attempt_before_validation":
@@ -370,12 +388,16 @@ def build_repair_plan(
     state: Optional[dict[str, Any]] = None,
 ) -> list[dict[str, Any]]:
     plan: dict[int, dict[str, Any]] = {}
+    action_priority = {
+        "refresh_ticket": 1,
+        "rerender_final_document": 2,
+    }
 
     def classify_action(issue: dict[str, Any], repair_step: int) -> str:
         code = str(issue.get("code") or "")
         if code == "invalid_gate_receipt":
             return "refresh_ticket"
-        if code in {"final_document_not_rendered_via_script", "step_order_violation"} and repair_step == 11:
+        if code in {"final_document_not_rendered_via_script", "missing_render_receipt", "step_order_violation"} and repair_step == 11:
             return "rerender_final_document"
         if repair_step == 3:
             return "rebuild_from_step_3"
@@ -387,15 +409,28 @@ def build_repair_plan(
             return "rollback_to_step_10"
         return f"rebuild_from_step_{repair_step}"
 
+    def build_repair_action(action_type: str, repair_step: int) -> dict[str, Any]:
+        if action_type == "refresh_ticket":
+            return {"kind": "refresh_ticket", "step": repair_step}
+        if action_type == "rerender_final_document":
+            return {"kind": "rerender_final_document", "step": repair_step}
+        if action_type == "rollback_to_step_10":
+            return {"kind": "rebuild_from_step", "step": 10}
+        if action_type.startswith("rebuild_from_step_"):
+            return {"kind": "rebuild_from_step", "step": repair_step}
+        return {"kind": action_type, "step": repair_step}
+
     for issue in issues:
         repair_step = issue.get("recommended_repair_step")
         if repair_step is None:
             continue
+        action_type = classify_action(issue, int(repair_step))
         entry = plan.setdefault(
             repair_step,
             {
                 "step": repair_step,
                 "action_type": "",
+                "repair_action": {},
                 "script_command": "",
                 "depends_on_steps": [],
                 "expected_artifacts_after_fix": [],
@@ -403,7 +438,10 @@ def build_repair_plan(
             },
         )
         code = issue["code"]
-        entry["action_type"] = classify_action(issue, int(repair_step))
+        existing_action = str(entry.get("action_type") or "")
+        if action_priority.get(action_type, 0) >= action_priority.get(existing_action, 0):
+            entry["action_type"] = action_type
+            entry["repair_action"] = build_repair_action(action_type, int(repair_step))
         if code in {"missing_artifact", "missing_working_draft_block", "draft_block_overwritten"}:
             for missing in issue.get("missing_artifacts", []):
                 if missing not in entry["expected_artifacts_after_fix"]:
@@ -660,7 +698,21 @@ class GateValidator:
         draft_path = self.working_draft_path()
         if not draft_path or not draft_path.is_dir():
             return
+        ctx_json_path = draft_path / "ctx.json"
         ctx_path = draft_path / "ctx.md"
+        if ctx_json_path.exists() and not ctx_path.exists():
+            add_issue(
+                errors,
+                make_issue(
+                    code="draft_block_overwritten",
+                    message=f"步骤 {step_num}: ctx.md 缺失，render view 已丢失",
+                    step=step_num,
+                    field="working_draft_path",
+                    missing_artifacts=["WD-CTX"],
+                    recommended_rollback_step=7,
+                    recommended_repair_step=7,
+                ),
+            )
         if not ctx_path.exists():
             return
         content = read_markdown(ctx_path)
@@ -994,28 +1046,29 @@ class GateValidator:
 
     def _resolve_artifact_file(self, working_dir: Path, artifact: str) -> Optional[Path]:
         if artifact == "WD-CTX":
-            return working_dir / "ctx.md"
+            return working_dir / "ctx.json"
         if artifact == "WD-TASK":
-            return working_dir / "task.md"
+            return working_dir / "task.json"
         exp_match = re.match(r"^WD-EXP-(SLOT-\d+)$", artifact)
         if exp_match:
-            return working_dir / "slots" / exp_match.group(1) / "experts.md"
+            experts_dir = working_dir / "slots" / exp_match.group(1) / "experts"
+            return experts_dir if experts_dir.is_dir() else None
         syn_match = re.match(r"^WD-SYN-(SLOT-\d+)$", artifact)
         if syn_match:
-            return working_dir / "slots" / syn_match.group(1) / "synthesis.md"
+            return decision_truth_path(working_dir, syn_match.group(1))
         if artifact in {"WD-EXP-*", "WD-EXP-SLOT-*"}:
             slots_dir = working_dir / "slots"
             if slots_dir.is_dir():
                 for slot_dir in sorted(slots_dir.iterdir()):
-                    exp = slot_dir / "experts.md"
-                    if exp.exists():
-                        return exp
+                    experts_dir = slot_dir / "experts"
+                    if experts_dir.is_dir() and list(experts_dir.glob("*.json")):
+                        return experts_dir
             return None
         if artifact in {"WD-SYN", "WD-SYN-SLOT-*"}:
             slots_dir = working_dir / "slots"
             if slots_dir.is_dir():
                 for slot_dir in sorted(slots_dir.iterdir()):
-                    syn = slot_dir / "synthesis.md"
+                    syn = decision_truth_path(working_dir, slot_dir.name)
                     if syn.exists():
                         return syn
             return None
@@ -1074,7 +1127,11 @@ class GateValidator:
         expected_path = str(entry.get("path") or "").strip()
         expected_hash = str(entry.get("content_hash") or "").strip()
         actual_relative = target_file.relative_to(self.repo_root).as_posix()
-        actual_hash = file_content_hash(target_file)
+        if artifact.startswith("WD-EXP-") and target_file.is_dir():
+            slot_id = artifact.removeprefix("WD-EXP-")
+            actual_hash = expert_truth_digest(draft_path, slot_id)
+        else:
+            actual_hash = file_content_hash(target_file)
         if expected_path != actual_relative or expected_hash != actual_hash:
             add_issue(
                 errors,
@@ -1100,7 +1157,21 @@ class GateValidator:
         if not draft_path or not draft_path.is_dir():
             return
         headings = [item["title"] for item in self.template_headings()]
+        task_json_path = draft_path / "task.json"
         task_path = draft_path / "task.md"
+        if task_json_path.exists() and not task_path.exists():
+            add_issue(
+                errors,
+                make_issue(
+                    code="draft_block_overwritten",
+                    message=f"步骤 {step_num}: task.md 缺失，render view 已丢失",
+                    step=step_num,
+                    field="working_draft_path",
+                    missing_artifacts=["WD-TASK"],
+                    recommended_rollback_step=8,
+                    recommended_repair_step=8,
+                ),
+            )
         if not task_path.exists():
             return
         content = read_markdown(task_path)
@@ -1537,6 +1608,7 @@ class GateValidator:
 
     def step_9(self, errors: list[dict[str, Any]]) -> None:
         self.common(9, errors)
+        draft_path = self.working_draft_path()
         require(
             self.state.get("can_enter_step_9") is True,
             errors,
@@ -1557,10 +1629,274 @@ class GateValidator:
             completed_slots = []
         completed_set = set(completed_slots)
         all_slot_ids = [s.get("slot", "") for s in state_slots if s.get("slot")]
+        slot_titles = {
+            str(item.get("slot") or "").strip(): str(item.get("title") or "").strip()
+            for item in state_slots
+            if str(item.get("slot") or "").strip()
+        }
         for slot_id in completed_set:
             artifact = f"WD-EXP-{slot_id}"
             self.check_working_draft_block(artifact, errors, 9)
+            experts_md = draft_path / "slots" / slot_id / "experts.md" if draft_path else None
+            if experts_md is not None and not experts_md.exists():
+                add_issue(
+                    errors,
+                    make_issue(
+                        code="draft_block_overwritten",
+                        message=f"步骤 9: {slot_id} 的 experts.md 缺失，render view 已丢失",
+                        step=9,
+                        field="working_draft_path",
+                        missing_artifacts=[artifact],
+                        recommended_rollback_step=9,
+                        recommended_repair_step=9,
+                    ),
+                )
+            if draft_path and not expert_truth_complete(state=self.state, working_dir=draft_path, slot_id=slot_id):
+                add_issue(
+                    errors,
+                    make_issue(
+                        code="wd_exp_member_incomplete",
+                        message=f"步骤 9: {slot_id} 的专家判断未覆盖全部已选成员",
+                        step=9,
+                        field="working_draft_path",
+                        missing_artifacts=[artifact],
+                        recommended_rollback_step=9,
+                        recommended_repair_step=9,
+                        details={
+                            "selected_members": selected_member_ids(self.state),
+                            "actual_members": [path.stem for path in expert_truth_files(draft_path, slot_id)],
+                        },
+                    ),
+                )
+            if draft_path:
+                expected_title = slot_titles.get(slot_id, "")
+                for truth_path in expert_truth_files(draft_path, slot_id):
+                    payload = load_json_object(truth_path)
+                    member_id = truth_path.stem
+                    if not payload:
+                        add_issue(
+                            errors,
+                            make_issue(
+                                code="wd_exp_member_truth_drift",
+                                message=f"步骤 9: {slot_id}/{member_id} 的专家真相源不是合法 JSON 对象",
+                                step=9,
+                                field="working_draft_path",
+                                missing_artifacts=[artifact],
+                                recommended_rollback_step=9,
+                                recommended_repair_step=9,
+                            ),
+                        )
+                        continue
+                    actual_slot = str(payload.get("slot") or "").strip()
+                    actual_member = str(payload.get("member") or "").strip()
+                    if actual_slot != expected_title or actual_member != member_id:
+                        add_issue(
+                            errors,
+                            make_issue(
+                                code="wd_exp_member_truth_drift",
+                                message=f"步骤 9: {slot_id}/{member_id} 的专家真相源与槽位/成员矩阵不一致",
+                                step=9,
+                                field="working_draft_path",
+                                missing_artifacts=[artifact],
+                                recommended_rollback_step=9,
+                                recommended_repair_step=9,
+                                details={
+                                    "slot": slot_id,
+                                    "member": member_id,
+                                    "expected_title": expected_title,
+                                    "actual_slot": actual_slot,
+                                    "actual_member": actual_member,
+                                },
+                            ),
+                        )
             self.check_artifact_registry(artifact, errors, 9)
+
+    def check_canonical_decision_truth(
+        self,
+        *,
+        slot_id: str,
+        title: str,
+        errors: list[dict[str, Any]],
+        step_num: int,
+    ) -> None:
+        draft_path = self.working_draft_path()
+        if not draft_path or not draft_path.is_dir():
+            return
+        truth_path = decision_truth_path(draft_path, slot_id)
+        if not truth_path.exists():
+            add_issue(
+                errors,
+                make_issue(
+                    code="missing_canonical_decision_truth",
+                    message=f"步骤 {step_num}: {slot_id} 缺少 canonical decision truth",
+                    step=step_num,
+                    field="working_draft_path",
+                    missing_artifacts=[f"WD-SYN-{slot_id}"],
+                    recommended_rollback_step=10,
+                    recommended_repair_step=10,
+                ),
+            )
+            return
+        try:
+            payload = json.loads(truth_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            add_issue(
+                errors,
+                make_issue(
+                    code="missing_canonical_decision_truth",
+                    message=f"步骤 {step_num}: {slot_id} 的 canonical decision truth 不是合法 JSON",
+                    step=step_num,
+                    field="working_draft_path",
+                    missing_artifacts=[f"WD-SYN-{slot_id}"],
+                    recommended_rollback_step=10,
+                    recommended_repair_step=10,
+                ),
+            )
+            return
+        if not isinstance(payload, dict):
+            add_issue(
+                errors,
+                make_issue(
+                    code="missing_canonical_decision_truth",
+                    message=f"步骤 {step_num}: {slot_id} 的 canonical decision truth 必须是对象",
+                    step=step_num,
+                    field="working_draft_path",
+                    missing_artifacts=[f"WD-SYN-{slot_id}"],
+                    recommended_rollback_step=10,
+                    recommended_repair_step=10,
+                ),
+            )
+            return
+        selected_writeup = str(payload.get("selected_writeup") or "").strip()
+        if str(payload.get("slot") or "").strip() != title or not selected_writeup:
+            add_issue(
+                errors,
+                make_issue(
+                    code="missing_canonical_decision_truth",
+                    message=f"步骤 {step_num}: {slot_id} 的 canonical decision truth 缺少最小成稿字段",
+                    step=step_num,
+                    field="working_draft_path",
+                    missing_artifacts=[f"WD-SYN-{slot_id}"],
+                    recommended_rollback_step=10,
+                    recommended_repair_step=10,
+                ),
+            )
+
+    def check_render_receipt(self, errors: list[dict[str, Any]], step_num: int) -> None:
+        checkpoint = self.checkpoint(11, errors)
+        receipt = checkpoint.get("render_receipt")
+        if not isinstance(receipt, dict):
+            add_issue(
+                errors,
+                make_issue(
+                    code="missing_render_receipt",
+                    message=f"步骤 {step_num}: 缺少 render_receipt，无法追溯最终文档来源",
+                    step=step_num,
+                    field="checkpoints.step-11.render_receipt",
+                    recommended_rollback_step=11,
+                    recommended_repair_step=11,
+                ),
+            )
+            return
+        if str(receipt.get("mode") or "") != "decision_truth":
+            add_issue(
+                errors,
+                make_issue(
+                    code="missing_render_receipt",
+                    message=f"步骤 {step_num}: render_receipt.mode 必须为 decision_truth",
+                    step=step_num,
+                    field="checkpoints.step-11.render_receipt",
+                    recommended_rollback_step=11,
+                    recommended_repair_step=11,
+                ),
+            )
+            return
+        slots = receipt.get("slots")
+        expected_slots = [str(item.get("slot") or "").strip() for item in self.state.get("slots") or [] if str(item.get("slot") or "").strip()]
+        actual_slots = [str(item.get("slot") or "").strip() for item in slots or [] if isinstance(item, dict)] if isinstance(slots, list) else []
+        if actual_slots != expected_slots:
+            add_issue(
+                errors,
+                make_issue(
+                    code="missing_render_receipt",
+                    message=f"步骤 {step_num}: render_receipt 必须覆盖全部模板槽位",
+                    step=step_num,
+                    field="checkpoints.step-11.render_receipt",
+                    recommended_rollback_step=11,
+                    recommended_repair_step=11,
+                    details={"expected_slots": expected_slots, "actual_slots": actual_slots},
+                ),
+            )
+            return
+        draft_path = self.working_draft_path()
+        if draft_path and isinstance(slots, list):
+            for item in slots:
+                if not isinstance(item, dict):
+                    continue
+                slot_id = str(item.get("slot") or "").strip()
+                expected_title = next(
+                    (
+                        str(slot_info.get("title") or "").strip()
+                        for slot_info in self.state.get("slots") or []
+                        if str(slot_info.get("slot") or "").strip() == slot_id
+                    ),
+                    "",
+                )
+                expected_path = decision_truth_path(draft_path, slot_id).relative_to(self.repo_root).as_posix()
+                actual_path = str(item.get("decision_path") or "").strip()
+                actual_hash = str(item.get("decision_hash") or "").strip()
+                expected_hash = decision_truth_digest(draft_path, slot_id)
+                actual_title = str(item.get("title") or "").strip()
+                actual_artifact = str(item.get("decision_artifact") or "").strip()
+                expected_artifact = f"WD-SYN-{slot_id}"
+                if (
+                    actual_path != expected_path
+                    or actual_hash != expected_hash
+                    or actual_title != expected_title
+                    or actual_artifact != expected_artifact
+                ):
+                    add_issue(
+                        errors,
+                        make_issue(
+                            code="missing_render_receipt",
+                            message=f"步骤 {step_num}: render_receipt 中 {slot_id} 的 decision 追溯信息不一致",
+                            step=step_num,
+                            field="checkpoints.step-11.render_receipt",
+                            recommended_rollback_step=11,
+                            recommended_repair_step=11,
+                            details={
+                                "slot": slot_id,
+                                "expected_title": expected_title,
+                                "actual_title": actual_title,
+                                "expected_artifact": expected_artifact,
+                                "actual_artifact": actual_artifact,
+                                "expected_path": expected_path,
+                                "actual_path": actual_path,
+                                "expected_hash": expected_hash,
+                                "actual_hash": actual_hash,
+                            },
+                        ),
+                    )
+        final_document = self.final_document_path()
+        final_hash = str(receipt.get("final_document_hash") or "").strip()
+        if final_document and final_document.exists():
+            expected_final_hash = file_content_hash(final_document)
+            if final_hash != expected_final_hash:
+                add_issue(
+                    errors,
+                    make_issue(
+                        code="missing_render_receipt",
+                        message=f"步骤 {step_num}: render_receipt.final_document_hash 与当前最终文档不一致",
+                        step=step_num,
+                        field="checkpoints.step-11.render_receipt",
+                        recommended_rollback_step=11,
+                        recommended_repair_step=11,
+                        details={
+                            "expected_final_hash": expected_final_hash,
+                            "actual_final_hash": final_hash,
+                        },
+                    ),
+                )
 
     def step_10(self, errors: list[dict[str, Any]]) -> None:
         self.common(10, errors)
@@ -1588,6 +1924,16 @@ class GateValidator:
             artifact = f"WD-SYN-{slot_id}"
             self.check_working_draft_block(artifact, errors, 10)
             self.check_artifact_registry(artifact, errors, 10)
+        for slot_info in state_slots:
+            slot_id = str(slot_info.get("slot") or "").strip()
+            title = str(slot_info.get("title") or "").strip()
+            if slot_id and title:
+                self.check_canonical_decision_truth(
+                    slot_id=slot_id,
+                    title=title,
+                    errors=errors,
+                    step_num=10,
+                )
         self.check_wd_syn_quality(errors, 10)
 
     def step_11(self, errors: list[dict[str, Any]]) -> None:
@@ -1610,7 +1956,12 @@ class GateValidator:
             slot_id = slot_info.get("slot", "")
             if slot_id:
                 self.check_working_draft_block(f"WD-SYN-{slot_id}", errors, 11)
-        self.check_wd_syn_quality(errors, 11)
+                self.check_canonical_decision_truth(
+                    slot_id=str(slot_id).strip(),
+                    title=str(slot_info.get("title") or "").strip(),
+                    errors=errors,
+                    step_num=11,
+                )
         self.check_final_document_not_premature(errors, 11)
         checkpoint = self.checkpoint(11, errors)
         final_document_path = self.final_document_path()
@@ -1625,6 +1976,7 @@ class GateValidator:
                 recommended_rollback_step=11,
                 recommended_repair_step=11,
             )
+            self.check_render_receipt(errors, 11)
 
     def step_12(self, errors: list[dict[str, Any]]) -> None:
         self.common(12, errors)

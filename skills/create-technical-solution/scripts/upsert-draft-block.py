@@ -19,9 +19,11 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from protocol_runtime import dump_yaml, iso_now, load_yaml, refresh_receipt, repo_root_from_state_path, require_receipt
+from protocol_runtime import decision_truth_path, default_step_summary, dump_yaml, expert_truth_complete, expert_truth_digest, iso_now, load_yaml, refresh_receipt, repo_root_from_state_path, require_receipt
 
 BLOCK_MARKER_RE = re.compile(r"^---BLOCK:(.+)$", re.MULTILINE)
+WRITEUP_START_RE = re.compile(r"^-\s*选定写法:\s*$", re.MULTILINE)
+WRITEUP_INLINE_RE = re.compile(r"^-\s*选定写法:\s*(.+?)\s*$", re.MULTILINE)
 
 
 def parse_stdin_blocks(raw: str, step: int) -> list[tuple[str, str]]:
@@ -139,8 +141,56 @@ def _slot_id_for_title(slots: list[dict[str, Any]], title: str) -> str:
     raise ValueError(f"未找到槽位标题对应的 state.slots 记录: {title}")
 
 
+def _json_text(payload: Any) -> str:
+    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+
+def _parse_json_array_content(content: str, label: str) -> list[dict[str, Any]]:
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label} 不是合法 JSON: {exc}") from exc
+    if not isinstance(payload, list):
+        raise ValueError(f"{label} 必须是 JSON 数组。")
+    normalized: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise ValueError(f"{label} 数组元素必须是 JSON 对象。")
+        normalized.append(item)
+    return normalized
+
+
+def render_exp_markdown(entries: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for entry in entries:
+        member = str(entry.get("member") or "").strip()
+        if not member:
+            raise ValueError("WD-EXP payload 缺少 member。")
+        evidence_refs = entry.get("evidence_refs") or []
+        open_questions = entry.get("open_questions") or []
+        if not isinstance(evidence_refs, list) or not isinstance(open_questions, list):
+            raise ValueError("WD-EXP evidence_refs/open_questions 必须是数组。")
+        evidence_text = ", ".join(
+            str(item).strip() for item in evidence_refs if str(item).strip()
+        )
+        open_text = ", ".join(
+            str(item).strip() for item in open_questions if str(item).strip()
+        ) or "无"
+        lines.extend(
+            [
+                f"### 专家：{member}",
+                f"- 决策类型: {str(entry.get('decision_type') or '').strip()}",
+                f"- 核心理由: {str(entry.get('rationale') or '').strip()}",
+                f"- 关键证据引用: {evidence_text}",
+                f"- 未决点: {open_text}",
+                "",
+            ]
+        )
+    return "\n".join(lines).strip()
+
+
 def render_exp_payload(entries: list[dict[str, Any]], slots: list[dict[str, Any]]) -> list[tuple[str, str]]:
-    rendered: list[tuple[str, str]] = []
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for entry in entries:
         slot_title = str(entry.get("slot") or "").strip()
         if not slot_title:
@@ -148,28 +198,22 @@ def render_exp_payload(entries: list[dict[str, Any]], slots: list[dict[str, Any]
         slot_id = _slot_id_for_title(slots, slot_title)
         evidence_refs = entry.get("evidence_refs") or []
         open_questions = entry.get("open_questions") or []
+        member = str(entry.get("member") or "").strip()
         if not isinstance(evidence_refs, list) or not isinstance(open_questions, list):
             raise ValueError("WD-EXP evidence_refs/open_questions 必须是数组。")
-        body = "\n".join(
-            [
-                "### 参与槽位",
-                f"- {slot_title}",
-                "",
-                "### 决策类型",
-                f"- {str(entry.get('decision_type') or '').strip()}",
-                "",
-                "### 核心理由",
-                f"- {str(entry.get('rationale') or '').strip()}",
-                "",
-                "### 关键证据引用",
-                *[f"- {str(item).strip()}" for item in evidence_refs if str(item).strip()],
-                "",
-                "### 未决点",
-                *([f"- {str(item).strip()}" for item in open_questions if str(item).strip()] or ["- 无"]),
-            ]
-        ).strip()
-        rendered.append((f"WD-EXP-{slot_id}", body))
-    return rendered
+        if not member:
+            raise ValueError("WD-EXP payload 缺少 member。")
+        grouped.setdefault(slot_id, []).append(
+            {
+                "slot": slot_title,
+                "member": member,
+                "decision_type": str(entry.get("decision_type") or "").strip(),
+                "rationale": str(entry.get("rationale") or "").strip(),
+                "evidence_refs": evidence_refs,
+                "open_questions": open_questions,
+            }
+        )
+    return [(f"WD-EXP-{slot_id}", _json_text(grouped_entries)) for slot_id, grouped_entries in grouped.items()]
 
 
 def render_syn_payload(entries: list[dict[str, Any]], slots: list[dict[str, Any]]) -> list[tuple[str, str]]:
@@ -183,39 +227,78 @@ def render_syn_payload(entries: list[dict[str, Any]], slots: list[dict[str, Any]
         evidence_refs = entry.get("evidence_refs") or []
         if not isinstance(comparisons, list) or not isinstance(evidence_refs, list):
             raise ValueError("WD-SYN comparisons/evidence_refs 必须是数组。")
-        table_lines = [
-            "| 路径 | 可行性 | 关键证据 | 选择理由 |",
-            "|------|--------|----------|----------|",
-        ]
         for item in comparisons:
             if not isinstance(item, dict):
                 raise ValueError("WD-SYN comparisons 数组元素必须是对象。")
-            table_lines.append(
-                "| {path} | {feasibility} | {evidence} | {reason} |".format(
-                    path=str(item.get("path") or "").strip(),
-                    feasibility=str(item.get("feasibility") or "").strip(),
-                    evidence=str(item.get("evidence") or "").strip(),
-                    reason=str(item.get("reason") or "").strip(),
-                )
-            )
-        body = "\n".join(
-            [
-                f"### 槽位：{slot_title}",
-                "#### 目标能力",
-                f"- {str(entry.get('target_capability') or '').strip()}",
-                "#### 候选方案对比",
-                *table_lines,
-                "#### 选定路径",
-                f"- 路径: {str(entry.get('selected_path') or '').strip()}",
-                f"- 选定写法:\n{str(entry.get('selected_writeup') or '').strip()}",
-                f"- 关键证据引用: {', '.join(str(item).strip() for item in evidence_refs if str(item).strip())}",
-                f"- 建议落位槽位: {slot_title}",
-                f"- 模板承载缺口: {str(entry.get('template_gap') or '无').strip()}",
-                f"- 未决问题: {str(entry.get('open_question') or '无').strip()}",
-            ]
-        ).strip()
-        rendered.append((f"WD-SYN-{slot_id}", body))
+        rendered.append((f"WD-SYN-{slot_id}", _json_text([entry])))
     return rendered
+
+
+def render_syn_markdown(entry: dict[str, Any]) -> str:
+    slot_title = str(entry.get("slot") or "").strip()
+    comparisons = entry.get("comparisons") or []
+    evidence_refs = entry.get("evidence_refs") or []
+    if not isinstance(comparisons, list) or not isinstance(evidence_refs, list):
+        raise ValueError("WD-SYN comparisons/evidence_refs 必须是数组。")
+    table_lines = [
+        "| 路径 | 可行性 | 关键证据 | 选择理由 |",
+        "|------|--------|----------|----------|",
+    ]
+    for item in comparisons:
+        if not isinstance(item, dict):
+            raise ValueError("WD-SYN comparisons 数组元素必须是对象。")
+        table_lines.append(
+            "| {path} | {feasibility} | {evidence} | {reason} |".format(
+                path=str(item.get("path") or "").strip(),
+                feasibility=str(item.get("feasibility") or "").strip(),
+                evidence=str(item.get("evidence") or "").strip(),
+                reason=str(item.get("reason") or "").strip(),
+            )
+        )
+    return "\n".join(
+        [
+            f"### 槽位：{slot_title}",
+            "#### 目标能力",
+            f"- {str(entry.get('target_capability') or '').strip()}",
+            "#### 候选方案对比",
+            *table_lines,
+            "#### 选定路径",
+            f"- 路径: {str(entry.get('selected_path') or '').strip()}",
+            f"- 选定写法:\n{str(entry.get('selected_writeup') or '').strip()}",
+            f"- 关键证据引用: {', '.join(str(item).strip() for item in evidence_refs if str(item).strip())}",
+            f"- 建议落位槽位: {slot_title}",
+            f"- 模板承载缺口: {str(entry.get('template_gap') or '无').strip()}",
+            f"- 未决问题: {str(entry.get('open_question') or '无').strip()}",
+        ]
+    ).strip()
+
+
+def extract_syn_truth_from_markdown(content: str) -> dict[str, Any]:
+    stripped = content.strip()
+    heading_match = re.search(r"^###\s+槽位：\s*(.+?)\s*$", stripped, re.MULTILINE)
+    if not heading_match:
+        raise ValueError("WD-SYN markdown 缺少 `### 槽位：...` 标题。")
+    slot_title = str(heading_match.group(1)).strip()
+    writeup_match = WRITEUP_START_RE.search(stripped)
+    selected_writeup = ""
+    if writeup_match:
+        remainder = stripped[writeup_match.end():]
+        end_match = re.search(r"^-\s*(?:关键证据引用|建议落位槽位|模板承载缺口|未决问题)", remainder, re.MULTILINE)
+        selected_writeup = (remainder[: end_match.start()] if end_match else remainder).strip()
+    else:
+        inline_match = WRITEUP_INLINE_RE.search(stripped)
+        if inline_match:
+            selected_writeup = str(inline_match.group(1)).strip()
+    return {
+        "slot": slot_title,
+        "target_capability": "",
+        "comparisons": [],
+        "selected_path": "",
+        "selected_writeup": selected_writeup,
+        "evidence_refs": [],
+        "template_gap": "",
+        "open_question": "",
+    }
 
 
 def validate_body(block_name: str, content: str) -> None:
@@ -228,9 +311,9 @@ def validate_body(block_name: str, content: str) -> None:
 
 def resolve_file_for_block(working_dir: Path, block_name: str, slots: list[dict[str, Any]]) -> Path:
     if block_name == "WD-CTX":
-        return working_dir / "ctx.md"
+        return working_dir / "ctx.json"
     if block_name == "WD-TASK":
-        return working_dir / "task.md"
+        return working_dir / "task.json"
     exp_match = re.match(r"^WD-EXP-(SLOT-\d+)$", block_name)
     if exp_match:
         slot_id = exp_match.group(1)
@@ -248,14 +331,78 @@ def resolve_file_for_block(working_dir: Path, block_name: str, slots: list[dict[
     raise SystemExit(f"不支持的 block: {block_name}")
 
 
+def resolve_registry_target_for_block(working_dir: Path, block_name: str, slots: list[dict[str, Any]]) -> Path | None:
+    if block_name in {"WD-CTX", "WD-TASK"}:
+        return resolve_file_for_block(working_dir, block_name, slots)
+    exp_match = re.match(r"^WD-EXP-(SLOT-\d+)$", block_name)
+    if exp_match:
+        experts_dir = working_dir / "slots" / exp_match.group(1) / "experts"
+        return experts_dir if experts_dir.is_dir() else None
+    return resolve_file_for_block(working_dir, block_name, slots)
+
+
 def write_working_draft_file(
     working_dir: Path,
     block_name: str,
     content: str,
     slots: list[dict[str, Any]],
 ) -> Path:
-    validate_body(block_name, content)
     target = resolve_file_for_block(working_dir, block_name, slots)
+    if block_name == "WD-CTX":
+        entries = _parse_json_array_content(content, "WD-CTX payload")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_json_text(entries), encoding="utf-8")
+        (working_dir / "ctx.md").write_text(
+            render_ctx_payload(entries).strip() + "\n", encoding="utf-8"
+        )
+        return target
+    if block_name == "WD-TASK":
+        entries = _parse_json_array_content(content, "WD-TASK payload")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_json_text(entries), encoding="utf-8")
+        (working_dir / "task.md").write_text(
+            render_task_payload(entries).strip() + "\n", encoding="utf-8"
+        )
+        return target
+    exp_match = re.match(r"^WD-EXP-(SLOT-\d+)$", block_name)
+    if exp_match:
+        entries = _parse_json_array_content(content, "WD-EXP payload")
+        slot_dir = working_dir / "slots" / exp_match.group(1)
+        experts_dir = slot_dir / "experts"
+        experts_dir.mkdir(parents=True, exist_ok=True)
+        for json_file in experts_dir.glob("*.json"):
+            json_file.unlink()
+        for entry in entries:
+            member = str(entry.get("member") or "").strip()
+            if not member:
+                raise ValueError("WD-EXP payload 缺少 member。")
+            (experts_dir / f"{member}.json").write_text(
+                _json_text(entry), encoding="utf-8"
+            )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            render_exp_markdown(entries).strip() + "\n", encoding="utf-8"
+        )
+        return target
+    syn_match = re.match(r"^WD-SYN-(SLOT-\d+)$", block_name)
+    if syn_match:
+        entry: dict[str, Any]
+        if content.lstrip().startswith("["):
+            entries = _parse_json_array_content(content, "WD-SYN payload")
+            if len(entries) != 1:
+                raise ValueError("WD-SYN payload 每次只能写入单个槽位。")
+            entry = entries[0]
+        else:
+            validate_body(block_name, content)
+            entry = extract_syn_truth_from_markdown(content)
+        slot_dir = working_dir / "slots" / syn_match.group(1)
+        slot_dir.mkdir(parents=True, exist_ok=True)
+        decision_path = decision_truth_path(working_dir, syn_match.group(1))
+        decision_path.write_text(_json_text(entry), encoding="utf-8")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(render_syn_markdown(entry).strip() + "\n", encoding="utf-8")
+        return target
+    validate_body(block_name, content)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content.strip() + "\n", encoding="utf-8")
     return target
@@ -321,7 +468,52 @@ def _check_step_completion(state: dict[str, Any], artifact_key: str) -> bool:
     return set(completed) >= set(all_ids)
 
 
-def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -> None:
+def _recompute_slot_progress(state: dict[str, Any], working_dir: Path) -> None:
+    _ensure_artifact_progress(state)
+    exp_completed: list[str] = []
+    syn_completed: list[str] = []
+    for slot_id in _all_slot_ids(state):
+        if expert_truth_complete(state=state, working_dir=working_dir, slot_id=slot_id):
+            exp_completed.append(slot_id)
+        syn_path = decision_truth_path(working_dir, slot_id)
+        if syn_path.exists():
+            syn_completed.append(slot_id)
+    state["artifact_progress"]["WD-EXP-SLOT-*"] = {"completed_slots": sorted(exp_completed)}
+    state["artifact_progress"]["WD-SYN-SLOT-*"] = {"completed_slots": sorted(syn_completed)}
+
+
+def _recompute_step_progress_checkpoints(state: dict[str, Any], block_updates: list[tuple[str, str]]) -> None:
+    checkpoints = state.setdefault("checkpoints", {})
+    completed = state.setdefault("completed_steps", [])
+    if not isinstance(checkpoints, dict) or not isinstance(completed, list):
+        return
+    exp_completed = state.get("artifact_progress", {}).get("WD-EXP-SLOT-*", {}).get("completed_slots", [])
+    syn_completed = state.get("artifact_progress", {}).get("WD-SYN-SLOT-*", {}).get("completed_slots", [])
+    if not isinstance(exp_completed, list):
+        exp_completed = []
+    if not isinstance(syn_completed, list):
+        syn_completed = []
+    all_ids = _all_slot_ids(state)
+    touched_exp = any(block_name.startswith("WD-EXP-") for block_name, _content in block_updates)
+    touched_syn = any(block_name.startswith("WD-SYN-") for block_name, _content in block_updates)
+    if touched_exp and "step-9" in checkpoints:
+        checkpoints["step-9"]["wd_exp_count"] = len(exp_completed)
+        all_done = bool(all_ids) and set(exp_completed) >= set(all_ids)
+        state["can_enter_step_10"] = all_done
+        state["current_step"] = 10 if all_done else 9
+        if 9 not in completed:
+            completed.append(9)
+    if touched_syn and "step-10" in checkpoints:
+        checkpoints["step-10"]["syn_slot_count"] = len(syn_completed)
+        all_done = bool(all_ids) and set(syn_completed) >= set(all_ids)
+        state["can_enter_step_11"] = all_done
+        state["current_step"] = 11 if all_done else 10
+        if 10 not in completed:
+            completed.append(10)
+    completed.sort()
+
+
+def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str | None) -> None:
     checkpoints = state.setdefault("checkpoints", {})
     if not isinstance(checkpoints, dict):
         checkpoints = {}
@@ -342,7 +534,7 @@ def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -
 
     if block_name == "WD-CTX":
         checkpoints["step-7"] = {
-            "summary": summary,
+            "summary": str(summary or "").strip(),
             "wd_ctx_written": True,
             "ctx_count": 0,
             "completed_at": iso_now(),
@@ -354,7 +546,7 @@ def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -
             completed.append(7)
     elif block_name == "WD-TASK":
         checkpoints["step-8"] = {
-            "summary": summary,
+            "summary": str(summary or "").strip(),
             "wd_task_written": True,
             "task_slot_count": 0,
             "completed_at": iso_now(),
@@ -369,7 +561,7 @@ def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -
         all_done = _check_step_completion(state, "WD-EXP-SLOT-*")
         completed_slots = state.get("artifact_progress", {}).get("WD-EXP-SLOT-*", {}).get("completed_slots", [])
         checkpoints["step-9"] = {
-            "summary": summary,
+            "summary": str(summary or "").strip(),
             "skipped": False,
             "reason": "",
             "wd_exp_count": len(completed_slots),
@@ -390,7 +582,7 @@ def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -
         all_done = _check_step_completion(state, "WD-SYN-SLOT-*")
         completed_slots = state.get("artifact_progress", {}).get("WD-SYN-SLOT-*", {}).get("completed_slots", [])
         checkpoints["step-10"] = {
-            "summary": summary,
+            "summary": str(summary or "").strip(),
             "wd_syn_written": True,
             "syn_slot_count": len(completed_slots),
             "completed_at": iso_now(),
@@ -410,11 +602,14 @@ def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str) -
 
 def update_counts(state: dict[str, Any], block_name: str, content: str) -> None:
     checkpoints = state.setdefault("checkpoints", {})
-    produced = state.get("produced_artifacts", [])
     if block_name == "WD-CTX":
-        checkpoints["step-7"]["ctx_count"] = count_items(content, "CTX-")
+        checkpoints["step-7"]["ctx_count"] = len(
+            _parse_json_array_content(content, "WD-CTX payload")
+        )
     elif block_name == "WD-TASK":
-        checkpoints["step-8"]["task_slot_count"] = count_slot_sections(content)
+        checkpoints["step-8"]["task_slot_count"] = len(
+            _parse_json_array_content(content, "WD-TASK payload")
+        )
     elif block_name.startswith("WD-EXP-"):
         completed_slots = state.get("artifact_progress", {}).get("WD-EXP-SLOT-*", {}).get("completed_slots", [])
         checkpoints["step-9"]["wd_exp_count"] = len(completed_slots)
@@ -436,26 +631,67 @@ def sync_artifact_registry(
         state["artifact_registry"] = registry
     repo_root = state_path_to_repo_root(state_path)
     for block_name, _content in block_updates:
-        target = resolve_file_for_block(working_dir, block_name, slots)
-        if not target.exists():
+        target = resolve_registry_target_for_block(working_dir, block_name, slots)
+        if target is None or not target.exists():
             continue
-        registry[block_name] = {
-            "path": target.relative_to(repo_root).as_posix(),
-            "content_hash": hashlib.sha256(target.read_bytes()).hexdigest(),
-            "written_at": iso_now(),
-            "writer": "run-step",
-        }
+        if block_name.startswith("WD-EXP-") and target.is_dir():
+            slot_id = block_name.removeprefix("WD-EXP-")
+            registry[block_name] = {
+                "path": target.relative_to(repo_root).as_posix(),
+                "content_hash": expert_truth_digest(working_dir, slot_id),
+                "written_at": iso_now(),
+                "writer": "run-step",
+            }
+        else:
+            registry[block_name] = {
+                "path": target.relative_to(repo_root).as_posix(),
+                "content_hash": hashlib.sha256(target.read_bytes()).hexdigest(),
+                "written_at": iso_now(),
+                "writer": "run-step",
+            }
 
 
 def state_path_to_repo_root(state_path: Path) -> Path:
     return repo_root_from_state_path(state_path)
 
 
-def sync_state_for_blocks(state: dict[str, Any], block_updates: list[tuple[str, str]], summary: str) -> None:
+def _apply_generated_summary(state: dict[str, Any], block_name: str, summary: str | None) -> None:
+    explicit = str(summary or "").strip()
+    checkpoints = state.setdefault("checkpoints", {})
+    if block_name == "WD-CTX":
+        checkpoints["step-7"]["summary"] = explicit or default_step_summary(
+            7, ctx_count=checkpoints["step-7"].get("ctx_count")
+        )
+    elif block_name == "WD-TASK":
+        checkpoints["step-8"]["summary"] = explicit or default_step_summary(
+            8, slot_count=checkpoints["step-8"].get("task_slot_count")
+        )
+    elif block_name.startswith("WD-EXP-"):
+        completed_slots = state.get("artifact_progress", {}).get("WD-EXP-SLOT-*", {}).get("completed_slots", [])
+        checkpoints["step-9"]["summary"] = explicit or default_step_summary(
+            9,
+            completed_slots=len(completed_slots),
+            total_slots=len(_all_slot_ids(state)),
+        )
+    elif block_name.startswith("WD-SYN-"):
+        completed_slots = state.get("artifact_progress", {}).get("WD-SYN-SLOT-*", {}).get("completed_slots", [])
+        checkpoints["step-10"]["summary"] = explicit or default_step_summary(
+            10,
+            completed_slots=len(completed_slots),
+            total_slots=len(_all_slot_ids(state)),
+        )
+
+
+def sync_state_for_blocks(state: dict[str, Any], block_updates: list[tuple[str, str]], summary: str | None, *, working_dir: Path | None = None) -> None:
     for block_name, _content in block_updates:
         sync_state_for_block(state, block_name, summary)
     for block_name, content in block_updates:
         update_counts(state, block_name, content)
+    if working_dir is not None:
+        _recompute_slot_progress(state, working_dir)
+        _recompute_step_progress_checkpoints(state, block_updates)
+    for block_name, _content in block_updates:
+        _apply_generated_summary(state, block_name, summary)
 
 
 def upsert_with_sync(
@@ -463,7 +699,7 @@ def upsert_with_sync(
     working_dir: Path,
     state_path: Path,
     block_updates: list[tuple[str, str]],
-    summary: str,
+    summary: str | None,
     require_receipt_step: int,
 ) -> dict[str, Any]:
     state = load_yaml(state_path)
@@ -473,7 +709,7 @@ def upsert_with_sync(
     for block_name, content in block_updates:
         write_working_draft_file(working_dir, block_name, content, slots)
         written.append(block_name)
-    sync_state_for_blocks(state, block_updates, summary)
+        sync_state_for_blocks(state, block_updates, summary, working_dir=working_dir)
     sync_artifact_registry(state, state_path, working_dir, slots, block_updates)
     refresh_receipt(state)
     dump_yaml(state_path, state)
