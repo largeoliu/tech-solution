@@ -82,10 +82,28 @@ def render_task_payload(entries: list[dict[str, Any]]) -> str:
         if not isinstance(required_ctx, list):
             raise ValueError("WD-TASK required_ctx 必须是数组。")
         ctx_text = ", ".join(str(item).strip() for item in required_ctx if str(item).strip())
+        participating_experts = entry.get("participating_experts") or []
+        if not isinstance(participating_experts, list):
+            raise ValueError("WD-TASK participating_experts 必须是数组。")
+        experts_items = [str(item).strip() for item in participating_experts if str(item).strip()]
+        expert_questions = entry.get("expert_questions") or []
+        if not isinstance(expert_questions, list):
+            raise ValueError("WD-TASK expert_questions 必须是数组。")
+        suggested_slot = str(entry.get("suggested_slot") or slot).strip()
+        expression_requirements = str(entry.get("expression_requirements") or "").strip()
+        blockers = str(entry.get("blockers") or "无").strip()
+        question_lines = [f"  - {str(item).strip()}" for item in expert_questions if str(item).strip()] or ["  - 无"]
         lines.extend(
             [
                 f"### {slot}",
-                f"必须消费的共享上下文: {ctx_text}",
+                f"- 槽位标识: {slot}",
+                f"- 必须消费的共享上下文: {ctx_text}",
+                f"- 参与专家: {', '.join(experts_items)}" if experts_items else "- 参与专家:",
+                "- 每位专家必答问题:",
+                *question_lines,
+                f"- 建议落位槽位: {suggested_slot}",
+                f"- 落位表达要求: {expression_requirements}" if expression_requirements else "- 落位表达要求: <只写当前模板槽位需要的最小闭环>",
+                f"- 缺口或阻塞项: {blockers}",
                 "",
             ]
         )

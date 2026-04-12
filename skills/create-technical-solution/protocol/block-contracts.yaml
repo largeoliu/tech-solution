@@ -19,8 +19,13 @@ blocks:
       type: array
       item_schema: slot_task
       required_fields:
-        - slot
-        - required_ctx
+        - slot              # label: 槽位标识
+        - required_ctx      # label: 必须消费的共享上下文
+        - participating_experts  # label: 参与专家
+        - expert_questions  # label: 每位专家必答问题
+        - suggested_slot    # label: 建议落位槽位
+        - expression_requirements  # label: 落位表达要求
+        - blockers          # label: 缺口或阻塞项
   WD-EXP-SLOT:
     type: pattern
     heading_pattern: WD-EXP-SLOT-\d+
@@ -52,3 +57,5 @@ blocks:
         - selected_path
         - selected_writeup
         - evidence_refs
+        - template_gap
+        - open_question

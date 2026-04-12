@@ -13,10 +13,6 @@ WD_SYN_REQUIRED_FRAGMENTS = [
 ]
 
 
-def required_fragments() -> list[str]:
-    return list(WD_SYN_REQUIRED_FRAGMENTS)
-
-
 def required_slot_fragments(title: str) -> list[str]:
     return [
         f"### 槽位：{title}",
@@ -54,10 +50,6 @@ def target_capability_present(slot_block: str) -> bool:
         if stripped.startswith("- ") and len(stripped) > 2:
             return True
     return False
-
-
-def missing_fragments(block: str) -> list[str]:
-    return [fragment for fragment in WD_SYN_REQUIRED_FRAGMENTS if fragment not in block]
 
 
 def missing_slot_fragments(block: str, title: str) -> list[str]:
