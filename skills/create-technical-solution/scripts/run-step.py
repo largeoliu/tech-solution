@@ -819,7 +819,6 @@ def render_final_document_in_process(state_path: Path, summary: str | None) -> t
     try:
         payload = module.render_final_document(
             state_path=state_path,
-            content_path=None,
             summary=summary,
         )
     except SystemExit as exc:
@@ -1263,6 +1262,7 @@ def complete_creative_step(
     step: int,
     stdin_content: str | None,
     snapshot: RuntimeSnapshot | None = None,
+    slot: str | None = None,
     **_: Any,
 ) -> tuple[int, str]:
     """处理步骤 7/8/9/10 的创作型步骤。内容通过 stdin 传入。"""
@@ -1271,6 +1271,7 @@ def complete_creative_step(
     snapshot = snapshot or load_runtime_snapshot(state_path)
     assert snapshot is not None
     working_dir = snapshot.working_draft_path
+    resolved_slot_title = resolve_slot_title(snapshot.state, slot) if step in (9, 10) else None
 
     module = load_upsert_draft_block_module()
     if step == 7:
@@ -1288,12 +1289,16 @@ def complete_creative_step(
     elif step == 9:
         try:
             payload = parse_json_array_payload(stdin_content, label="步骤 9 结构化内容")
+            if resolved_slot_title and any(str(item.get("slot") or "").strip() != resolved_slot_title for item in payload):
+                return 1, f"步骤 9 的 payload 只能提交 {resolved_slot_title}，请使用 --slot 对应单个槽位。"
             block_updates = module.render_exp_payload(payload, snapshot.state.get("slots") or [])
         except ValueError as exc:
             return 1, str(exc)
     elif step == 10:
         try:
             payload = parse_json_array_payload(stdin_content, label="步骤 10 结构化内容")
+            if resolved_slot_title and any(str(item.get("slot") or "").strip() != resolved_slot_title for item in payload):
+                return 1, f"步骤 10 的 payload 只能提交 {resolved_slot_title}，请使用 --slot 对应单个槽位。"
             block_updates = module.render_syn_payload(payload, snapshot.state.get("slots") or [])
         except ValueError as exc:
             return 1, str(exc)
@@ -1382,14 +1387,16 @@ def complete_step_12(
     return 0, f"✅ 步骤 12 完成。working draft 与状态文件已清理。\n{stdout}"
 
 
-def emit_scaffold(state_path: Path, members: list[str] | None = None) -> int:
-    snapshot = load_runtime_snapshot(state_path)
-    if not snapshot.state:
-        print("❌ 状态文件不存在。请先用 --slug 参数执行步骤 1。")
-        return 1
-    module = load_block_scaffolds_module()
-    print(module.emit_scaffold(snapshot, members=members or []))
-    return 0
+def resolve_slot_title(state: dict[str, Any], slot: str | None) -> str | None:
+    raw_slot = str(slot or "").strip()
+    if not raw_slot:
+        return None
+    for slot_info in state.get("slots") or []:
+        slot_id = str(slot_info.get("slot") or "").strip()
+        title = str(slot_info.get("title") or "").strip()
+        if raw_slot in {slot_id, title}:
+            return title
+    return None
 
 
 def emit_json_scaffold(state_path: Path, members: list[str] | None = None, slot: str | None = None) -> int:
@@ -1400,7 +1407,8 @@ def emit_json_scaffold(state_path: Path, members: list[str] | None = None, slot:
     module = load_block_scaffolds_module()
     full_scaffold = json.loads(module.emit_json_scaffold(snapshot, members=members or []))
     if slot and snapshot.current_step in (9, 10):
-        full_scaffold = [item for item in full_scaffold if item.get("slot") == slot]
+        resolved_slot_title = resolve_slot_title(snapshot.state, slot)
+        full_scaffold = [item for item in full_scaffold if item.get("slot") == resolved_slot_title]
         if not full_scaffold:
             slot_titles = {s.get("slot", ""): s.get("title", "") for s in snapshot.state.get("slots", [])}
             print(f"❌ --slot {slot} 未匹配到任何 scaffold 条目。可用 slot: {list(slot_titles.keys())}", file=sys.stderr)
@@ -1563,16 +1571,24 @@ def build_creative_entry_response(state_path: Path, step: int) -> dict[str, Any]
     json_scaffold_command = None
     json_scaffold_preview = None
     slot_progress = _slot_progress_for_step(state, step)
+    recommended_slot = slot_progress.get("recommended_slot") if slot_progress else None
     if ticket_value:
         base = run_step_base_command(state_path)
-        submit_command = f"{base} --complete --ticket {ticket_value}"
-        json_scaffold_command = f"{base} --emit-json-scaffold"
+        if recommended_slot and step in (9, 10):
+            submit_command = f"{base} --complete --ticket {ticket_value} --slot {recommended_slot}"
+            json_scaffold_command = f"{base} --emit-json-scaffold --slot {recommended_slot}"
+        else:
+            submit_command = f"{base} --complete --ticket {ticket_value}"
+            json_scaffold_command = f"{base} --emit-json-scaffold"
         try:
             module = load_block_scaffolds_module()
             snapshot = load_runtime_snapshot(state_path)
-            json_scaffold_preview = json.loads(
-                module.emit_json_scaffold(snapshot, members=[])
-            )
+            json_scaffold_preview = json.loads(module.emit_json_scaffold(snapshot, members=[]))
+            if recommended_slot and step in (9, 10):
+                recommended_title = resolve_slot_title(state, recommended_slot)
+                json_scaffold_preview = [
+                    item for item in json_scaffold_preview if item.get("slot") == recommended_title
+                ]
         except Exception:
             json_scaffold_preview = None
     response = {
@@ -1721,10 +1737,10 @@ def complete_step(args: argparse.Namespace) -> int:
             state_path, summary, 8, stdin_content, snapshot=snapshot
         ),
         9: lambda: complete_creative_step(
-            state_path, summary, 9, stdin_content, snapshot=snapshot
+            state_path, summary, 9, stdin_content, snapshot=snapshot, slot=getattr(args, "slot", None)
         ),
         10: lambda: complete_creative_step(
-            state_path, summary, 10, stdin_content, snapshot=snapshot
+            state_path, summary, 10, stdin_content, snapshot=snapshot, slot=getattr(args, "slot", None)
         ),
         11: lambda: complete_step_11(state_path, summary, snapshot=snapshot),
         12: lambda: complete_step_12(state_path, summary, snapshot=snapshot),
@@ -1766,9 +1782,6 @@ def main() -> int:
         "--mark-step-card-read", action="store_true", help=argparse.SUPPRESS
     )
     parser.add_argument(
-        "--emit-scaffold", action="store_true", help="输出当前步骤 scaffold 到 stdout"
-    )
-    parser.add_argument(
         "--emit-json-scaffold", action="store_true", help="输出当前步骤 JSON scaffold 到 stdout"
     )
     parser.add_argument("--summary", help="步骤完成摘要（--complete 时必需）")
@@ -1789,13 +1802,12 @@ def main() -> int:
             bool(args.advance),
             bool(args.prepare),
             bool(args.complete),
-            bool(args.emit_scaffold),
             bool(args.emit_json_scaffold),
             bool(args.mark_step_card_read),
         ]
     ) > 1:
         parser.error(
-            "--advance、--prepare、--mark-step-card-read、--emit-scaffold、--emit-json-scaffold 与 --complete 不能同时使用。"
+            "--advance、--prepare、--mark-step-card-read、--emit-json-scaffold 与 --complete 不能同时使用。"
         )
 
     args._stdin_content = None
@@ -1815,8 +1827,6 @@ def main() -> int:
         return prepare_step(Path(args.state).resolve(), slug=getattr(args, "slug", None))
     if args.mark_step_card_read:
         return mark_step_card_read(Path(args.state).resolve())
-    if args.emit_scaffold:
-        return emit_scaffold(Path(args.state).resolve(), members=args.member)
     if args.emit_json_scaffold:
         return emit_json_scaffold(Path(args.state).resolve(), members=args.member, slot=args.slot)
     else:

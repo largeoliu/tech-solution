@@ -107,6 +107,12 @@ def load_decision_truth(slot_path: Path, title: str) -> dict[str, Any]:
             f"槽位「{title}」的 canonical decision truth 缺少可用于最终成稿的 `选定写法`。"
             "请在步骤 10 补齐该字段后重新提交。"
         )
+    evidence_refs = payload.get("evidence_refs") or []
+    if not isinstance(evidence_refs, list) or not any(str(item).strip() for item in evidence_refs):
+        raise SystemExit(
+            f"槽位「{title}」的 canonical decision truth 缺少 evidence_refs。"
+            "请在步骤 10 补齐关键证据引用后重新提交。"
+        )
     return payload
 
 
@@ -151,7 +157,11 @@ def render_from_draft(state_path: Path) -> str:
         slot_id = slot_info.get("slot", "")
         title = slot_info.get("title", "")
         truth = load_decision_truth(decision_truth_path(draft_path, slot_id), title)
-        sections[title] = str(truth.get("selected_writeup") or "").strip()
+        body = str(truth.get("selected_writeup") or "").strip()
+        evidence_refs = [str(item).strip() for item in truth.get("evidence_refs") or [] if str(item).strip()]
+        if evidence_refs:
+            body = f"{body}\n\n> 依据: {', '.join(evidence_refs)}"
+        sections[title] = body
 
     template_content = template_path.read_text(encoding="utf-8")
     expected_slots = extract_slot_headings(template_content)
@@ -211,7 +221,6 @@ def build_render_receipt(*, state: dict[str, Any], draft_path: Path, repo_root: 
 def render_final_document(
     *,
     state_path: Path,
-    content_path: Path | None,
     summary: str | None,
 ) -> dict[str, Any]:
     state = load_yaml(state_path)
@@ -235,10 +244,7 @@ def render_final_document(
     if allowed_root not in final_document_path.parents:
         raise SystemExit(f"final_document_path 必须位于 {allowed_root} 下，当前为 {final_document_path}")
 
-    if content_path is not None:
-        content = content_path.read_text(encoding="utf-8")
-    else:
-        content = render_from_draft(state_path)
+    content = render_from_draft(state_path)
 
     placeholder_findings = placeholder_hits(content)
     if placeholder_findings:
@@ -264,9 +270,11 @@ def render_final_document(
         for slot_info in state.get("slots") or []:
             slot_id = slot_info.get("slot", "")
             title = slot_info.get("title", "")
-            syn_path = draft_path / "slots" / slot_id / "synthesis.md"
-            if title and syn_path.exists():
-                slot_blocks[title] = syn_path.read_text(encoding="utf-8")
+            truth_path = decision_truth_path(draft_path, slot_id)
+            if not title or not truth_path.exists():
+                continue
+            payload = load_decision_truth(truth_path, title)
+            slot_blocks[title] = str(payload.get("selected_writeup") or "").strip()
         repeated_groups = repeated_slot_groups(slot_blocks)
         if repeated_groups:
             raise SystemExit("WD-SYN-SLOT-* 内容过于相似，拒绝生成最终文档。")
@@ -324,7 +332,6 @@ def main() -> int:
 
     payload = render_final_document(
         state_path=Path(args.state).resolve(),
-        content_path=None,
         summary=args.summary,
     )
     if args.format == "json":

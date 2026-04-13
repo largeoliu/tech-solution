@@ -57,10 +57,9 @@ compatibility:
    - 自动步骤（2、3、6、11、12）会在一次调用内完成推进
    - 业务决策步骤（1、4、5）会自动完成 entry 动作，并返回 `business_task`、`required_output_shape`、`next_action`
    - 创作步骤（7、8、9、10）会自动完成 entry 动作，并返回 `business_task`、`artifact`、`required_output_shape`、`ticket`、`submit_command`、`json_scaffold_command`、`next_action`
-3. **只读 scaffold**：`python /path/to/run-step.py --state <状态文件> --emit-scaffold` → 仅向 `stdout` 输出当前步骤 Markdown scaffold；不修改 state、working draft 或 receipt
-4. **JSON scaffold（创作步骤推荐）**：`python /path/to/run-step.py --state <状态文件> --emit-json-scaffold` → 仅向 `stdout` 输出当前创作步骤的结构化 JSON 骨架；适合步骤 7/8/9/10 先拿合法数组结构再补业务值
-5. **仅在业务/创作步骤提交业务内容时**，才使用 `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket>`；checkpoint 摘要由脚本自动生成
-6. **重复**直到步骤 12 完成
+3. **JSON scaffold（创作步骤推荐）**：`python /path/to/run-step.py --state <状态文件> --emit-json-scaffold` → 仅向 `stdout` 输出当前创作步骤的结构化 JSON 骨架；适合步骤 7/8/9/10 先拿合法数组结构再补业务值
+4. **仅在业务/创作步骤提交业务内容时**，才使用 `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket>`；checkpoint 摘要由脚本自动生成
+5. **重复**直到步骤 12 完成
 
 标准主路径示例：
 
@@ -71,7 +70,7 @@ compatibility:
 | 空状态 / 步骤 1 entry | `python /path/to/run-step.py --state <状态文件> --advance` |
 | 业务决策步骤 entry（1、4、5） | `python /path/to/run-step.py --state <状态文件> --advance` |
 | 创作步骤 entry（7、8、9、10） | `python /path/to/run-step.py --state <状态文件> --advance` |
-| 业务/创作步骤提交正文 | `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> <<'HEREDOC' <JSON payload> HEREDOC` |
+| 业务/创作步骤提交正文 | `python /path/to/run-step.py --state <状态文件> --complete --ticket <ticket> [--slot SLOT-XX] <<'HEREDOC' <JSON payload> HEREDOC` |
 | 创作步骤获取 JSON 骨架 | `python /path/to/run-step.py --state <状态文件> --emit-json-scaffold` |
 
 ## 状态文件初始化
@@ -80,9 +79,6 @@ compatibility:
 ## 运行入口与内部脚本
 - `python /path/to/run-step.py --state <状态文件> [--advance | --complete --ticket <ticket> ...]`
   - 唯一受支持的对外入口。默认通过 `--advance` 统一封装验证、receipt 刷新、参数推导、step card 加载、working draft 写入、最终文档成稿与清理
-- `python /path/to/run-step.py --state <状态文件> --emit-scaffold`
-  - 同一入口下的只读辅助模式；仅输出 scaffold 到 `stdout`，不是第二条写入路径，也不会替代 `--complete`
-  - `--emit-scaffold 与 --complete 不能同时使用`
 - `python /path/to/run-step.py --state <状态文件> --emit-json-scaffold`
   - 创作步骤的只读 JSON 辅助模式；仅输出与 `required_output_shape` 对齐的结构化数组骨架，帮助一次性提交完整 payload
   - 不修改 state、working draft 或 receipt
@@ -90,11 +86,11 @@ compatibility:
 - 其他脚本（如 `initialize-state.py`、`extract-template-snapshot.py`、`upsert-draft-block.py`、`advance-state-step.py`、`render-final-document.py`、`finalize-cleanup.py`）
   - 仅保留给 `run-step.py`、测试与内部兼容流程使用；不再作为用户公开操作入口
 - 创作型步骤（7、8、9、10）统一通过 heredoc 提交结构化 JSON payload
-- Step 7: CTX entry 数组，canonical truth 写入 `ctx.json`，`ctx.md` 只是脚本导出的 render view
-- Step 8: slot task 数组，canonical truth 写入 `task.json`，`task.md` 只是脚本导出的 render view
-- Step 9: slot×member expert truth 数组；每条必须绑定 `member`，脚本按槽位拆分为 `slots/SLOT-XX/experts/<MEMBER>.json`，`experts.md` 只是 render view
-- Step 10: slot decision 数组；canonical truth 写入 `slots/SLOT-XX/decision.json`，`synthesis.md` 只是脚本导出的派生 view
-- Markdown 只允许由脚本渲染到 working draft；模型不得手写 WD block 正文，也不得把 render view 当成 canonical truth
+- Step 7: CTX entry 数组，canonical truth 写入 `ctx.json`；每条必须携带可追溯的 `source_refs`，若 repowiki 存在则至少 1 条 `source_refs` 需要引用 `repowiki:...`
+- Step 8: slot task 数组，canonical truth 写入 `task.json`
+- Step 9: slot×member expert truth 数组；每条必须绑定 `member`，脚本按槽位拆分为 `slots/SLOT-XX/experts/<MEMBER>.json`
+- Step 10: slot decision 数组；canonical truth 写入 `slots/SLOT-XX/decision.json`，且 `evidence_refs` 必填
+- 中间 working draft 只保留 JSON truth：`ctx.json`、`task.json`、`experts/<MEMBER>.json`、`decision.json`；不再生成任何中间 Markdown 视图
 
 ## 状态更新规则
 - 每步完成后写入 `checkpoints.step-N` 并追加 `completed_steps`
@@ -113,15 +109,18 @@ compatibility:
 - **receipt 必须跟随 current_step 原子刷新**：任何 mutating script 成功后都必须把 `gate_receipt.step` 刷新到最新 `current_step`；若 `receipt.step` 落后于 `current_step`，视为非法状态，必须停下修复，不能继续写 draft、render 或 cleanup
 - **working draft 只能文件级写入**：step 7/8/9/10 只能通过 `run-step.py` 的受控写入路径更新对应文件，禁止整份覆盖 draft 目录
 - **创作步骤不得提交 Markdown 正文**：通过 stdin 传入的只能是结构化 JSON payload；如果直接提交 `## WD-*`、draft 容器标题或手写区块正文，视为无效输入
-- **step 9 truth 是 slot×member**：专家判断的真相源是 `slots/SLOT-XX/experts/<MEMBER>.json`；`experts.md` 仅用于阅读，不得把单个槽位总述当成成员真相
-- **step 10 truth 是 decision.json**：每个槽位的收敛真相源只能是 `slots/SLOT-XX/decision.json`；`synthesis.md` 仅保留脚本导出的审阅视图
+- **step 7 来源必须结构化可追溯**：`ctx.json[*].source_refs` 至少指向代码路径、需求文档路径或 `repowiki:...`；仅写“整体架构分析”之类泛化来源不算通过
+- **step 9 truth 是 slot×member**：专家判断的真相源是 `slots/SLOT-XX/experts/<MEMBER>.json`
+- **step 10 truth 是 decision.json**：每个槽位的收敛真相源只能是 `slots/SLOT-XX/decision.json`
+- **step 9/10 默认按推荐槽位推进**：`--advance` 返回 `slot_progress.recommended_slot`；公共主路径优先用 `--emit-json-scaffold --slot SLOT-XX` 与 `--complete --ticket <ticket> --slot SLOT-XX`，让脚本把模型约束在单槽位闭环里
 - **state 中路径必须相对化**：`solution_root` 固定为 `.architecture/technical-solutions`，`working_draft_path` 固定为 `.architecture/.state/create-technical-solution/[slug]/draft`（目录）；不得把绝对路径写回 state
 - **最终文档目录固定**：`final_document_path` 只能位于 `.architecture/technical-solutions/`，不得写入 `docs/`、项目根目录或其他自定义目录
 - **目录策略固定为双读单写**：可以读取历史 `.architecture/solutions/`，但本次流程的新 working draft 统一写入 `.architecture/.state/create-technical-solution/`，最终文档统一写入 `.architecture/technical-solutions/`
 - **禁止外部脚本补状态**：不得用 inline Python、手工 Edit YAML、直接 `rm` 文件来伪造 receipt、fingerprint、checkpoint、cleanup 结果；一旦 gate fail，必须停在当前步修复脚本要求的最小前置
 - **禁止先写 final 再追认**：step 11 只能通过 `run-step.py` 的成稿流程生成最终文档；不得先 `Write` 最终文档，再补跑内部脚本追认
-- **render 不接受外部整文**：step 11 只能从 `decision.json` truth 渲染；不得先拼 `/tmp/final-document.md` 再传给脚本，也不得把 `synthesis.md` 当成唯一输入
+- **render 不接受外部整文**：step 11 只能从 `decision.json` truth 渲染；不得先拼 `/tmp/final-document.md` 再传给脚本
 - **step 11 必须写 render receipt**：`checkpoints.step-11.render_receipt.mode` 必须为 `decision_truth`，并记录每个槽位对应的 `decision.json` 路径/hash 以及最终文档 hash
+- **step 11 证据行由脚本渲染**：最终文档正文来自 `decision.json.selected_writeup`，并由脚本自动附加 `依据: CTX-XX`，不得手工拼接中间推理栏目
 - **cleanup 失败只允许脚本化 repair**：step 12 失败时只能回到 `run-step.py` 给出的修复步骤重跑；不得阅读 validator 源码逆向补字段
 - **禁止把现成 `docs/技术方案*.md` 当主路径**：若仓库内已有历史方案，只能当背景参考；不得先重写 `docs/` 再回头补 `.architecture` 流程
 

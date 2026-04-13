@@ -15,9 +15,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from protocol_runtime import workflow_default_block
 from runtime_snapshot import RuntimeSnapshot
-from wd_syn_contract import render_slot_lines
 
 
 def load_extract_template_snapshot_module() -> Any:
@@ -66,82 +64,12 @@ def resolve_members(state: dict[str, Any], members: list[str] | None = None) -> 
     return resolved
 
 
-def build_wd_ctx_scaffold(snapshot: RuntimeSnapshot) -> str:
-    slots = template_slots(snapshot)
-    slot_line = "、".join(s["title"] for s in slots)
-    return "\n".join(
-        [
-            "### CTX-01",
-            "来源: <文件路径 / 目录 / 用户输入>",
-            "结论或约束: <共享事实、已有实现、限制条件>",
-            f"适用槽位: {slot_line}",
-            "可信度或缺口: 待补证",
-        ]
-    )
-
-
-def build_wd_task_scaffold(snapshot: RuntimeSnapshot) -> str:
-    members = ", ".join(selected_members(snapshot.state) or ["<MEMBER_ID>"])
-    lines: list[str] = []
-    for slot_info in template_slots(snapshot):
-        title = slot_info["title"]
-        slot_id = slot_info.get("slot", "")
-        lines.extend(
-            [
-                f"### {title}",
-                f"- 槽位标识: {slot_id}",
-                "- 必须消费的共享上下文: CTX-01",
-                f"- 参与专家: {members}",
-                "- 每位专家必答问题:",
-                "  - <围绕当前槽位补齐复用 / 改造 / 新建比较>",
-                f"- 建议落位槽位: {title}",
-                "- 落位表达要求: <只写当前模板槽位需要的最小闭环>",
-                "- 缺口或阻塞项: <若无则写无>",
-                "",
-            ]
-        )
-    return "\n".join(lines).rstrip()
-
-
-def build_wd_exp_scaffold(snapshot: RuntimeSnapshot, members: list[str] | None = None) -> str:
-    slots = template_slots(snapshot)
-    resolved_members = resolve_members(snapshot.state, members)
-    payloads: list[str] = []
-    for slot_info in slots:
-        slot_id = slot_info.get("slot", "")
-        lines = [f"---BLOCK:WD-EXP-{slot_id}", ""]
-        for member in resolved_members:
-            lines.extend(
-                [
-                    f"### 专家：{member}",
-                    "- 决策类型: <复用 / 改造 / 新建>",
-                    "- 核心理由: <绑定 CTX 编号，说明为什么选这条路径>",
-                    "- 关键证据引用: CTX-01",
-                    "- 未决点: <若无则写无>",
-                    "",
-                ]
-            )
-        payloads.append("\n".join(lines).rstrip())
-    return "\n\n".join(payloads)
-
-
-def build_wd_syn_scaffold(snapshot: RuntimeSnapshot) -> str:
-    slots = template_slots(snapshot)
-    payloads: list[str] = []
-    for slot_info in slots:
-        slot_id = slot_info.get("slot", "")
-        title = slot_info["title"]
-        lines = [f"---BLOCK:WD-SYN-{slot_id}", ""]
-        lines.extend(render_slot_lines(title))
-        payloads.append("\n".join(lines).rstrip())
-    return "\n\n".join(payloads)
-
-
 def build_ctx_json_scaffold(snapshot: RuntimeSnapshot) -> list[dict[str, Any]]:
     return [
         {
             "id": f"CTX-{index:02d}",
             "source": "",
+            "source_refs": [],
             "conclusion": "",
             "applicable_slots": [slot_info["title"]],
             "confidence": "",
@@ -151,10 +79,18 @@ def build_ctx_json_scaffold(snapshot: RuntimeSnapshot) -> list[dict[str, Any]]:
 
 
 def build_task_json_scaffold(snapshot: RuntimeSnapshot) -> list[dict[str, Any]]:
+    selected_members = snapshot.state.get("checkpoints", {}).get("step-5", {}).get("selected_members", [])
+    if not isinstance(selected_members, list):
+        selected_members = []
     return [
         {
             "slot": slot_info["title"],
             "required_ctx": [],
+            "participating_experts": selected_members,
+            "expert_questions": [],
+            "suggested_slot": slot_info["title"],
+            "expression_requirements": "",
+            "blockers": "无",
         }
         for slot_info in template_slots(snapshot)
     ]
@@ -213,16 +149,3 @@ def emit_json_scaffold(snapshot: RuntimeSnapshot, members: list[str] | None = No
     else:
         raise SystemExit(f"步骤 {step} 不支持 emit json scaffold；仅支持步骤 7/8/9/10。")
     return json.dumps(payload, ensure_ascii=False, indent=2)
-
-
-def emit_scaffold(snapshot: RuntimeSnapshot, members: list[str] | None = None) -> str:
-    step = snapshot.current_step
-    if step == 7:
-        return build_wd_ctx_scaffold(snapshot)
-    if step == 8:
-        return build_wd_task_scaffold(snapshot)
-    if step == 9:
-        return build_wd_exp_scaffold(snapshot, members=members)
-    if step == 10:
-        return build_wd_syn_scaffold(snapshot)
-    raise SystemExit(f"步骤 {step} 不支持 emit scaffold；仅支持步骤 7/8/9/10。")

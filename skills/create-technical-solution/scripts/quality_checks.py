@@ -55,7 +55,6 @@ INTERMEDIATE_FIELD_PATTERNS = [
     re.compile(r"关键证据引用"),
     re.compile(r"模板承载缺口"),
     re.compile(r"未决问题"),
-    re.compile(r"CTX-\d+"),
 ]
 
 

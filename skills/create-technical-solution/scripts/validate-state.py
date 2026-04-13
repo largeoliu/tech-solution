@@ -102,7 +102,7 @@ GATE_REPAIR_STEP = {
 }
 
 CTX_HEADING_PATTERN = re.compile(r"^\s*###\s+(CTX-\d+)\s*$", re.MULTILINE)
-CTX_REQUIRED_FIELDS = ("来源:", "结论或约束:", "适用槽位:", "可信度或缺口:")
+CTX_FILE_REF_PATTERN = re.compile(r"(?:repowiki:|[A-Za-z0-9_./-]+\.[A-Za-z0-9_-]+(?:[:#][0-9LC]+)?)")
 
 
 def extract_named_block(markdown: str, heading: str) -> str:
@@ -162,11 +162,57 @@ def file_content_hash(path: Path) -> str:
 def load_json_object(path: Path) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+    except (FileNotFoundError, json.JSONDecodeError):
         return None
     if not isinstance(payload, dict):
         return None
     return payload
+
+
+def load_json_array(path: Path) -> list[dict[str, Any]] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, list):
+        return None
+    normalized: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            return None
+        normalized.append(item)
+    return normalized
+
+
+def normalize_string_list(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def ctx_source_refs(entry: dict[str, Any]) -> list[str]:
+    refs = normalize_string_list(entry.get("source_refs"))
+    if refs:
+        return refs
+    source = str(entry.get("source") or "").strip()
+    if not source:
+        return []
+    return [part.strip() for part in source.split(",") if part.strip()]
+
+
+def is_traceable_ref(ref: str) -> bool:
+    return bool(CTX_FILE_REF_PATTERN.search(ref))
+
+
+def ctx_repowiki_refs(entries: list[dict[str, Any]]) -> list[str]:
+    refs: list[str] = []
+    for entry in entries:
+        for ref in ctx_source_refs(entry):
+            if ref.startswith("repowiki:") and ref not in refs:
+                refs.append(ref)
+    return refs
 
 
 def extract_slot_headings(markdown: str, slot_level: Optional[int] = None) -> list[dict[str, Any]]:
@@ -274,7 +320,7 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
     if code == "step_skipped_without_checkpoint":
         return "回到对应步骤流，通过 run-step.py 让跳步记录按协议自动落盘。"
     if code == "repowiki_not_consumed":
-        return "回到步骤 7，实际读取并引用 repowiki，再把来源条目写入 WD-CTX。"
+        return "回到步骤 7，实际读取并引用 repowiki，再把 repowiki:... 路径写入 WD-CTX.source_refs。"
     if code == "invalid_working_draft_path":
         return "回到步骤 3，重新生成 .architecture/.state/create-technical-solution/[slug]/draft/ 目录。"
     if code == "invalid_final_document_path":
@@ -286,13 +332,17 @@ def remediation_for_issue(issue: dict[str, Any]) -> str:
     if code == "artifact_registry_mismatch":
         return "草稿文件被流程外改写；回到对应步骤通过 run-step.py 重新写入并刷新登记。"
     if code == "wd_ctx_structure_invalid":
-        return "回到步骤 7，把 WD-CTX 改成按 `### CTX-XX` 递增编号的结构化条目，并补齐来源、结论或约束、适用槽位、可信度或缺口。"
+        return "回到步骤 7，重写 ctx.json，补齐 id/source/source_refs/conclusion/applicable_slots/confidence，并保持 CTX-01 连续递增。"
+    if code == "ctx_source_not_traceable":
+        return "回到步骤 7，把模糊来源改成可追溯的 source_refs，例如代码路径、需求文档路径或 repowiki:...。"
     if code == "wd_ctx_count_mismatch":
         return "回到步骤 7，通过 run-step.py 重写 WD-CTX，并让 checkpoints.step-7.ctx_count 与实际 CTX 条目数保持一致且大于 0。"
     if code == "placeholder_content_detected":
         return "删除占位语句或模板残留，改成真实技术结论、真实地址/资料和可执行写法后重试。"
     if code == "missing_canonical_decision_truth":
-        return "回到步骤 10，补齐每个槽位的 decision.json，并让 synthesis.md 仅作为脚本导出的派生视图。"
+        return "回到步骤 10，补齐每个槽位的 decision.json，至少包含 slot/selected_writeup/evidence_refs。"
+    if code == "unauthorized_draft_file":
+        return "删除 working draft 顶层未授权 JSON 中间文件，再通过 run-step.py 重新提交合法槽位产物。"
     if code == "wd_syn_slots_too_similar":
         return "回到步骤 10，按槽位重做差异化收敛，避免把同一套 boilerplate 复制到多个槽位。"
     if code == "cleanup_attempt_before_validation":
@@ -699,13 +749,15 @@ class GateValidator:
         if not draft_path or not draft_path.is_dir():
             return
         ctx_json_path = draft_path / "ctx.json"
-        ctx_path = draft_path / "ctx.md"
-        if ctx_json_path.exists() and not ctx_path.exists():
+        entries = load_json_array(ctx_json_path) if ctx_json_path.exists() else None
+        checkpoint = self.checkpoint(7, errors)
+        expected_count = checkpoint.get("ctx_count")
+        if entries is None:
             add_issue(
                 errors,
                 make_issue(
-                    code="draft_block_overwritten",
-                    message=f"步骤 {step_num}: ctx.md 缺失，render view 已丢失",
+                    code="wd_ctx_structure_invalid",
+                    message=f"步骤 {step_num}: WD-CTX 必须是合法 JSON 数组",
                     step=step_num,
                     field="working_draft_path",
                     missing_artifacts=["WD-CTX"],
@@ -713,18 +765,13 @@ class GateValidator:
                     recommended_repair_step=7,
                 ),
             )
-        if not ctx_path.exists():
             return
-        content = read_markdown(ctx_path)
-        entries = extract_ctx_entries(content)
-        checkpoint = self.checkpoint(7, errors)
-        expected_count = checkpoint.get("ctx_count")
         if not entries:
             add_issue(
                 errors,
                 make_issue(
                     code="wd_ctx_structure_invalid",
-                    message=f"步骤 {step_num}: WD-CTX 必须按 `### CTX-XX` 输出结构化条目",
+                    message=f"步骤 {step_num}: WD-CTX 必须至少包含 1 条结构化上下文",
                     step=step_num,
                     field="working_draft_path",
                     missing_artifacts=["WD-CTX"],
@@ -734,7 +781,7 @@ class GateValidator:
             )
             return
         expected_ids = [f"CTX-{index:02d}" for index in range(1, len(entries) + 1)]
-        actual_ids = [entry["ctx_id"] for entry in entries]
+        actual_ids = [str(entry.get("id") or "").strip() for entry in entries]
         if actual_ids != expected_ids:
             add_issue(
                 errors,
@@ -749,22 +796,60 @@ class GateValidator:
                     details={"expected_ctx_ids": expected_ids, "actual_ctx_ids": actual_ids},
                 ),
             )
+        traceability_findings: list[dict[str, Any]] = []
         for entry in entries:
-            missing_fields = [field for field in CTX_REQUIRED_FIELDS if field not in entry["body"]]
+            ctx_id = str(entry.get("id") or "").strip() or "<unknown>"
+            missing_fields = [
+                field
+                for field in ("source", "source_refs", "conclusion", "applicable_slots", "confidence")
+                if field not in entry or entry.get(field) in (None, "", [])
+            ]
             if missing_fields:
                 add_issue(
                     errors,
                     make_issue(
                         code="wd_ctx_structure_invalid",
-                        message=f"步骤 {step_num}: {entry['ctx_id']} 缺少必填字段",
+                        message=f"步骤 {step_num}: {ctx_id} 缺少必填字段",
                         step=step_num,
                         field="working_draft_path",
                         missing_artifacts=["WD-CTX"],
                         recommended_rollback_step=7,
                         recommended_repair_step=7,
-                        details={"ctx_id": entry["ctx_id"], "missing_fields": missing_fields},
+                        details={"ctx_id": ctx_id, "missing_fields": missing_fields},
                     ),
                 )
+                continue
+            if not isinstance(entry.get("applicable_slots"), list):
+                add_issue(
+                    errors,
+                    make_issue(
+                        code="wd_ctx_structure_invalid",
+                        message=f"步骤 {step_num}: {ctx_id} 的 applicable_slots 必须是数组",
+                        step=step_num,
+                        field="working_draft_path",
+                        missing_artifacts=["WD-CTX"],
+                        recommended_rollback_step=7,
+                        recommended_repair_step=7,
+                        details={"ctx_id": ctx_id},
+                    ),
+                )
+            refs = ctx_source_refs(entry)
+            if not refs or not all(is_traceable_ref(ref) for ref in refs):
+                traceability_findings.append({"ctx_id": ctx_id, "source_refs": refs})
+        if traceability_findings:
+            add_issue(
+                errors,
+                make_issue(
+                    code="ctx_source_not_traceable",
+                    message=f"步骤 {step_num}: WD-CTX 来源必须通过 source_refs 指向可追溯文件或 repowiki 路径",
+                    step=step_num,
+                    field="working_draft_path",
+                    missing_artifacts=["WD-CTX"],
+                    recommended_rollback_step=7,
+                    recommended_repair_step=7,
+                    details={"findings": traceability_findings},
+                ),
+            )
         if not isinstance(expected_count, int) or expected_count <= 0 or expected_count != len(entries):
             add_issue(
                 errors,
@@ -777,6 +862,30 @@ class GateValidator:
                     recommended_rollback_step=7,
                     recommended_repair_step=7,
                     details={"expected_ctx_count": expected_count, "actual_ctx_count": len(entries)},
+                ),
+            )
+
+    def check_unexpected_draft_json_files(self, errors: list[dict[str, Any]], step_num: int) -> None:
+        draft_path = self.working_draft_path()
+        if not draft_path or not draft_path.is_dir():
+            return
+        allowed_top_level = {"ctx.json", "task.json"}
+        unexpected = [
+            child.name
+            for child in draft_path.iterdir()
+            if child.is_file() and child.suffix == ".json" and child.name not in allowed_top_level
+        ]
+        if unexpected:
+            add_issue(
+                errors,
+                make_issue(
+                    code="unauthorized_draft_file",
+                    message=f"步骤 {step_num}: working draft 顶层存在未授权 JSON 中间文件",
+                    step=step_num,
+                    field="working_draft_path",
+                    recommended_rollback_step=step_num,
+                    recommended_repair_step=step_num,
+                    details={"unexpected_files": sorted(unexpected)},
                 ),
             )
 
@@ -1158,13 +1267,13 @@ class GateValidator:
             return
         headings = [item["title"] for item in self.template_headings()]
         task_json_path = draft_path / "task.json"
-        task_path = draft_path / "task.md"
-        if task_json_path.exists() and not task_path.exists():
+        entries = load_json_array(task_json_path) if task_json_path.exists() else None
+        if entries is None:
             add_issue(
                 errors,
                 make_issue(
-                    code="draft_block_overwritten",
-                    message=f"步骤 {step_num}: task.md 缺失，render view 已丢失",
+                    code="task_block_structure_invalid",
+                    message=f"步骤 {step_num}: WD-TASK 必须是合法 JSON 数组",
                     step=step_num,
                     field="working_draft_path",
                     missing_artifacts=["WD-TASK"],
@@ -1172,12 +1281,10 @@ class GateValidator:
                     recommended_repair_step=8,
                 ),
             )
-        if not task_path.exists():
             return
-        content = read_markdown(task_path)
-        if not content.strip():
+        if not entries:
             return
-        actual_headings = [normalize_task_heading(title) for title in extract_block_headings(content)]
+        actual_headings = [normalize_task_heading(str(entry.get("slot") or "")) for entry in entries]
         if any(title.startswith("CTX-") for title in actual_headings):
             add_issue(
                 errors,
@@ -1203,11 +1310,35 @@ class GateValidator:
                     details={"expected_slots": headings, "actual_slots": actual_headings},
                 ),
             )
-        ctx_path = draft_path / "ctx.md"
-        if not ctx_path.exists():
+        ctx_entries = load_json_array(draft_path / "ctx.json")
+        if ctx_entries is None:
             return
-        valid_ctx_ids = set(extract_ctx_ids(read_markdown(ctx_path)))
-        referenced_ctx_ids = set(extract_task_ctx_refs(content))
+        valid_ctx_ids = {str(entry.get("id") or "").strip() for entry in ctx_entries if str(entry.get("id") or "").strip()}
+        referenced_ctx_ids: set[str] = set()
+        required_fields = [
+            "participating_experts",
+            "expert_questions",
+            "suggested_slot",
+            "expression_requirements",
+            "blockers",
+        ]
+        for entry in entries:
+            referenced_ctx_ids.update(normalize_string_list(entry.get("required_ctx")))
+            missing_fields = [field for field in required_fields if field not in entry]
+            if missing_fields:
+                add_issue(
+                    errors,
+                    make_issue(
+                        code="wd_task_field_missing",
+                        message=f"步骤 {step_num}: WD-TASK 槽位 [{str(entry.get('slot') or '').strip()}] 缺少必填字段",
+                        step=step_num,
+                        field="working_draft_path",
+                        missing_artifacts=["WD-TASK"],
+                        recommended_rollback_step=8,
+                        recommended_repair_step=8,
+                        details={"missing_fields": missing_fields},
+                    ),
+                )
         invalid_ctx_ids = sorted(referenced_ctx_ids - valid_ctx_ids)
         if invalid_ctx_ids:
             add_issue(
@@ -1222,28 +1353,6 @@ class GateValidator:
                     details={"invalid_ctx_ids": invalid_ctx_ids, "valid_ctx_ids": sorted(valid_ctx_ids)},
                 ),
             )
-        for slot_title in headings:
-            section_content = _extract_task_slot_section(content, slot_title)
-            for field_key, field_label in [
-                ("participating_experts", "参与专家:"),
-                ("expert_questions", "每位专家必答问题:"),
-                ("suggested_slot", "建议落位槽位:"),
-                ("expression_requirements", "落位表达要求:"),
-                ("blockers", "缺口或阻塞项:"),
-            ]:
-                if field_label not in section_content:
-                    add_issue(
-                        errors,
-                        make_issue(
-                            code="wd_task_field_missing",
-                            message=f"步骤 {step_num}: WD-TASK 槽位 [{slot_title}] 缺少必填字段 [{field_label}]",
-                            step=step_num,
-                            field="working_draft_path",
-                            missing_artifacts=["WD-TASK"],
-                            recommended_rollback_step=8,
-                            recommended_repair_step=8,
-                        ),
-                    )
 
     def check_skip_record(self, skipped_step: int, errors: list[dict[str, Any]], step_num: int) -> None:
         skipped_steps = self.state.get("skipped_steps", [])
@@ -1270,14 +1379,18 @@ class GateValidator:
 
     def check_repowiki_consumed(self, errors: list[dict[str, Any]], step_num: int) -> None:
         checkpoint6 = self.checkpoint(6, errors)
-        if checkpoint6.get("repowiki_exists") is True and int(checkpoint6.get("repowiki_source_count") or 0) <= 0:
+        checkpoint7 = self.checkpoint(7, errors)
+        consumed_paths = checkpoint7.get("repowiki_consumed_paths") if isinstance(checkpoint7, dict) else []
+        if checkpoint6.get("repowiki_exists") is True and not isinstance(consumed_paths, list):
+            consumed_paths = []
+        if checkpoint6.get("repowiki_exists") is True and not consumed_paths:
             add_issue(
                 errors,
                 make_issue(
                     code="repowiki_not_consumed",
                     message=f"步骤 {step_num}: repowiki 已存在但未记录实际消费来源",
                     step=step_num,
-                                        field="checkpoints.step-6.repowiki_source_count",
+                    field="checkpoints.step-7.repowiki_consumed_paths",
                     recommended_rollback_step=7,
                     recommended_repair_step=7,
                 ),
@@ -1287,12 +1400,8 @@ class GateValidator:
         draft_path = self.working_draft_path()
         if not draft_path or not draft_path.is_dir():
             return
-        slots_dir = draft_path / "slots"
-        if not slots_dir.is_dir():
-            return
         template_titles = [item["title"] for item in self.template_headings()]
         state_slots = self.state.get("slots") or []
-        slot_title_map = {s.get("slot", ""): s.get("title", "") for s in state_slots}
         actual_titles: list[str] = []
         missing: list[str] = []
         placeholder_findings: list[dict[str, Any]] = []
@@ -1300,19 +1409,31 @@ class GateValidator:
         for slot_info in state_slots:
             slot_id = slot_info.get("slot", "")
             slot_title = slot_info.get("title", "")
-            syn_path = slots_dir / slot_id / "synthesis.md"
-            if not syn_path.exists():
+            payload = load_json_object(decision_truth_path(draft_path, slot_id))
+            if not payload:
                 continue
-            actual_titles.append(slot_title)
-            slot_content = read_markdown(syn_path)
-            slot_blocks[slot_title] = slot_content
-            if not target_capability_present(slot_content):
-                if "#### 目标能力" not in missing:
-                    missing.append("#### 目标能力")
-            for fragment in missing_wd_syn_slot_fragments(slot_content, slot_title):
-                if fragment not in missing:
-                    missing.append(fragment)
-            hits = placeholder_hits(slot_content)
+            actual_titles.append(str(payload.get("slot") or "").strip())
+            target_capability = str(payload.get("target_capability") or "").strip()
+            selected_writeup = str(payload.get("selected_writeup") or "").strip()
+            evidence_refs = normalize_string_list(payload.get("evidence_refs"))
+            comparisons = payload.get("comparisons") or []
+            slot_blocks[slot_title] = selected_writeup
+            if not target_capability:
+                if "target_capability" not in missing:
+                    missing.append("target_capability")
+            if str(payload.get("slot") or "").strip() != slot_title:
+                if f"slot={slot_title}" not in missing:
+                    missing.append(f"slot={slot_title}")
+            if not isinstance(comparisons, list) or len(comparisons) != 3:
+                if "comparisons" not in missing:
+                    missing.append("comparisons")
+            else:
+                comparison_paths = {str(item.get("path") or "").strip() for item in comparisons if isinstance(item, dict)}
+                if comparison_paths != {"复用", "改造", "新建"} and "comparisons.paths" not in missing:
+                    missing.append("comparisons.paths")
+            if not evidence_refs and "evidence_refs" not in missing:
+                missing.append("evidence_refs")
+            hits = placeholder_hits("\n".join([target_capability, selected_writeup]))
             if hits:
                 placeholder_findings.append({"slot": slot_title, "hits": hits})
         if actual_titles != template_titles:
@@ -1608,6 +1729,7 @@ class GateValidator:
 
     def step_9(self, errors: list[dict[str, Any]]) -> None:
         self.common(9, errors)
+        self.check_unexpected_draft_json_files(errors, 9)
         draft_path = self.working_draft_path()
         require(
             self.state.get("can_enter_step_9") is True,
@@ -1637,20 +1759,6 @@ class GateValidator:
         for slot_id in completed_set:
             artifact = f"WD-EXP-{slot_id}"
             self.check_working_draft_block(artifact, errors, 9)
-            experts_md = draft_path / "slots" / slot_id / "experts.md" if draft_path else None
-            if experts_md is not None and not experts_md.exists():
-                add_issue(
-                    errors,
-                    make_issue(
-                        code="draft_block_overwritten",
-                        message=f"步骤 9: {slot_id} 的 experts.md 缺失，render view 已丢失",
-                        step=9,
-                        field="working_draft_path",
-                        missing_artifacts=[artifact],
-                        recommended_rollback_step=9,
-                        recommended_repair_step=9,
-                    ),
-                )
             if draft_path and not expert_truth_complete(state=self.state, working_dir=draft_path, slot_id=slot_id):
                 add_issue(
                     errors,
@@ -1768,12 +1876,13 @@ class GateValidator:
             )
             return
         selected_writeup = str(payload.get("selected_writeup") or "").strip()
-        if str(payload.get("slot") or "").strip() != title or not selected_writeup:
+        evidence_refs = normalize_string_list(payload.get("evidence_refs"))
+        if str(payload.get("slot") or "").strip() != title or not selected_writeup or not evidence_refs:
             add_issue(
                 errors,
                 make_issue(
                     code="missing_canonical_decision_truth",
-                    message=f"步骤 {step_num}: {slot_id} 的 canonical decision truth 缺少最小成稿字段",
+                    message=f"步骤 {step_num}: {slot_id} 的 canonical decision truth 缺少最小成稿字段或 evidence_refs",
                     step=step_num,
                     field="working_draft_path",
                     missing_artifacts=[f"WD-SYN-{slot_id}"],
@@ -1900,6 +2009,7 @@ class GateValidator:
 
     def step_10(self, errors: list[dict[str, Any]]) -> None:
         self.common(10, errors)
+        self.check_unexpected_draft_json_files(errors, 10)
         self.check_pending_questions(errors, 10)
         require(
             self.state.get("can_enter_step_10") is True,

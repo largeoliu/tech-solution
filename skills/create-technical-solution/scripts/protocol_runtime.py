@@ -439,7 +439,7 @@ def render_run_step_command(
         if not has_current_ticket:
             return [advance_line]
         return [
-            f"{base} --complete --ticket <ticket> <<'HEREDOC'",
+            f"{base} --complete --ticket <ticket> --slot SLOT-01 <<'HEREDOC'",
             '[',
             '  {',
             '    "slot": "2.1 方案设计",',
@@ -455,7 +455,7 @@ def render_run_step_command(
         if not has_current_ticket:
             return [advance_line]
         return [
-            f"{base} --complete --ticket <ticket> <<'HEREDOC'",
+            f"{base} --complete --ticket <ticket> --slot SLOT-01 <<'HEREDOC'",
             '[',
             '  {',
             '    "slot": "2.1 方案设计",',

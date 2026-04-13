@@ -69,7 +69,7 @@ This removes the need to read `state.yaml` to continue the flow.
 
 - Added `--emit-json-scaffold` for steps 7, 8, 9, and 10.
 - Added matching scaffold generators that emit valid structured arrays instead of Markdown-only draft templates.
-- Kept `--emit-scaffold` for Markdown-oriented inspection and authoring help.
+- 后续进一步收口 public surface，只保留 `--emit-json-scaffold` 作为创作步骤的只读辅助入口。
 
 ### Draft path and runtime alignment
 

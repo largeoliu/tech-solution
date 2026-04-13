@@ -112,7 +112,7 @@ def _installed_copy_workspace(tmp_path):
     return install_root, copied_run_step, copied_doctor, state_path
 
 
-def test_emit_scaffold_installed_copy_smoke(tmp_path):
+def test_emit_json_scaffold_installed_copy_smoke(tmp_path):
     install_root, run_step, _, state_path = _installed_copy_workspace(tmp_path)
 
     for extra_args, label in [
@@ -139,11 +139,11 @@ def test_emit_scaffold_installed_copy_smoke(tmp_path):
         assert r.returncode == 0, f"{label} failed: {r.stderr}\n{r.stdout}"
 
     result = subprocess.run(
-        ["python3", str(run_step), "--state", str(state_path), "--emit-scaffold"],
+        ["python3", str(run_step), "--state", str(state_path), "--emit-json-scaffold"],
         capture_output=True, text=True, check=False, cwd=install_root,
     )
-    assert result.returncode == 0, f"emit-scaffold failed: {result.stderr}"
-    assert "### CTX-01" in result.stdout
+    assert result.returncode == 0, f"emit-json-scaffold failed: {result.stderr}"
+    assert '"id": "CTX-01"' in result.stdout
 
 
 def test_runtime_doctor_installed_copy_smoke(tmp_path):

@@ -37,31 +37,6 @@ TEMPLATE = """# 技术方案文档
 
 ### 2.2 风险与验证
 """
-
-
-def make_wd_syn_block(title: str) -> str:
-    return "\n".join(
-        [
-            f"### 槽位：{title}",
-            "#### 目标能力",
-            f"- 收敛 {title} 的最终写法",
-            "#### 候选方案对比",
-            "| 路径 | 可行性 | 关键证据 | 选择理由 |",
-            "|------|--------|----------|----------|",
-            f"| 复用 | ☐ | CTX-01 | {title} 不能直接复用现有产物 |",
-            f"| 改造 | ☑ | CTX-01 | {title} 适合在现有资产上扩展 |",
-            f"| 新建 | ☐ | CTX-01 | {title} 新建成本高于收益 |",
-            "#### 选定路径",
-            "- 路径: 改造",
-            f"- 选定写法: 在 {title} 槽位补齐针对性的技术结论",
-            "- 关键证据引用: CTX-01",
-            f"- 建议落位槽位: {title}",
-            "- 模板承载缺口: 无",
-            "- 未决问题: 无",
-        ]
-    )
-
-
 @pytest.fixture()
 def workspace(tmp_path: Path) -> dict[str, Path]:
     repo = tmp_path / "sample-project"
@@ -160,6 +135,7 @@ def write_good_draft(path: Path) -> None:
                 {
                     "id": "CTX-01",
                     "source": "services/a.py, models/a.py",
+                    "source_refs": ["services/a.py", "models/a.py"],
                     "conclusion": "需求概述已在现有流程中有入口。",
                     "applicable_slots": ["1.1 需求概述", "1.2 核心目标", "2.1 方案设计", "2.2 风险与验证"],
                     "confidence": "已核实",
@@ -169,16 +145,6 @@ def write_good_draft(path: Path) -> None:
             indent=2,
         )
         + "\n",
-        encoding="utf-8",
-    )
-    (path / "ctx.md").write_text(
-        "\n".join([
-            "### CTX-01",
-            "来源: code",
-            "结论或约束: existing implementation",
-            "适用槽位: 1.1 需求概述、1.2 核心目标、2.1 方案设计、2.2 风险与验证",
-            "可信度或缺口: 已核实",
-        ]),
         encoding="utf-8",
     )
     (path / "task.json").write_text(
@@ -193,55 +159,6 @@ def write_good_draft(path: Path) -> None:
             indent=2,
         )
         + "\n",
-        encoding="utf-8",
-    )
-    (path / "task.md").write_text(
-        "\n\n".join([
-            "\n".join([
-                "### 1.1 需求概述",
-                "- 槽位标识: SLOT-01",
-                "- 必须消费的共享上下文: CTX-01",
-                "- 参与专家: systems_architect",
-                "- 每位专家必答问题:",
-                "  - <围绕当前槽位补齐复用 / 改造 / 新建比较>",
-                "- 建议落位槽位: 1.1 需求概述",
-                "- 落位表达要求: <只写当前模板槽位需要的最小闭环>",
-                "- 缺口或阻塞项: 无",
-            ]),
-            "\n".join([
-                "### 1.2 核心目标",
-                "- 槽位标识: SLOT-02",
-                "- 必须消费的共享上下文: CTX-01",
-                "- 参与专家: systems_architect",
-                "- 每位专家必答问题:",
-                "  - <围绕当前槽位补齐复用 / 改造 / 新建比较>",
-                "- 建议落位槽位: 1.2 核心目标",
-                "- 落位表达要求: <只写当前模板槽位需要的最小闭环>",
-                "- 缺口或阻塞项: 无",
-            ]),
-            "\n".join([
-                "### 2.1 方案设计",
-                "- 槽位标识: SLOT-03",
-                "- 必须消费的共享上下文: CTX-01",
-                "- 参与专家: systems_architect",
-                "- 每位专家必答问题:",
-                "  - <围绕当前槽位补齐复用 / 改造 / 新建比较>",
-                "- 建议落位槽位: 2.1 方案设计",
-                "- 落位表达要求: <只写当前模板槽位需要的最小闭环>",
-                "- 缺口或阻塞项: 无",
-            ]),
-            "\n".join([
-                "### 2.2 风险与验证",
-                "- 槽位标识: SLOT-04",
-                "- 必须消费的共享上下文: CTX-01",
-                "- 参与专家: systems_architect",
-                "- 每位专家必答问题:",
-                "  - <围绕当前槽位补齐复用 / 改造 / 新建比较>",
-                "- 建议落位槽位: 2.2 风险与验证",
-                "- 落位表达要求: <只写当前模板槽位需要的最小闭环>",
-                "- 缺口或阻塞项: 无",
-            ]),
-        ]),
         encoding="utf-8",
     )
     for index, title in enumerate(["1.1 需求概述", "1.2 核心目标", "2.1 方案设计", "2.2 风险与验证"], start=1):
@@ -265,17 +182,6 @@ def write_good_draft(path: Path) -> None:
             + "\n",
             encoding="utf-8",
         )
-        (slot / "experts.md").write_text(
-            "\n".join([
-                "### 专家：systems_architect",
-                "- 决策类型: 改造",
-                "- 核心理由: 绑定 CTX-01，说明为什么选这条路径",
-                "- 关键证据引用: CTX-01",
-                "- 未决点: 无",
-            ]),
-            encoding="utf-8",
-        )
-        (slot / "synthesis.md").write_text(make_wd_syn_block(title), encoding="utf-8")
         (slot / "decision.json").write_text(
             json.dumps(
                 {
@@ -303,17 +209,14 @@ def write_good_draft(path: Path) -> None:
 def assert_good_draft(path: Path) -> None:
     assert path.is_dir()
     assert (path / "ctx.json").exists()
-    assert (path / "ctx.md").exists()
     assert (path / "task.json").exists()
-    assert (path / "task.md").exists()
     assert (path / "slots" / "SLOT-01" / "decision.json").exists()
-    assert (path / "slots" / "SLOT-01" / "experts.md").exists()
-    assert (path / "slots" / "SLOT-04" / "synthesis.md").exists()
+    assert (path / "slots" / "SLOT-01" / "experts" / "systems_architect.json").exists()
 
 
 def write_incomplete_draft(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
-    (path / "ctx.md").write_text("### CTX-01\n来源: code\n", encoding="utf-8")
+    (path / "ctx.json").write_text("[]\n", encoding="utf-8")
 
 
 def load_doctor():

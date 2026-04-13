@@ -90,7 +90,6 @@ def workspace(tmp_path: Path) -> dict[str, Path]:
         "template_path": template_path,
         "members_path": members_path,
         "principles_path": principles_path,
-        "content_file": repo / "wd-exp-systems-architect.md",
     }
 
 
@@ -454,9 +453,7 @@ def write_directory_draft(
     working_dir = workspace["working_draft_path"]
     working_dir.mkdir(parents=True, exist_ok=True)
     (working_dir / "ctx.json").write_text(WD_CTX_PAYLOAD + "\n", encoding="utf-8")
-    (working_dir / "ctx.md").write_text(WD_CTX_BODY.strip() + "\n", encoding="utf-8")
     (working_dir / "task.json").write_text(WD_TASK_PAYLOAD + "\n", encoding="utf-8")
-    (working_dir / "task.md").write_text(WD_TASK_BODY.strip() + "\n", encoding="utf-8")
     slots_dir = working_dir / "slots"
     slots_dir.mkdir(parents=True, exist_ok=True)
     for index, title in enumerate(
@@ -466,7 +463,6 @@ def write_directory_draft(
         slot_dir = slots_dir / slot_id
         slot_dir.mkdir(parents=True, exist_ok=True)
         experts_json_dir = slot_dir / "experts"
-        experts_body = ""
         if with_experts:
             experts_json_dir.mkdir(parents=True, exist_ok=True)
             (experts_json_dir / "systems_architect.json").write_text(
@@ -485,8 +481,6 @@ def write_directory_draft(
                 + "\n",
                 encoding="utf-8",
             )
-            experts_body = f"### 专家：systems_architect\n- 决策类型: 改造\n- 核心理由: 复用现有骨架并补齐 {title}。\n- 关键证据引用: CTX-01\n- 未决点: 无\n"
-        synthesis_body = ""
         if with_synthesis:
             (slot_dir / "decision.json").write_text(
                 json.dumps(
@@ -510,20 +504,6 @@ def write_directory_draft(
                 + "\n",
                 encoding="utf-8",
             )
-            synthesis_body = (
-                f"### 槽位：{title}\n"
-                f"#### 目标能力\n- 收敛 {title} 的最终写法。\n"
-                "#### 候选方案对比\n"
-                "| 路径 | 可行性 | 关键证据 | 选择理由 |\n"
-                "|------|--------|----------|----------|\n"
-                "| 复用 | ❌ | CTX-01 | 不足 |\n"
-                "| 改造 | ✅ | CTX-01 | 推荐 |\n"
-                "| 新建 | ❌ | CTX-01 | 成本高 |\n"
-                "#### 选定路径\n"
-                f"- 路径: 改造\n- 选定写法:\n在 {title} 位置补齐内容。\n- 关键证据引用: CTX-01\n- 建议落位槽位: {title}\n- 模板承载缺口: 无\n- 未决问题: 无\n"
-            )
-        (slot_dir / "experts.md").write_text(experts_body, encoding="utf-8")
-        (slot_dir / "synthesis.md").write_text(synthesis_body, encoding="utf-8")
 
 
 def write_step9_draft(workspace: dict[str, Path]) -> None:
@@ -558,60 +538,11 @@ FINAL_DOC = """# 技术方案文档
 """
 
 
-WD_CTX_BODY = """### CTX-01
-来源: services/a.py, models/a.py
-结论或约束: 需求概述沿用现有入口。
-适用槽位: 1.1 需求概述, 1.2 核心目标, 2.1 方案设计, 2.2 风险与验证
-可信度或缺口: 已验证
-"""
-
-
-WD_TASK_BODY = """### 1.1 需求概述
-- 槽位标识: 1.1 需求概述
-- 必须消费的共享上下文: CTX-01
-- 参与专家:
-- 每位专家必答问题:
-  - 无
-- 建议落位槽位: 1.1 需求概述
-- 落位表达要求: <只写当前模板槽位需要的最小闭环>
-- 缺口或阻塞项: 无
-
-### 1.2 核心目标
-- 槽位标识: 1.2 核心目标
-- 必须消费的共享上下文: CTX-01
-- 参与专家:
-- 每位专家必答问题:
-  - 无
-- 建议落位槽位: 1.2 核心目标
-- 落位表达要求: <只写当前模板槽位需要的最小闭环>
-- 缺口或阻塞项: 无
-
-### 2.1 方案设计
-- 槽位标识: 2.1 方案设计
-- 必须消费的共享上下文: CTX-01
-- 参与专家:
-- 每位专家必答问题:
-  - 无
-- 建议落位槽位: 2.1 方案设计
-- 落位表达要求: <只写当前模板槽位需要的最小闭环>
-- 缺口或阻塞项: 无
-
-### 2.2 风险与验证
-- 槽位标识: 2.2 风险与验证
-- 必须消费的共享上下文: CTX-01
-- 参与专家:
-- 每位专家必答问题:
-  - 无
-- 建议落位槽位: 2.2 风险与验证
-- 落位表达要求: <只写当前模板槽位需要的最小闭环>
-- 缺口或阻塞项: 无
-"""
-
-
 WD_CTX_PAYLOAD = """[
   {
     "id": "CTX-01",
     "source": "services/a.py, models/a.py",
+    "source_refs": ["services/a.py", "models/a.py"],
     "conclusion": "需求概述沿用现有入口。",
     "applicable_slots": ["1.1 需求概述", "1.2 核心目标", "2.1 方案设计", "2.2 风险与验证"],
     "confidence": "已验证"
@@ -622,19 +553,39 @@ WD_CTX_PAYLOAD = """[
 WD_TASK_PAYLOAD = """[
   {
     "slot": "1.1 需求概述",
-    "required_ctx": ["CTX-01"]
+    "required_ctx": ["CTX-01"],
+    "participating_experts": ["systems_architect"],
+    "expert_questions": [],
+    "suggested_slot": "1.1 需求概述",
+    "expression_requirements": "",
+    "blockers": "无"
   },
   {
     "slot": "1.2 核心目标",
-    "required_ctx": ["CTX-01"]
+    "required_ctx": ["CTX-01"],
+    "participating_experts": ["systems_architect"],
+    "expert_questions": [],
+    "suggested_slot": "1.2 核心目标",
+    "expression_requirements": "",
+    "blockers": "无"
   },
   {
     "slot": "2.1 方案设计",
-    "required_ctx": ["CTX-01"]
+    "required_ctx": ["CTX-01"],
+    "participating_experts": ["systems_architect"],
+    "expert_questions": [],
+    "suggested_slot": "2.1 方案设计",
+    "expression_requirements": "",
+    "blockers": "无"
   },
   {
     "slot": "2.2 风险与验证",
-    "required_ctx": ["CTX-01"]
+    "required_ctx": ["CTX-01"],
+    "participating_experts": ["systems_architect"],
+    "expert_questions": [],
+    "suggested_slot": "2.2 风险与验证",
+    "expression_requirements": "",
+    "blockers": "无"
   }
 ]"""
 
@@ -705,131 +656,6 @@ def make_wd_syn_payload() -> str:
     )
 
 
-WD_EXP_BODY = """### 参与槽位
-- 2.1 方案设计
-
-### 决策类型
-- 改造
-
-### 核心理由
-- 复用现有骨架并补齐专家分析。
-
-### 关键证据引用
-- CTX-01
-
-### 未决点
-- 无
-"""
-
-
-def make_wd_exp_block(title: str) -> str:
-    return WD_EXP_BODY.replace("2.1 方案设计", title)
-
-
-def make_wd_syn_block(title: str) -> str:
-    return f"""### 槽位：{title}
-#### 目标能力
-- 收敛 {title} 的最终写法。
-#### 候选方案对比
-| 路径 | 可行性 | 关键证据 | 选择理由 |
-|------|--------|----------|----------|
-| 复用 | ❌ | CTX-01 | 不足 |
-| 改造 | ✅ | CTX-01 | 推荐 |
-| 新建 | ❌ | CTX-01 | 成本高 |
-#### 选定路径
-- 路径: 改造
-- 选定写法: 在 {title} 位置补齐内容。
-- 关键证据引用: CTX-01
-- 建议落位槽位: {title}
-- 模板承载缺口: 无
-- 未决问题: 无
-"""
-
-
-WD_SYN_BODY = """### 槽位：1.1 需求概述
-#### 目标能力
-- 明确需求边界与改造目标。
-#### 候选方案对比
-| 路径 | 可行性 | 关键证据 | 选择理由 |
-|------|--------|----------|----------|
-| 复用 | ❌ | CTX-01 | 不足 |
-| 改造 | ✅ | CTX-01 | 推荐 |
-| 新建 | ❌ | CTX-01 | 成本高 |
-#### 选定路径
-- 路径: 改造
-- 选定写法: 在现有实现上扩展。
-- 关键证据引用: CTX-01
-- 建议落位槽位: 1.1 需求概述
-- 模板承载缺口: 无
-- 未决问题: 无
-
-### 槽位：1.2 核心目标
-#### 目标能力
-- 收敛核心目标与验收标准。
-#### 候选方案对比
-| 路径 | 可行性 | 关键证据 | 选择理由 |
-|------|--------|----------|----------|
-| 复用 | ❌ | CTX-01 | 不足 |
-| 改造 | ✅ | CTX-01 | 推荐 |
-| 新建 | ❌ | CTX-01 | 成本高 |
-#### 选定路径
-- 路径: 改造
-- 选定写法: 保留目标结构并补齐约束。
-- 关键证据引用: CTX-01
-- 建议落位槽位: 1.2 核心目标
-- 模板承载缺口: 无
-- 未决问题: 无
-
-### 槽位：2.1 方案设计
-#### 目标能力
-- 收敛实现路径与关键设计点。
-#### 候选方案对比
-| 路径 | 可行性 | 关键证据 | 选择理由 |
-|------|--------|----------|----------|
-| 复用 | ❌ | CTX-01 | 不足 |
-| 改造 | ✅ | CTX-01 | 推荐 |
-| 新建 | ❌ | CTX-01 | 成本高 |
-#### 选定路径
-- 路径: 改造
-- 选定写法: 在现有骨架上补充实现细节。
-- 关键证据引用: CTX-01
-- 建议落位槽位: 2.1 方案设计
-- 模板承载缺口: 无
-- 未决问题: 无
-
-### 槽位：2.2 风险与验证
-#### 目标能力
-- 明确风险与验证手段。
-#### 候选方案对比
-| 路径 | 可行性 | 关键证据 | 选择理由 |
-|------|--------|----------|----------|
-| 复用 | ❌ | CTX-01 | 不足 |
-| 改造 | ✅ | CTX-01 | 推荐 |
-| 新建 | ❌ | CTX-01 | 成本高 |
-#### 选定路径
-- 路径: 改造
-- 选定写法: 沿用现有验证流程并补足检查项。
-- 关键证据引用: CTX-01
-- 建议落位槽位: 2.2 风险与验证
-- 模板承载缺口: 无
-- 未决问题: 无
-"""
-
-
-WD_SYN_LIGHT_BODY = """### 槽位：1.1 需求概述
-- 延续现有结构，只做小范围调整。
-
-### 槽位：1.2 核心目标
-- 保持现有边界并补齐说明。
-
-### 槽位：2.1 方案设计
-- 在现有模块内完成实现。
-
-### 槽位：2.2 风险与验证
-- 增加回归验证并控制改动范围。
-"""
-
-
 def make_args(
     state_path: Path,
     summary: str | None,
@@ -840,6 +666,7 @@ def make_args(
     member: list[str] | None = None,
     stdin_content: str | None = None,
     ticket: str | None = None,
+    slot: str | None = None,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         state=str(state_path),
@@ -849,16 +676,9 @@ def make_args(
         solution_type=solution_type,
         member=member or [],
         ticket=ticket,
+        slot=slot,
         _stdin_content=stdin_content,
     )
-
-
-def write_content_file(workspace: dict[str, Path], name: str, content: str) -> str:
-    path = workspace["repo"] / name
-    path.write_text(content, encoding="utf-8")
-    return str(path)
-
-
 def mark_card_and_prepare(workspace: dict[str, Path]) -> None:
     assert run_step.mark_step_card_read(workspace["state_path"]) == 0
     assert run_step.prepare_step(workspace["state_path"]) == 0
@@ -1067,7 +887,7 @@ class TestRunStepBehavior:
         assert result["allowed_block_pattern"] == "WD-EXP-SLOT-*"
         assert result["submit_command"].endswith("--complete --ticket <ticket> --summary \"<完成摘要>\"") is False
         assert "--complete --ticket" in result["submit_command"]
-        assert result["json_scaffold_command"].endswith("--emit-json-scaffold")
+        assert result["json_scaffold_command"].endswith("--emit-json-scaffold --slot SLOT-01")
         assert isinstance(result["json_scaffold_preview"], list)
         assert result["json_scaffold_preview"][0]["slot"] == "1.1 需求概述"
         assert result["json_scaffold_preview"][0]["evidence_refs"] == []
@@ -1143,7 +963,7 @@ class TestRunStepBehavior:
         assert json.loads(
             (workspace["working_draft_path"] / "ctx.json").read_text(encoding="utf-8")
         ) == json.loads(WD_CTX_PAYLOAD)
-        assert (workspace["working_draft_path"] / "ctx.md").read_text(encoding="utf-8") == WD_CTX_BODY.strip() + "\n"
+        assert not (workspace["working_draft_path"] / "ctx.md").exists()
 
     def test_complete_step_8_accepts_structured_payload_and_renders_task_markdown(
         self, workspace: dict[str, Path]
@@ -1177,9 +997,9 @@ class TestRunStepBehavior:
         assert json.loads(
             (workspace["working_draft_path"] / "task.json").read_text(encoding="utf-8")
         ) == json.loads(WD_TASK_PAYLOAD)
-        assert (workspace["working_draft_path"] / "task.md").read_text(encoding="utf-8") == WD_TASK_BODY.strip() + "\n"
+        assert not (workspace["working_draft_path"] / "task.md").exists()
 
-    def test_complete_step_9_accepts_structured_payload_and_renders_expert_blocks(
+    def test_complete_step_9_accepts_structured_payload_and_writes_expert_truth(
         self, workspace: dict[str, Path]
     ) -> None:
         state = make_step9_state(workspace)
@@ -1208,11 +1028,9 @@ class TestRunStepBehavior:
             "evidence_refs": ["CTX-01"],
             "open_questions": ["无"],
         }
-        slot1 = (workspace["working_draft_path"] / "slots" / "SLOT-01" / "experts.md").read_text(encoding="utf-8")
-        assert "### 专家：systems_architect" in slot1
-        assert "- 决策类型: 改造" in slot1
+        assert not (workspace["working_draft_path"] / "slots" / "SLOT-01" / "experts.md").exists()
 
-    def test_complete_step_10_accepts_structured_payload_and_renders_synthesis_blocks(
+    def test_complete_step_10_accepts_structured_payload_and_writes_decision_truth(
         self, workspace: dict[str, Path]
     ) -> None:
         state = make_step11_state(workspace)
@@ -1240,7 +1058,6 @@ class TestRunStepBehavior:
             == 0
         )
 
-        slot1 = (workspace["working_draft_path"] / "slots" / "SLOT-01" / "synthesis.md").read_text(encoding="utf-8")
         decision_truth = json.loads(
             (workspace["working_draft_path"] / "slots" / "SLOT-01" / "decision.json").read_text(
                 encoding="utf-8"
@@ -1248,8 +1065,7 @@ class TestRunStepBehavior:
         )
         assert decision_truth["slot"] == "1.1 需求概述"
         assert decision_truth["selected_writeup"] == "在 1.1 需求概述 位置补齐内容。"
-        assert "#### 目标能力" in slot1
-        assert "- 路径: 改造" in slot1
+        assert not (workspace["working_draft_path"] / "slots" / "SLOT-01" / "synthesis.md").exists()
 
     def test_complete_step_11_renders_from_canonical_decision_truth_and_records_traceability(
         self, workspace: dict[str, Path]
@@ -1373,7 +1189,7 @@ class TestRunStepBehavior:
         write_state(workspace, state)
         write_step9_draft(workspace)
         old_ticket = prepare_and_get_ticket(workspace)
-        task_path = workspace["working_draft_path"] / "task.md"
+        task_path = workspace["working_draft_path"] / "task.json"
         task_path.write_text(task_path.read_text(encoding="utf-8") + "\n- 新增一行\n", encoding="utf-8")
 
         result = run_step.advance_step(workspace["state_path"])
@@ -1466,10 +1282,10 @@ class TestRunStepBehavior:
         }
         state["produced_artifacts"] = ["WD-CTX", "WD-TASK", "WD-EXP-SLOT-01", "WD-SYN-SLOT-01"]
         state["artifact_registry"] = {
-            "WD-CTX": {"path": "ctx.md"},
-            "WD-TASK": {"path": "task.md"},
-            "WD-EXP-SLOT-01": {"path": "slots/SLOT-01/experts.md"},
-            "WD-SYN-SLOT-01": {"path": "slots/SLOT-01/synthesis.md"},
+            "WD-CTX": {"path": "ctx.json"},
+            "WD-TASK": {"path": "task.json"},
+            "WD-EXP-SLOT-01": {"path": "slots/SLOT-01/experts"},
+            "WD-SYN-SLOT-01": {"path": "slots/SLOT-01/decision.json"},
         }
         state["artifact_progress"] = {
             "WD-EXP-SLOT-*": {"completed_slots": ["SLOT-01"]},
@@ -1531,7 +1347,7 @@ class TestRunStepBehavior:
         write_state(workspace, state)
         write_step9_draft(workspace)
         ticket = prepare_and_get_ticket(workspace)
-        task_path = workspace["working_draft_path"] / "task.md"
+        task_path = workspace["working_draft_path"] / "task.json"
         task_path.write_text(task_path.read_text(encoding="utf-8") + "\n- 新增一行\n", encoding="utf-8")
 
         exit_code = run_step.complete_step(
@@ -1646,32 +1462,6 @@ class TestRunStepBehavior:
 
         assert exc_info.value.code == 2
 
-    def test_main_emit_scaffold_mode_keeps_summary_optional(
-        self,
-        workspace: dict[str, Path],
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        captured: dict[str, object] = {}
-
-        def fake_emit_scaffold(
-            state_path: Path, members: list[str] | None = None
-        ) -> int:
-            captured["state_path"] = state_path
-            captured["members"] = members
-            return 0
-
-        monkeypatch.setattr(run_step, "emit_scaffold", fake_emit_scaffold)
-        monkeypatch.setattr(
-            "sys.argv",
-            ["run-step.py", "--state", str(workspace["state_path"]), "--emit-scaffold"],
-        )
-
-        assert run_step.main() == 0
-        assert captured == {
-            "state_path": workspace["state_path"].resolve(),
-            "members": [],
-        }
-
     def test_main_emit_json_scaffold_mode_keeps_summary_optional(
         self,
         workspace: dict[str, Path],
@@ -1699,29 +1489,6 @@ class TestRunStepBehavior:
             "members": [],
             "slot": None,
         }
-
-    def test_main_rejects_emit_scaffold_with_complete(
-        self,
-        workspace: dict[str, Path],
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setattr(
-            "sys.argv",
-            [
-                "run-step.py",
-                "--state",
-                str(workspace["state_path"]),
-                "--emit-scaffold",
-                "--complete",
-                "--summary",
-                "noop",
-            ],
-        )
-
-        with pytest.raises(SystemExit) as exc_info:
-            run_step.main()
-
-        assert exc_info.value.code == 2
 
     def test_main_rejects_emit_json_scaffold_with_complete(
         self,
@@ -1868,82 +1635,13 @@ class TestRunStepBehavior:
         output = capsys.readouterr().out
         assert "--advance" in output
         assert "--complete" in output
-        assert "--emit-scaffold" in output
+        assert "--emit-json-scaffold" in output
+        assert "--emit-scaffold" not in output
         assert "--prepare" not in output
         assert "--mark-step-card-read" not in output
         assert "--solution-type" not in output
         assert "--member" not in output
         assert "--slug" not in output
-
-    def test_emit_scaffold_does_not_mutate_state_or_draft(
-        self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        state = make_step9_state(workspace)
-        write_state(workspace, state)
-        write_step9_draft(workspace)
-        before_state = workspace["state_path"].read_text(encoding="utf-8")
-        before_ctx = (workspace["working_draft_path"] / "ctx.md").read_text(
-            encoding="utf-8"
-        )
-        before_task = (workspace["working_draft_path"] / "task.md").read_text(
-            encoding="utf-8"
-        )
-
-        exit_code = run_step.emit_scaffold(workspace["state_path"])
-
-        assert exit_code == 0
-        output = capsys.readouterr().out
-        assert "---BLOCK:WD-EXP-SLOT-01" in output
-        assert "### 专家：systems_architect" in output
-        assert workspace["state_path"].read_text(encoding="utf-8") == before_state
-        assert (workspace["working_draft_path"] / "ctx.md").read_text(
-            encoding="utf-8"
-        ) == before_ctx
-        assert (workspace["working_draft_path"] / "task.md").read_text(
-            encoding="utf-8"
-        ) == before_task
-
-    def test_emit_scaffold_step9_member_filter_limits_output(
-        self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        state = make_step9_state(workspace)
-        state["checkpoints"]["step-5"]["selected_members"] = [
-            "systems_architect",
-            "domain_expert",
-        ]
-        state["checkpoints"]["step-5"]["selected_member_count"] = 2
-        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
-        write_state(workspace, state)
-        write_step9_draft(workspace)
-
-        exit_code = run_step.emit_scaffold(
-            workspace["state_path"], members=["domain_expert"]
-        )
-
-        assert exit_code == 0
-        output = capsys.readouterr().out
-        assert "### 专家：domain_expert" in output
-        assert "### 专家：systems_architect" not in output
-
-    def test_emit_scaffold_uses_stdout_instead_of_complete_path(
-        self,
-        workspace: dict[str, Path],
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        state = make_step9_state(workspace)
-        write_state(workspace, state)
-        write_step9_draft(workspace)
-
-        def forbid_complete(*_args, **_kwargs):
-            raise AssertionError("emit_scaffold should not call complete path")
-
-        monkeypatch.setattr(run_step, "complete_creative_step", forbid_complete)
-
-        exit_code = run_step.emit_scaffold(workspace["state_path"])
-
-        assert exit_code == 0
-        assert "WD-EXP" in capsys.readouterr().out
 
     def test_emit_json_scaffold_step7_matches_required_shape(
         self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]
@@ -1968,6 +1666,7 @@ class TestRunStepBehavior:
         assert payload[0] == {
             "id": "CTX-01",
             "source": "",
+            "source_refs": [],
             "conclusion": "",
             "applicable_slots": ["1.1 需求概述"],
             "confidence": "",
@@ -2022,6 +1721,20 @@ class TestRunStepBehavior:
         assert payload[0]["member"] == "systems_architect"
         assert payload[1]["slot"] == "1.1 需求概述"
         assert payload[1]["member"] == "domain_expert"
+
+    def test_emit_json_scaffold_step9_respects_slot_filter(
+        self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        state = make_step9_state(workspace)
+        write_state(workspace, state)
+        write_step9_draft(workspace)
+
+        exit_code = run_step.emit_json_scaffold(workspace["state_path"], slot="SLOT-02")
+
+        assert exit_code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert len(payload) == 1
+        assert payload[0]["slot"] == "1.2 核心目标"
 
     def test_emit_json_scaffold_step10_matches_required_shape(
         self, workspace: dict[str, Path], capsys: pytest.CaptureFixture[str]
@@ -2230,24 +1943,34 @@ class TestRunStepBehavior:
         assert isinstance(ticket["artifact_fingerprint"], str)
         assert ticket["allowed_block_pattern"] == "WD-EXP-SLOT-*"
 
-    def test_complete_step_rejects_block_outside_ticket_scope(
+    def test_complete_step_9_rejects_payload_outside_requested_slot(
         self, workspace: dict[str, Path]
     ) -> None:
         state = make_step9_state(workspace)
         write_state(workspace, state)
         write_step9_draft(workspace)
-        mark_card_and_prepare(workspace)
-        ticket = vs.load_state(workspace["state_path"])["pending_ticket"]["value"]
+        ticket = prepare_and_get_ticket(workspace)
 
         exit_code = run_step.complete_step(
             make_args(
                 workspace["state_path"],
                 "专家分析完成",
-                stdin_content=(
-                    "---BLOCK:WD-SYN-SLOT-01\n\n"
-                    + make_wd_syn_block("1.1 需求概述")
+                stdin_content=json.dumps(
+                    [
+                        {
+                            "slot": "1.2 核心目标",
+                            "member": "systems_architect",
+                            "decision_type": "改造",
+                            "rationale": "复用现有骨架并补齐专家分析。",
+                            "evidence_refs": ["CTX-01"],
+                            "open_questions": ["无"],
+                        }
+                    ],
+                    ensure_ascii=False,
+                    indent=2,
                 ),
                 ticket=ticket,
+                slot="SLOT-01",
             )
         )
 
@@ -2255,6 +1978,53 @@ class TestRunStepBehavior:
         new_state = vs.load_state(workspace["state_path"])
         assert new_state["current_step"] == 9
         assert new_state["pending_ticket"]["value"] == ticket
+
+    def test_complete_step_10_rejects_payload_outside_requested_slot(
+        self, workspace: dict[str, Path]
+    ) -> None:
+        state = make_step11_state(workspace)
+        state["current_step"] = 10
+        state["completed_steps"] = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        state["gate_receipt"] = {
+            "step": 10,
+            "state_fingerprint": "",
+            "validated_at": "2026-04-08T09:31:00",
+        }
+        state["gate_receipt"]["state_fingerprint"] = vs.compute_state_fingerprint(state)
+        write_state(workspace, state)
+        write_step11_draft(workspace)
+        ticket = prepare_and_get_ticket(workspace)
+
+        exit_code = run_step.complete_step(
+            make_args(
+                workspace["state_path"],
+                "WD-SYN 完成",
+                stdin_content=json.dumps(
+                    [
+                        {
+                            "slot": "1.2 核心目标",
+                            "target_capability": "收敛 1.2 核心目标 的最终写法。",
+                            "comparisons": [
+                                {"path": "复用", "feasibility": "❌", "evidence": "CTX-01", "reason": "不足"},
+                                {"path": "改造", "feasibility": "✅", "evidence": "CTX-01", "reason": "推荐"},
+                                {"path": "新建", "feasibility": "❌", "evidence": "CTX-01", "reason": "成本高"},
+                            ],
+                            "selected_path": "改造",
+                            "selected_writeup": "在 1.2 核心目标 位置补齐内容。",
+                            "evidence_refs": ["CTX-01"],
+                            "template_gap": "无",
+                            "open_question": "无",
+                        }
+                    ],
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                ticket=ticket,
+                slot="SLOT-01",
+            )
+        )
+
+        assert exit_code != 0
 
     def test_complete_step_requires_ticket_after_prepare(
         self, workspace: dict[str, Path]
@@ -2353,7 +2123,7 @@ class TestRunStepBehavior:
         mark_card_and_prepare(workspace)
         ticket = vs.load_state(workspace["state_path"])["pending_ticket"]["value"]
 
-        ctx_path = workspace["working_draft_path"] / "ctx.md"
+        ctx_path = workspace["working_draft_path"] / "ctx.json"
         ctx_path.write_text(ctx_path.read_text(encoding="utf-8") + "\n外部篡改\n", encoding="utf-8")
 
         exp_blocks = make_wd_exp_payload()
@@ -2422,19 +2192,17 @@ class TestRunStepBehavior:
 
         assert code == 0, message
         new_state = vs.load_state(workspace["state_path"])
-        slot1 = (
-            workspace["working_draft_path"] / "slots" / "SLOT-01" / "experts.md"
-        ).read_text(encoding="utf-8")
-        slot2 = (
-            workspace["working_draft_path"] / "slots" / "SLOT-02" / "experts.md"
-        ).read_text(encoding="utf-8")
+        slot1 = json.loads(
+            (workspace["working_draft_path"] / "slots" / "SLOT-01" / "experts" / "systems_architect.json").read_text(encoding="utf-8")
+        )
+        slot2 = json.loads(
+            (workspace["working_draft_path"] / "slots" / "SLOT-02" / "experts" / "systems_architect.json").read_text(encoding="utf-8")
+        )
         assert new_state["current_step"] == 10
         assert new_state["gate_receipt"]["step"] == 10
         assert new_state["checkpoints"]["step-9"]["wd_exp_count"] == 4
-        assert "### 专家：systems_architect" in slot1
-        assert "- 决策类型: 改造" in slot1
-        assert "### 专家：systems_architect" in slot2
-        assert "- 决策类型: 改造" in slot2
+        assert slot1["decision_type"] == "改造"
+        assert slot2["decision_type"] == "改造"
 
     def test_complete_step_9_generates_summary_when_missing(
         self, workspace: dict[str, Path]
@@ -2498,11 +2266,10 @@ class TestRunStepBehavior:
         assert code == 0, message
         assert seen_working_dirs
         assert all(path != workspace["working_draft_path"] for path in seen_working_dirs)
-        promoted = (
-            workspace["working_draft_path"] / "slots" / "SLOT-01" / "experts.md"
-        ).read_text(encoding="utf-8")
-        assert "### 专家：systems_architect" in promoted
-        assert "- 决策类型: 改造" in promoted
+        promoted = json.loads(
+            (workspace["working_draft_path"] / "slots" / "SLOT-01" / "experts" / "systems_architect.json").read_text(encoding="utf-8")
+        )
+        assert promoted["decision_type"] == "改造"
 
     def test_complete_creative_step_batch_step9_rolls_back_on_partial_failure(
         self, workspace: dict[str, Path]
@@ -2510,9 +2277,9 @@ class TestRunStepBehavior:
         state = make_step9_state(workspace)
         before_state = copy.deepcopy(state)
         write_state(workspace, state)
-        write_step9_draft(workspace)
+        write_directory_draft(workspace, with_experts=True)
         before_draft = (
-            workspace["working_draft_path"] / "slots" / "SLOT-01" / "experts.md"
+            workspace["working_draft_path"] / "slots" / "SLOT-01" / "experts" / "systems_architect.json"
         ).read_text(encoding="utf-8")
 
         stdin_content = json.dumps(
@@ -2548,7 +2315,7 @@ class TestRunStepBehavior:
         assert code != 0
         assert "WD-EXP evidence_refs/open_questions 必须是数组" in message
         assert (
-            workspace["working_draft_path"] / "slots" / "SLOT-01" / "experts.md"
+            workspace["working_draft_path"] / "slots" / "SLOT-01" / "experts" / "systems_architect.json"
         ).read_text(encoding="utf-8") == before_draft
         assert vs.load_state(workspace["state_path"]) == before_state
 
@@ -2654,7 +2421,8 @@ class TestRunStepBehavior:
         )
 
         assert code != 0
-        assert "WD-CTX applicable_slots 必须是数组" in message
+        assert "步骤 7 验证失败" in message
+        assert "wd_ctx_structure_invalid" in message
 
     def test_step10_renderer_validation_returns_structured_error_not_system_exit(
         self, workspace: dict[str, Path]

@@ -98,7 +98,7 @@ def legacy_working_draft_fix(
     current_path = resolve_repo_path(repo_root, raw_path)
     if current_path is None or current_path == canonical_draft_path:
         return None
-    wd_files = ["ctx.json", "ctx.md", "task.json", "task.md", "slots"]
+    wd_files = ["ctx.json", "task.json", "slots"]
     if current_path.is_dir() and any((current_path / name).exists() for name in wd_files):
         return None
     should_move = current_path.exists() and not canonical_draft_path.exists()
@@ -129,7 +129,7 @@ def old_layout_migration_fix(
         return None
     if old_dir == canonical_draft_path:
         return None
-    wd_files = ["ctx.json", "ctx.md", "task.json", "task.md", "slots"]
+    wd_files = ["ctx.json", "task.json", "slots"]
     has_old_layout = any((old_dir / f).exists() for f in wd_files)
     if not has_old_layout:
         return None
@@ -213,7 +213,7 @@ def run_doctor(
                 source = Path(fix["from_path"])
                 target = Path(fix["path"])
                 target.mkdir(parents=True, exist_ok=True)
-                for item in ["ctx.json", "ctx.md", "task.json", "task.md", "slots"]:
+                for item in ["ctx.json", "task.json", "slots"]:
                     src_item = source / item
                     tgt_item = target / item
                     if src_item.exists():

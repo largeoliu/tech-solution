@@ -22,8 +22,6 @@ if str(SCRIPTS_DIR) not in sys.path:
 from protocol_runtime import decision_truth_path, default_step_summary, dump_yaml, expert_truth_complete, expert_truth_digest, iso_now, load_yaml, refresh_receipt, repo_root_from_state_path, require_receipt
 
 BLOCK_MARKER_RE = re.compile(r"^---BLOCK:(.+)$", re.MULTILINE)
-WRITEUP_START_RE = re.compile(r"^-\s*选定写法:\s*$", re.MULTILINE)
-WRITEUP_INLINE_RE = re.compile(r"^-\s*选定写法:\s*(.+?)\s*$", re.MULTILINE)
 
 
 def parse_stdin_blocks(raw: str, step: int) -> list[tuple[str, str]]:
@@ -67,70 +65,49 @@ CTX_EXTENSION_FIELDS = [
 ]
 
 
-def render_ctx_payload(entries: list[dict[str, Any]]) -> str:
-    lines: list[str] = []
-    for index, entry in enumerate(entries, start=1):
-        ctx_id = str(entry.get("id") or f"CTX-{index:02d}").strip() or f"CTX-{index:02d}"
-        source = str(entry.get("source") or "").strip()
-        conclusion = str(entry.get("conclusion") or "").strip()
-        confidence = str(entry.get("confidence") or "").strip()
-        applicable_slots = entry.get("applicable_slots") or []
-        if not isinstance(applicable_slots, list):
-            raise ValueError("WD-CTX applicable_slots 必须是数组。")
-        slots_text = ", ".join(str(item).strip() for item in applicable_slots if str(item).strip())
-        lines.extend(
-            [
-                f"### {ctx_id}",
-                f"来源: {source}",
-                f"结论或约束: {conclusion}",
-                f"适用槽位: {slots_text}",
-                f"可信度或缺口: {confidence}",
-            ]
-        )
-        for label, key in CTX_EXTENSION_FIELDS:
-            value = str(entry.get(key) or "").strip()
-            if value:
-                lines.append(f"- {label}: {value}")
-        lines.append("")
-    return "\n".join(lines).strip()
+def _coerce_string_list(value: Any, *, field_name: str) -> list[str]:
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{field_name} 必须是数组。")
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
-def render_task_payload(entries: list[dict[str, Any]]) -> str:
-    lines: list[str] = []
+def _ctx_source_refs(entry: dict[str, Any]) -> list[str]:
+    refs = _coerce_string_list(entry.get("source_refs"), field_name="WD-CTX source_refs")
+    if refs:
+        return refs
+    source = str(entry.get("source") or "").strip()
+    if not source:
+        return []
+    return [part.strip() for part in source.split(",") if part.strip()]
+
+
+def _ctx_entry_traceable(entry: dict[str, Any]) -> bool:
+    refs = _ctx_source_refs(entry)
+    if not refs:
+        return False
+    return any("/" in ref or "." in ref or ref.startswith("repowiki:") for ref in refs)
+
+
+def _ctx_repowiki_refs(entries: list[dict[str, Any]]) -> list[str]:
+    refs: list[str] = []
     for entry in entries:
-        slot = str(entry.get("slot") or "").strip()
-        required_ctx = entry.get("required_ctx") or []
-        if not slot:
-            raise ValueError("WD-TASK slot 不能为空。")
-        if not isinstance(required_ctx, list):
-            raise ValueError("WD-TASK required_ctx 必须是数组。")
-        ctx_text = ", ".join(str(item).strip() for item in required_ctx if str(item).strip())
-        participating_experts = entry.get("participating_experts") or []
-        if not isinstance(participating_experts, list):
-            raise ValueError("WD-TASK participating_experts 必须是数组。")
-        experts_items = [str(item).strip() for item in participating_experts if str(item).strip()]
-        expert_questions = entry.get("expert_questions") or []
-        if not isinstance(expert_questions, list):
-            raise ValueError("WD-TASK expert_questions 必须是数组。")
-        suggested_slot = str(entry.get("suggested_slot") or slot).strip()
-        expression_requirements = str(entry.get("expression_requirements") or "").strip()
-        blockers = str(entry.get("blockers") or "无").strip()
-        question_lines = [f"  - {str(item).strip()}" for item in expert_questions if str(item).strip()] or ["  - 无"]
-        lines.extend(
-            [
-                f"### {slot}",
-                f"- 槽位标识: {slot}",
-                f"- 必须消费的共享上下文: {ctx_text}",
-                f"- 参与专家: {', '.join(experts_items)}" if experts_items else "- 参与专家:",
-                "- 每位专家必答问题:",
-                *question_lines,
-                f"- 建议落位槽位: {suggested_slot}",
-                f"- 落位表达要求: {expression_requirements}" if expression_requirements else "- 落位表达要求: <只写当前模板槽位需要的最小闭环>",
-                f"- 缺口或阻塞项: {blockers}",
-                "",
-            ]
-        )
-    return "\n".join(lines).strip()
+        for ref in _ctx_source_refs(entry):
+            if ref.startswith("repowiki:") and ref not in refs:
+                refs.append(ref)
+    return refs
+
+
+def _ctx_gate_ready(entries: list[dict[str, Any]], state: dict[str, Any]) -> bool:
+    if not entries:
+        return False
+    if any(not _ctx_entry_traceable(entry) for entry in entries):
+        return False
+    checkpoint6 = state.get("checkpoints", {}).get("step-6", {}) if isinstance(state.get("checkpoints"), dict) else {}
+    if checkpoint6.get("repowiki_exists") is True and not _ctx_repowiki_refs(entries):
+        return False
+    return True
 
 
 def _slot_id_for_title(slots: list[dict[str, Any]], title: str) -> str:
@@ -158,35 +135,6 @@ def _parse_json_array_content(content: str, label: str) -> list[dict[str, Any]]:
             raise ValueError(f"{label} 数组元素必须是 JSON 对象。")
         normalized.append(item)
     return normalized
-
-
-def render_exp_markdown(entries: list[dict[str, Any]]) -> str:
-    lines: list[str] = []
-    for entry in entries:
-        member = str(entry.get("member") or "").strip()
-        if not member:
-            raise ValueError("WD-EXP payload 缺少 member。")
-        evidence_refs = entry.get("evidence_refs") or []
-        open_questions = entry.get("open_questions") or []
-        if not isinstance(evidence_refs, list) or not isinstance(open_questions, list):
-            raise ValueError("WD-EXP evidence_refs/open_questions 必须是数组。")
-        evidence_text = ", ".join(
-            str(item).strip() for item in evidence_refs if str(item).strip()
-        )
-        open_text = ", ".join(
-            str(item).strip() for item in open_questions if str(item).strip()
-        ) or "无"
-        lines.extend(
-            [
-                f"### 专家：{member}",
-                f"- 决策类型: {str(entry.get('decision_type') or '').strip()}",
-                f"- 核心理由: {str(entry.get('rationale') or '').strip()}",
-                f"- 关键证据引用: {evidence_text}",
-                f"- 未决点: {open_text}",
-                "",
-            ]
-        )
-    return "\n".join(lines).strip()
 
 
 def render_exp_payload(entries: list[dict[str, Any]], slots: list[dict[str, Any]]) -> list[tuple[str, str]]:
@@ -234,73 +182,6 @@ def render_syn_payload(entries: list[dict[str, Any]], slots: list[dict[str, Any]
     return rendered
 
 
-def render_syn_markdown(entry: dict[str, Any]) -> str:
-    slot_title = str(entry.get("slot") or "").strip()
-    comparisons = entry.get("comparisons") or []
-    evidence_refs = entry.get("evidence_refs") or []
-    if not isinstance(comparisons, list) or not isinstance(evidence_refs, list):
-        raise ValueError("WD-SYN comparisons/evidence_refs 必须是数组。")
-    table_lines = [
-        "| 路径 | 可行性 | 关键证据 | 选择理由 |",
-        "|------|--------|----------|----------|",
-    ]
-    for item in comparisons:
-        if not isinstance(item, dict):
-            raise ValueError("WD-SYN comparisons 数组元素必须是对象。")
-        table_lines.append(
-            "| {path} | {feasibility} | {evidence} | {reason} |".format(
-                path=str(item.get("path") or "").strip(),
-                feasibility=str(item.get("feasibility") or "").strip(),
-                evidence=str(item.get("evidence") or "").strip(),
-                reason=str(item.get("reason") or "").strip(),
-            )
-        )
-    return "\n".join(
-        [
-            f"### 槽位：{slot_title}",
-            "#### 目标能力",
-            f"- {str(entry.get('target_capability') or '').strip()}",
-            "#### 候选方案对比",
-            *table_lines,
-            "#### 选定路径",
-            f"- 路径: {str(entry.get('selected_path') or '').strip()}",
-            f"- 选定写法:\n{str(entry.get('selected_writeup') or '').strip()}",
-            f"- 关键证据引用: {', '.join(str(item).strip() for item in evidence_refs if str(item).strip())}",
-            f"- 建议落位槽位: {slot_title}",
-            f"- 模板承载缺口: {str(entry.get('template_gap') or '无').strip()}",
-            f"- 未决问题: {str(entry.get('open_question') or '无').strip()}",
-        ]
-    ).strip()
-
-
-def extract_syn_truth_from_markdown(content: str) -> dict[str, Any]:
-    stripped = content.strip()
-    heading_match = re.search(r"^###\s+槽位：\s*(.+?)\s*$", stripped, re.MULTILINE)
-    if not heading_match:
-        raise ValueError("WD-SYN markdown 缺少 `### 槽位：...` 标题。")
-    slot_title = str(heading_match.group(1)).strip()
-    writeup_match = WRITEUP_START_RE.search(stripped)
-    selected_writeup = ""
-    if writeup_match:
-        remainder = stripped[writeup_match.end():]
-        end_match = re.search(r"^-\s*(?:关键证据引用|建议落位槽位|模板承载缺口|未决问题)", remainder, re.MULTILINE)
-        selected_writeup = (remainder[: end_match.start()] if end_match else remainder).strip()
-    else:
-        inline_match = WRITEUP_INLINE_RE.search(stripped)
-        if inline_match:
-            selected_writeup = str(inline_match.group(1)).strip()
-    return {
-        "slot": slot_title,
-        "target_capability": "",
-        "comparisons": [],
-        "selected_path": "",
-        "selected_writeup": selected_writeup,
-        "evidence_refs": [],
-        "template_gap": "",
-        "open_question": "",
-    }
-
-
 def validate_body(block_name: str, content: str) -> None:
     body = content.strip()
     if not body:
@@ -320,14 +201,14 @@ def resolve_file_for_block(working_dir: Path, block_name: str, slots: list[dict[
         valid_ids = {s.get("slot", "") for s in slots}
         if valid_ids and slot_id not in valid_ids:
             raise SystemExit(f"block {block_name} 的 slot 不在 state.slots 中。")
-        return working_dir / "slots" / slot_id / "experts.md"
+        return working_dir / "slots" / slot_id / "experts"
     syn_match = re.match(r"^WD-SYN-(SLOT-\d+)$", block_name)
     if syn_match:
         slot_id = syn_match.group(1)
         valid_ids = {s.get("slot", "") for s in slots}
         if valid_ids and slot_id not in valid_ids:
             raise SystemExit(f"block {block_name} 的 slot 不在 state.slots 中。")
-        return working_dir / "slots" / slot_id / "synthesis.md"
+        return decision_truth_path(working_dir, slot_id)
     raise SystemExit(f"不支持的 block: {block_name}")
 
 
@@ -352,17 +233,11 @@ def write_working_draft_file(
         entries = _parse_json_array_content(content, "WD-CTX payload")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(_json_text(entries), encoding="utf-8")
-        (working_dir / "ctx.md").write_text(
-            render_ctx_payload(entries).strip() + "\n", encoding="utf-8"
-        )
         return target
     if block_name == "WD-TASK":
         entries = _parse_json_array_content(content, "WD-TASK payload")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(_json_text(entries), encoding="utf-8")
-        (working_dir / "task.md").write_text(
-            render_task_payload(entries).strip() + "\n", encoding="utf-8"
-        )
         return target
     exp_match = re.match(r"^WD-EXP-(SLOT-\d+)$", block_name)
     if exp_match:
@@ -379,29 +254,18 @@ def write_working_draft_file(
             (experts_dir / f"{member}.json").write_text(
                 _json_text(entry), encoding="utf-8"
             )
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(
-            render_exp_markdown(entries).strip() + "\n", encoding="utf-8"
-        )
-        return target
+        return experts_dir
     syn_match = re.match(r"^WD-SYN-(SLOT-\d+)$", block_name)
     if syn_match:
-        entry: dict[str, Any]
-        if content.lstrip().startswith("["):
-            entries = _parse_json_array_content(content, "WD-SYN payload")
-            if len(entries) != 1:
-                raise ValueError("WD-SYN payload 每次只能写入单个槽位。")
-            entry = entries[0]
-        else:
-            validate_body(block_name, content)
-            entry = extract_syn_truth_from_markdown(content)
+        entries = _parse_json_array_content(content, "WD-SYN payload")
+        if len(entries) != 1:
+            raise ValueError("WD-SYN payload 每次只能写入单个槽位。")
+        entry = entries[0]
         slot_dir = working_dir / "slots" / syn_match.group(1)
         slot_dir.mkdir(parents=True, exist_ok=True)
         decision_path = decision_truth_path(working_dir, syn_match.group(1))
         decision_path.write_text(_json_text(entry), encoding="utf-8")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(render_syn_markdown(entry).strip() + "\n", encoding="utf-8")
-        return target
+        return decision_path
     validate_body(block_name, content)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content.strip() + "\n", encoding="utf-8")
@@ -513,7 +377,7 @@ def _recompute_step_progress_checkpoints(state: dict[str, Any], block_updates: l
     completed.sort()
 
 
-def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str | None) -> None:
+def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str | None, *, content: str | None = None) -> None:
     checkpoints = state.setdefault("checkpoints", {})
     if not isinstance(checkpoints, dict):
         checkpoints = {}
@@ -533,15 +397,19 @@ def sync_state_for_block(state: dict[str, Any], block_name: str, summary: str | 
         state["completed_steps"] = completed
 
     if block_name == "WD-CTX":
+        entries = _parse_json_array_content(content or "[]", "WD-CTX payload")
+        repowiki_consumed_paths = _ctx_repowiki_refs(entries)
+        gate_ready = _ctx_gate_ready(entries, state)
         checkpoints["step-7"] = {
             "summary": str(summary or "").strip(),
             "wd_ctx_written": True,
             "ctx_count": 0,
+            "repowiki_consumed_paths": repowiki_consumed_paths,
             "completed_at": iso_now(),
         }
-        state["can_enter_step_8"] = True
+        state["can_enter_step_8"] = gate_ready
         state["can_enter_step_10"] = False
-        state["current_step"] = 8
+        state["current_step"] = 8 if gate_ready else 7
         if 7 not in completed:
             completed.append(7)
     elif block_name == "WD-TASK":
@@ -683,8 +551,8 @@ def _apply_generated_summary(state: dict[str, Any], block_name: str, summary: st
 
 
 def sync_state_for_blocks(state: dict[str, Any], block_updates: list[tuple[str, str]], summary: str | None, *, working_dir: Path | None = None) -> None:
-    for block_name, _content in block_updates:
-        sync_state_for_block(state, block_name, summary)
+    for block_name, content in block_updates:
+        sync_state_for_block(state, block_name, summary, content=content)
     for block_name, content in block_updates:
         update_counts(state, block_name, content)
     if working_dir is not None:

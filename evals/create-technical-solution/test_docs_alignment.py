@@ -67,7 +67,7 @@ def test_reference_doc_matches_current_validator_json_contract() -> None:
     assert "对外只消费 `run-step.py`" in text
 
 
-def test_docs_cover_canonical_truth_and_render_views() -> None:
+def test_docs_cover_pure_json_intermediate_truth() -> None:
     skill_text = read("skills/create-technical-solution/SKILL.md")
     ref_text = read("skills/create-technical-solution/REFERENCE.md")
     step7_text = read("skills/create-technical-solution/steps/07-构建共享上下文.md")
@@ -81,17 +81,21 @@ def test_docs_cover_canonical_truth_and_render_views() -> None:
     assert "decision.json" in skill_text
     assert "render_receipt" in skill_text
 
-    assert "ctx.json" in ref_text and "ctx.md" in ref_text
-    assert "task.json" in ref_text and "task.md" in ref_text
-    assert "experts/<MEMBER>.json" in ref_text and "experts.md" in ref_text
-    assert "decision.json" in ref_text and "synthesis.md" in ref_text
+    assert "ctx.json" in ref_text
+    assert "task.json" in ref_text
+    assert "experts/<MEMBER>.json" in ref_text
+    assert "decision.json" in ref_text
     assert "decision_truth" in ref_text
+    assert "ctx.md" not in ref_text
+    assert "task.md" not in ref_text
+    assert "experts.md" not in ref_text
+    assert "synthesis.md" not in ref_text
 
-    assert "ctx.json" in step7_text and "ctx.md" in step7_text
-    assert "task.json" in step8_text and "task.md" in step8_text
+    assert "ctx.json" in step7_text and "ctx.md" not in step7_text
+    assert "task.json" in step8_text and "task.md" not in step8_text
     assert '"member"' in step9_text
     assert "experts/<MEMBER>.json" in step9_text
-    assert "decision.json" in step10_text and "synthesis.md" in step10_text
+    assert "decision.json" in step10_text and "synthesis.md" not in step10_text
     assert "decision.json.selected_writeup" in step11_text
     assert "render_receipt" in step11_text
 
@@ -112,23 +116,21 @@ def test_public_docs_say_summaries_are_script_generated() -> None:
     assert "不再要求模型手写摘要" in combined
 
 
-def test_docs_cover_emit_scaffold_read_only_contract() -> None:
+def test_docs_cover_emit_json_scaffold_read_only_contract() -> None:
     ref_text = read("skills/create-technical-solution/REFERENCE.md")
     skill_text = read("skills/create-technical-solution/SKILL.md")
 
-    assert "--emit-scaffold" in ref_text
+    assert "--emit-json-scaffold" in ref_text
     assert "stdout" in ref_text
     assert "不修改 state" in ref_text
     assert "不修改 working draft" in ref_text
     assert "不修改 receipt" in ref_text
-    assert "不是第二条写入路径" in ref_text
-    assert "--emit-scaffold 与 --complete 不能同时使用" in ref_text
-    assert "auto-skip" in ref_text
+    assert "--emit-json-scaffold 与 --complete` 不能同时使用" in ref_text
 
-    assert "--emit-scaffold" in skill_text
+    assert "--emit-json-scaffold" in skill_text
     assert "stdout" in skill_text
-    assert "只读" in skill_text
-    assert "--emit-scaffold 与 --complete 不能同时使用" in skill_text
+    assert "JSON scaffold" in skill_text
+    assert "--emit-scaffold" not in skill_text
 
 
 def test_skill_doc_keeps_run_step_as_only_supported_public_entry() -> None:

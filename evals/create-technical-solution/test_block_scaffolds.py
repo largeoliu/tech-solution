@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -79,11 +80,11 @@ def test_step7_scaffold_emits_ctx_block(tmp_path: Path) -> None:
     write_state(workspace["state_path"], make_state(workspace, step=7))
 
     snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
-    payload = scaffolds.emit_scaffold(snapshot)
+    payload = json.loads(scaffolds.emit_json_scaffold(snapshot))
 
-    assert payload.startswith("### CTX-01\n")
-    assert "### CTX-01" in payload
-    assert "适用槽位" in payload
+    assert payload[0]["id"] == "CTX-01"
+    assert payload[0]["source_refs"] == []
+    assert payload[0]["applicable_slots"] == ["1.1 需求概述"]
 
 
 def test_step8_scaffold_uses_template_slots(tmp_path: Path) -> None:
@@ -93,13 +94,12 @@ def test_step8_scaffold_uses_template_slots(tmp_path: Path) -> None:
     write_state(workspace["state_path"], make_state(workspace, step=8))
 
     snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
-    payload = scaffolds.emit_scaffold(snapshot)
+    payload = json.loads(scaffolds.emit_json_scaffold(snapshot))
 
-    assert payload.startswith("### 1.1 需求概述\n")
-    assert "### 1.1 需求概述" in payload
-    assert "### 2.2 风险与验证" in payload
-    assert "必须消费的共享上下文" in payload
-    assert payload.count("### ") == 4
+    assert payload[0]["slot"] == "1.1 需求概述"
+    assert payload[-1]["slot"] == "2.2 风险与验证"
+    assert payload[0]["participating_experts"] == ["systems_architect"]
+    assert len(payload) == 4
 
 
 def test_step9_scaffold_emits_all_selected_members_by_default(tmp_path: Path) -> None:
@@ -112,12 +112,12 @@ def test_step9_scaffold_emits_all_selected_members_by_default(tmp_path: Path) ->
     )
 
     snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
-    payload = scaffolds.emit_scaffold(snapshot)
+    payload = json.loads(scaffolds.emit_json_scaffold(snapshot))
 
-    assert "---BLOCK:WD-EXP-SLOT-01" in payload
-    assert "### 专家：systems_architect" in payload
-    assert "### 专家：domain_expert" in payload
-    assert "- 决策类型:" in payload
+    assert len(payload) == 8
+    assert payload[0]["member"] == "systems_architect"
+    assert payload[1]["member"] == "domain_expert"
+    assert payload[0]["decision_type"] == ""
 
 
 def test_step9_scaffold_requires_selected_members(tmp_path: Path) -> None:
@@ -129,21 +129,20 @@ def test_step9_scaffold_requires_selected_members(tmp_path: Path) -> None:
     snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
 
     with pytest.raises(SystemExit, match="selected_members"):
-        scaffolds.emit_scaffold(snapshot)
+        scaffolds.emit_json_scaffold(snapshot)
 
 
 def test_step10_wd_syn_scaffold_matches_full_shared_slot_contract(tmp_path: Path) -> None:
     scaffolds = load_script("block_scaffolds")
     runtime_snapshot = load_script("runtime_snapshot")
-    wd_syn_contract = load_script("wd_syn_contract")
     workspace = make_workspace(tmp_path)
     write_state(workspace["state_path"], make_state(workspace, step=10))
 
     snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
-    payload = scaffolds.emit_scaffold(snapshot)
+    payload = json.loads(scaffolds.emit_json_scaffold(snapshot))
 
-    for fragment in wd_syn_contract.required_slot_fragments("1.1 需求概述"):
-        assert fragment in payload
+    assert payload[0]["slot"] == "1.1 需求概述"
+    assert [item["path"] for item in payload[0]["comparisons"]] == ["复用", "改造", "新建"]
 
 
 def test_step10_wd_syn_scaffold_contains_explicit_target_capability_placeholder(tmp_path: Path) -> None:
@@ -153,7 +152,7 @@ def test_step10_wd_syn_scaffold_contains_explicit_target_capability_placeholder(
     write_state(workspace["state_path"], make_state(workspace, step=10))
 
     snapshot = runtime_snapshot.load_runtime_snapshot(workspace["state_path"])
-    payload = scaffolds.emit_scaffold(snapshot)
+    payload = json.loads(scaffolds.emit_json_scaffold(snapshot))
 
-    assert "#### 目标能力" in payload
-    assert "- <本槽位要承载的能力或结论>" in payload
+    assert payload[0]["target_capability"] == ""
+    assert payload[0]["evidence_refs"] == []
